@@ -1,0 +1,136 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Kismet EventBridge Event Schema",
+  "description": "所有跨域事件的格式定义。Week 1 锁定，所有 domain 按此格式发布和消费事件。",
+  "version": "1.0.0",
+  "eventBusName": "kismet-events",
+
+  "events": {
+    "swipe.created": {
+      "source": "kismet.swipe-service",
+      "detail-type": "swipe.created",
+      "description": "用户划右（like）时发布。仅 like 触发，pass 不触发。",
+      "publisher": "Swipe Service",
+      "consumers": ["Match Service", "Activity Logger"],
+      "detail": {
+        "swipeId": { "type": "string", "example": "swipe-001" },
+        "userId": { "type": "string", "example": "user-123", "description": "执行划动的用户" },
+        "targetUserId": { "type": "string", "example": "user-456", "description": "被划的用户" },
+        "action": { "type": "string", "enum": ["like"], "description": "只有 like 会发事件" },
+        "timestamp": { "type": "string", "format": "date-time", "example": "2026-04-01T12:00:00Z" }
+      }
+    },
+
+    "match.created": {
+      "source": "kismet.match-service",
+      "detail-type": "match.created",
+      "description": "双向 like 检测到匹配时发布。",
+      "publisher": "Match Service",
+      "consumers": ["Push Notification", "Email Service", "Icebreaker Service", "Activity Logger"],
+      "detail": {
+        "matchId": { "type": "string", "example": "match-789" },
+        "userIds": { "type": "array", "items": { "type": "string" }, "example": ["user-123", "user-456"], "description": "匹配的两个用户 ID" },
+        "timestamp": { "type": "string", "format": "date-time", "example": "2026-04-01T12:00:00Z" }
+      }
+    },
+
+    "message.sent": {
+      "source": "kismet.message-service",
+      "detail-type": "message.sent",
+      "description": "用户发送消息后发布。",
+      "publisher": "Message Service",
+      "consumers": ["Text Moderation", "Activity Logger"],
+      "detail": {
+        "messageId": { "type": "string", "example": "msg-001" },
+        "matchId": { "type": "string", "example": "match-789" },
+        "senderId": { "type": "string", "example": "user-123" },
+        "content": { "type": "string", "example": "Hey! Nice to meet you" },
+        "messageType": { "type": "string", "enum": ["text"], "description": "目前只支持 text" },
+        "timestamp": { "type": "string", "format": "date-time", "example": "2026-04-01T12:05:00Z" }
+      }
+    },
+
+    "photo.uploaded": {
+      "source": "kismet.photo-service",
+      "detail-type": "photo.uploaded",
+      "description": "用户上传照片后发布。触发图片审核。",
+      "publisher": "Photo Service",
+      "consumers": ["Image Moderation", "Activity Logger"],
+      "detail": {
+        "photoId": { "type": "string", "example": "photo-001" },
+        "userId": { "type": "string", "example": "user-123" },
+        "s3Key": { "type": "string", "example": "photos/user-123/photo-001.jpg" },
+        "s3Bucket": { "type": "string", "example": "kismet-photos-dev" },
+        "timestamp": { "type": "string", "format": "date-time", "example": "2026-04-01T11:00:00Z" }
+      }
+    },
+
+    "user.created": {
+      "source": "kismet.auth-service",
+      "detail-type": "user.created",
+      "description": "新用户注册成功后发布。",
+      "publisher": "Auth Service",
+      "consumers": ["Email Service", "Activity Logger"],
+      "detail": {
+        "userId": { "type": "string", "example": "user-123" },
+        "email": { "type": "string", "example": "student@northeastern.edu" },
+        "timestamp": { "type": "string", "format": "date-time", "example": "2026-04-01T10:00:00Z" }
+      }
+    },
+
+    "profile.completed": {
+      "source": "kismet.profile-service",
+      "detail-type": "profile.completed",
+      "description": "用户首次完成个人资料后发布。用于将用户加入发现池。",
+      "publisher": "Profile Service",
+      "consumers": ["Recommendation Service", "Activity Logger"],
+      "detail": {
+        "userId": { "type": "string", "example": "user-123" },
+        "name": { "type": "string", "example": "Alice" },
+        "gender": { "type": "string", "enum": ["male", "female", "non-binary"] },
+        "timestamp": { "type": "string", "format": "date-time", "example": "2026-04-01T10:30:00Z" }
+      }
+    },
+
+    "user.reported": {
+      "source": "kismet.report-service",
+      "detail-type": "user.reported",
+      "description": "用户提交举报后发布。",
+      "publisher": "Report Service",
+      "consumers": ["Admin Dashboard", "Email Service", "Activity Logger"],
+      "detail": {
+        "reportId": { "type": "string", "example": "report-001" },
+        "reporterId": { "type": "string", "example": "user-123", "description": "举报人" },
+        "reportedUserId": { "type": "string", "example": "user-456", "description": "被举报人" },
+        "reason": { "type": "string", "enum": ["harassment", "inappropriate_content", "spam", "fake_profile", "other"] },
+        "timestamp": { "type": "string", "format": "date-time", "example": "2026-04-01T14:00:00Z" }
+      }
+    },
+
+    "content.flagged": {
+      "source": "kismet.moderation",
+      "detail-type": "content.flagged",
+      "description": "内容审核（文字或图片）检测到违规内容时发布。",
+      "publisher": "Text Moderation / Image Moderation",
+      "consumers": ["Admin Dashboard", "Activity Logger"],
+      "detail": {
+        "contentId": { "type": "string", "example": "msg-001 or photo-001" },
+        "contentType": { "type": "string", "enum": ["text", "image"] },
+        "userId": { "type": "string", "example": "user-123", "description": "内容所有者" },
+        "reason": { "type": "string", "example": "toxicity_detected" },
+        "score": { "type": "number", "example": 0.92, "description": "审核置信度 0-1" },
+        "timestamp": { "type": "string", "format": "date-time", "example": "2026-04-01T12:01:00Z" }
+      }
+    }
+  },
+
+  "_usage_example": {
+    "description": "Python 代码示例：发布事件到 EventBridge",
+    "code": "import boto3\nimport json\nfrom datetime import datetime\n\nclient = boto3.client('events')\n\nclient.put_events(\n    Entries=[\n        {\n            'Source': 'kismet.swipe-service',\n            'DetailType': 'swipe.created',\n            'Detail': json.dumps({\n                'swipeId': 'swipe-001',\n                'userId': 'user-123',\n                'targetUserId': 'user-456',\n                'action': 'like',\n                'timestamp': datetime.utcnow().isoformat() + 'Z'\n            }),\n            'EventBusName': 'kismet-events'\n        }\n    ]\n)"
+  },
+
+  "_consumer_example": {
+    "description": "Lambda handler 示例：消费 match.created 事件",
+    "code": "def handler(event, context):\n    detail = event['detail']\n    match_id = detail['matchId']\n    user_ids = detail['userIds']\n    \n    # 发推送通知给两个用户\n    for user_id in user_ids:\n        send_push(user_id, f'You have a new match!')\n    \n    return {'statusCode': 200}"
+  }
+}

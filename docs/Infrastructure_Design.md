@@ -115,13 +115,21 @@ Rules are managed per-service (each service creates its own EventBridge rule to 
 | Frontend | `kismet-frontend` S3 bucket | Serve React app |
 | Photos | `kismet-photos` S3 bucket | Serve user photos with caching |
 
-### 2.6 ElastiCache (Redis)
+### ~~2.6 ElastiCache (Redis)~~ → Replaced by DynamoDB TTL
 
-| Cluster | Purpose | Used By |
-|---------|---------|---------|
-| `kismet-cache` | Presence status + rate limiting | Presence Service, Rate Limiter |
+> **Decision (2026-04-01):** ElastiCache 已从架构中移除。
+> 原因：需要 VPC + NAT Gateway，配置复杂度高、有额外费用（~$32/月），投入产出比差。
+> Presence Service 和 Rate Limiter 改用 DynamoDB + TTL 实现。
 
-**Note:** ElastiCache requires a VPC. The Redis cluster and its consumer Lambdas must run inside a VPC with a NAT Gateway for internet access. This adds complexity — see §5 for a simpler fallback.
+**Presence — DynamoDB with TTL:**
+- Table: `kismet-presence` (PK: `USER#{userId}`, SK: `STATUS`)
+- TTL 字段：60 秒后自动过期 → 用户自动标记为 offline
+- 前端每 30 秒发一次 `POST /presence/heartbeat`
+
+**Rate Limiting — DynamoDB with TTL + API Gateway Throttling:**
+- Table: `kismet-rate-limits` (PK: `USER#{userId}#ACTION#{action}`, SK: `WINDOW#{timestamp}`)
+- TTL 字段：滑动窗口过期
+- 结合 API Gateway 自带的 throttle 设置（基础防护）
 
 ### 2.7 Kinesis (Analytics Pipeline)
 
@@ -299,27 +307,9 @@ This way:
 
 If the team hits blockers, here are drop-in simplifications:
 
-### ElastiCache → DynamoDB TTL
+### ~~ElastiCache → DynamoDB TTL~~ (已执行)
 
-ElastiCache requires VPC + NAT Gateway, which is complex and costs money.
-
-**Alternative:** Use a DynamoDB table with TTL for presence and rate limiting:
-
-```
-# Presence — DynamoDB with TTL
-kismet-presence table:
-  PK: USER#{userId}
-  status: "online" | "offline" | "typing"
-  ttl: now + 60 seconds   ← auto-expires
-
-# Rate Limiter — DynamoDB with TTL
-kismet-rate-limits table:
-  PK: USER#{userId}#ACTION#{action}
-  count: 5
-  ttl: now + 60 seconds   ← sliding window
-```
-
-**Trade-off:** Slightly higher latency (~10ms vs ~1ms), but no VPC required.
+已在 §2.6 中正式移除 ElastiCache，改用 DynamoDB TTL。不再是备选方案，而是默认方案。
 
 ### Kinesis → Direct S3 Write
 
@@ -456,7 +446,7 @@ services/domain-X/service-name/
 | IaC Tool | **SAM** | Simplest for Lambda-centric apps; 3-week timeline |
 | API Gateway | **One REST + optional WebSocket** | Single entry point; shared auth |
 | Messaging | **HTTP polling → upgrade to WebSocket if time** | De-risks Week 2; same backend |
-| Caching | **DynamoDB TTL** (default) / ElastiCache (stretch) | Avoid VPC complexity |
+| Caching | **DynamoDB TTL** (ElastiCache removed) | Avoid VPC + NAT Gateway complexity and cost |
 | Analytics | **Kinesis** (default) / Direct S3 (fallback) | Kinesis is a course requirement |
 | Icebreakers | **Bedrock** (default) / Hardcoded (fallback) | Depends on Bedrock access timing |
 | Environments | **Single `dev` env** | 3-week project, no prod needed |
