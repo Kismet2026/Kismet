@@ -143,6 +143,7 @@ Update the current user's email notification preferences.
 | `match_notification` | `match.created` event | Notification that user has a new match |
 | `message_notification` | `message.sent` event | Notification that user received a new message |
 | `weekly_digest` | Scheduler (Sunday 9am) | Weekly summary of activity and suggestions |
+| `report_alert` | `user.reported` event | Admin alert when a user is reported |
 
 ---
 
@@ -195,6 +196,24 @@ Triggers sending a match notification email (if user has matchNotifications enab
 }
 ```
 
+### Consumed: `user.reported`
+
+Triggers sending an alert email to admin when a user is reported.
+
+```json
+{
+  "source": "kismet.report-service",
+  "detail-type": "user.reported",
+  "detail": {
+    "reportId": "report-001",
+    "reporterId": "user-123",
+    "reportedUserId": "user-456",
+    "reason": "harassment",
+    "timestamp": "2026-04-01T14:00:00Z"
+  }
+}
+```
+
 ---
 
 ## SES Configuration
@@ -214,5 +233,6 @@ Triggers sending a match notification email (if user has matchNotifications enab
 | **Called by** | Frontend (React) | HTTP via API Gateway (preferences only) |
 | **Consumes from** | Auth Service | EventBridge `user.created` |
 | **Consumes from** | Match Service | EventBridge `match.created` |
+| **Consumes from** | Report Service | EventBridge `user.reported` |
 | **Depends on** | Auth (Cognito) | JWT validation via API Gateway Authorizer |
 | **Uses** | SES | Email delivery |
