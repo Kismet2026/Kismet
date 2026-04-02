@@ -1,0 +1,96 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Kismet profile service Lambda scaffold.
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: dev
+  SharedApiId:
+    Type: String
+    Default: ''
+  ProfilesTableName:
+    Type: String
+    Default: kismet-profiles-dev
+  EventBusName:
+    Type: String
+    Default: kismet-events
+
+Conditions:
+  HasSharedApiId: !Not [!Equals [!Ref SharedApiId, '']]
+
+Globals:
+  Function:
+    Runtime: python3.12
+    Timeout: 10
+    MemorySize: 256
+    Tracing: Active
+
+Resources:
+  ProfilesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Ref ProfilesTableName
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+
+  ProfileServiceFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub kismet-profile-service-${EnvironmentName}
+      Description: Handles profile CRUD routes for the Kismet profile service.
+      CodeUri: .
+      Handler: lambda_function.lambda_handler
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ProfilesTableName
+      Environment:
+        Variables:
+          PROFILES_TABLE_NAME: !Ref ProfilesTableName
+          EVENT_BUS_NAME: !Ref EventBusName
+      Events:
+        CreateProfileRoute:
+          Type: Api
+          Properties:
+            Path: /profiles
+            Method: post
+            RestApiId: !If [HasSharedApiId, !Ref SharedApiId, !Ref AWS::NoValue]
+        GetProfileRoute:
+          Type: Api
+          Properties:
+            Path: /profiles/{userId}
+            Method: get
+            RestApiId: !If [HasSharedApiId, !Ref SharedApiId, !Ref AWS::NoValue]
+        UpdateProfileRoute:
+          Type: Api
+          Properties:
+            Path: /profiles/{userId}
+            Method: put
+            RestApiId: !If [HasSharedApiId, !Ref SharedApiId, !Ref AWS::NoValue]
+        DeleteProfileRoute:
+          Type: Api
+          Properties:
+            Path: /profiles/{userId}
+            Method: delete
+            RestApiId: !If [HasSharedApiId, !Ref SharedApiId, !Ref AWS::NoValue]
+
+Outputs:
+  ProfileServiceFunctionName:
+    Description: Profile service Lambda function name.
+    Value: !Ref ProfileServiceFunction
+  ProfileServiceFunctionArn:
+    Description: Profile service Lambda function ARN.
+    Value: !GetAtt ProfileServiceFunction.Arn
+  ProfilesTableArn:
+    Description: Profile service DynamoDB table ARN.
+    Value: !GetAtt ProfilesTable.Arn
