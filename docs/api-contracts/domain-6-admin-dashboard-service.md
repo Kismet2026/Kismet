@@ -307,15 +307,14 @@ Adds flagged content to the flagged content queue in DynamoDB.
 
 ```json
 {
-  "source": "kismet.text-moderation-service",
+  "source": "kismet.moderation",
   "detail-type": "content.flagged",
   "detail": {
-    "contentId": "flag-001",
-    "type": "text",
-    "content": "...",
+    "contentId": "msg-001",
+    "contentType": "text",
     "userId": "user-456",
-    "reason": "hate_speech",
-    "confidence": 0.92,
+    "reason": "toxicity_detected",
+    "score": 0.92,
     "timestamp": "2026-04-01T11:30:00Z"
   }
 }
@@ -332,7 +331,7 @@ Increments the report count for the reported user.
   "detail": {
     "reportId": "report-001",
     "reportedUserId": "user-456",
-    "reportedBy": "user-123",
+    "reporterId": "user-123",
     "reason": "harassment",
     "timestamp": "2026-04-01T11:35:00Z"
   }

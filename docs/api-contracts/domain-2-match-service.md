@@ -195,15 +195,13 @@ DELETE /matches/match-001
   "detail-type": "match.created",
   "detail": {
     "matchId": "match-001",
-    "userAId": "user-123",
-    "userBId": "user-456",
-    "baziScore": 85,
-    "matchedAt": "2026-04-01T12:00:00Z"
+    "userIds": ["user-123", "user-456"],
+    "timestamp": "2026-04-01T12:00:00Z"
   }
 }
 ```
 
-**Consumed by:** Notification Service, Chat Service
+**Consumed by:** Push Notification, Email Service, Icebreaker Service, Activity Logger
 
 ---
 
@@ -213,5 +211,5 @@ DELETE /matches/match-001
 |-----------|---------|-----|
 | **Called by** | Frontend (React) | HTTP via API Gateway |
 | **Consumes from** | Swipe Service | EventBridge `swipe.created` / DynamoDB Stream |
-| **Publishes to** | Notification Service, Chat Service | EventBridge `match.created` |
+| **Publishes to** | Push Notification, Email Service, Icebreaker Service, Activity Logger | EventBridge `match.created` |
 | **Depends on** | Auth (Cognito) | JWT validation via API Gateway Authorizer |

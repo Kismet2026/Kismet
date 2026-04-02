@@ -222,7 +222,7 @@ GET /reports/report-001
     "reporterId": "user-123",
     "reportedUserId": "user-456",
     "reason": "harassment",
-    "createdAt": "2026-04-01T12:00:00Z"
+    "timestamp": "2026-04-01T12:00:00Z"
   }
 }
 ```

@@ -189,8 +189,7 @@ Triggers sending a match notification email (if user has matchNotifications enab
   "detail-type": "match.created",
   "detail": {
     "matchId": "match-001",
-    "userId1": "user-123",
-    "userId2": "user-456",
+    "userIds": ["user-123", "user-456"],
     "timestamp": "2026-04-01T12:00:00Z"
   }
 }
