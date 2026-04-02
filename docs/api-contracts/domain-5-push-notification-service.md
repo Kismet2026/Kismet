@@ -1,6 +1,6 @@
 # Push Notification Service — API Contract
 
-**Owner:** Nili
+**Owner:** Ni Li
 **Domain:** Notifications & Engagement
 **Base Path:** `/notifications`
 **AWS Services:** SNS, Lambda

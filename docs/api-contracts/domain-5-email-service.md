@@ -1,6 +1,6 @@
 # Email Service — API Contract
 
-**Owner:** Nili
+**Owner:** Ni Li
 **Domain:** Notifications & Engagement
 **Base Path:** `/email`
 **AWS Services:** SES, Lambda
