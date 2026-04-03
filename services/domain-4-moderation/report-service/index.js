@@ -66,7 +66,7 @@ async function createReport(event, reporterId) {
     TableName: TABLE_NAME,
     FilterExpression: "reporterId = :rid AND reportedUserId = :ruid AND #status = :s",
     ExpressionAttributeNames: { "#status": "status" },
-    ExpressionAttributeValues: marshall({ ":rid": reporterId, ":ruid": reportedUserId, ":s": "pending" })
+    ExpressionAttributeValues: marshall({ ":rid": reporterId, ":ruid": reportedUserId, ":s": "PENDING" })
   }));
 
   if (conflictCheck.Items && conflictCheck.Items.length > 0) {
@@ -84,7 +84,7 @@ async function createReport(event, reporterId) {
     reportedUserId,
     reason,
     description: description || "",
-    status: "pending",
+    status: "PENDING",
     resolution: null,
     createdAt: now,
     resolvedAt: null
@@ -194,10 +194,10 @@ async function resolveReport(event) {
       ConditionExpression: "attribute_exists(pk) AND #status = :pendingStatus",
       ExpressionAttributeNames: { "#status": "status" },
       ExpressionAttributeValues: marshall({
-        ":resolvedStatus": "resolved",
+        ":resolvedStatus": resolution === "dismiss" ? "DISMISSED" : "RESOLVED",
         ":res": resolution,
         ":now": now,
-        ":pendingStatus": "pending"
+        ":pendingStatus": "PENDING"
       }),
       ReturnValues: "ALL_NEW"
     }));

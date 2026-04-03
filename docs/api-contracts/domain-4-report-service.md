@@ -40,7 +40,7 @@
   "reportedUserId": "user-456",
   "reason": "harassment",
   "description": "This user sent threatening messages.",
-  "status": "pending",
+  "status": "PENDING",
   "createdAt": "2026-04-01T12:00:00Z"
 }
 ```
@@ -86,7 +86,7 @@ GET /reports?limit=20&cursor=xxx
       "reporterId": "user-123",
       "reportedUserId": "user-456",
       "reason": "harassment",
-      "status": "pending",
+      "status": "PENDING",
       "createdAt": "2026-04-01T12:00:00Z"
     },
     {
@@ -94,7 +94,7 @@ GET /reports?limit=20&cursor=xxx
       "reporterId": "user-789",
       "reportedUserId": "user-321",
       "reason": "spam",
-      "status": "resolved",
+      "status": "RESOLVED",
       "createdAt": "2026-04-01T11:55:00Z"
     }
   ],
@@ -126,7 +126,7 @@ GET /reports/report-001
   "reportedUserId": "user-456",
   "reason": "harassment",
   "description": "This user sent threatening messages.",
-  "status": "pending",
+  "status": "PENDING",
   "resolution": null,
   "createdAt": "2026-04-01T12:00:00Z",
   "resolvedAt": null
@@ -168,7 +168,7 @@ GET /reports/report-001
   "reportId": "report-001",
   "reportedUserId": "user-456",
   "reason": "harassment",
-  "status": "resolved",
+  "status": "RESOLVED",
   "resolution": "warning",
   "resolvedAt": "2026-04-01T14:00:00Z"
 }
@@ -198,12 +198,14 @@ GET /reports/report-001
 | `reportedUserId` | String | — |
 | `reason` | String | — |
 | `description` | String | — |
-| `status` | String | — |
-| `resolution` | String | — |
+| `status` | String | — | "PENDING", "RESOLVED", "DISMISSED" |
+| `resolution` | String | — | "warning" \| "ban" \| null |
 | `createdAt` | String (ISO 8601) | — |
 | `resolvedAt` | String (ISO 8601) | — |
 
-**GSI:** `reportedUserId-index` — 按 reportedUserId 查询该用户的所有举报
+**GSIs:** 
+1. `reportedUserId-index` — 按 reportedUserId 查询该用户的所有举报 (PK: `reportedUserId`, SK: `createdAt`)
+2. `status-index` — 按 status 查询和过滤举报列表 (PK: `status`, SK: `createdAt`)
 
 ---
 
