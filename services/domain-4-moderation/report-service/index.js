@@ -1,10 +1,12 @@
 import { DynamoDBClient, ScanCommand, GetItemCommand, PutItemCommand, UpdateItemCommand, QueryCommand } from "@aws-sdk/client-dynamodb";
 import { marshall, unmarshall } from "@aws-sdk/util-dynamodb";
 import { EventBridgeClient, PutEventsCommand } from "@aws-sdk/client-eventbridge";
+import { SESClient, SendEmailCommand } from "@aws-sdk/client-ses";
 import { v4 as uuidv4 } from "uuid";
 
 const dbClient = new DynamoDBClient({});
 const ebClient = new EventBridgeClient({});
+const sesClient = new SESClient({});
 
 const TABLE_NAME = "kismet-reports";
 const VALID_REASONS = ["harassment", "inappropriate_content", "spam", "fake_profile", "other"];
@@ -110,6 +112,23 @@ async function createReport(event, reporterId) {
       EventBusName: "default"
     }]
   }));
+
+  // Send SES Admin Alert
+  try {
+    await sesClient.send(new SendEmailCommand({
+      Destination: { ToAddresses: [process.env.ADMIN_EMAIL || "admin@kismet.com"] },
+      Message: {
+        Body: {
+          Text: { Data: `New user report received.\n\nReport ID: ${reportId}\nReporter: ${reporterId}\nReported User: ${reportedUserId}\nReason: ${reason}\nDescription: ${description || "N/A"}\n\nPlease check the admin dashboard to review this report.` }
+        },
+        Subject: { Data: `[Kismet Admin Alert] New User Report: ${reason}` }
+      },
+      Source: process.env.SYSTEM_EMAIL || "noreply@kismet.com"
+    }));
+  } catch (sesError) {
+    console.error("Failed to send admin alert via SES:", sesError);
+    // Don't fail the request if just the email alert fails
+  }
 
   // Cleanup for response
   delete reportItem.pk;
