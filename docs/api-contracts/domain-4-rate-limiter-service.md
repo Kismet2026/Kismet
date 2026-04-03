@@ -3,13 +3,13 @@
 **Owner:** Amber
 **Domain:** Safety & Moderation
 **Base Path:** N/A (middleware, not directly called)
-**AWS Services:** API Gateway, DynamoDB
+**AWS Services:** API Gateway, ElastiCache (Redis)
 
 ---
 
 ## Overview
 
-Rate Limiter 不是传统的 REST 服务，而是一个速率限制层。通过 API Gateway Usage Plans + API Keys 实现基础限流，通过 DynamoDB + TTL 实现用户级别的精细限流。
+Rate Limiter 不是传统的 REST 服务，而是一个速率限制层。通过 API Gateway Usage Plans + API Keys 实现基础限流，通过 ElastiCache (Redis) + TTL 实现用户级别的精细限流。
 
 ### Rate Limits
 
@@ -22,7 +22,7 @@ Rate Limiter 不是传统的 REST 服务，而是一个速率限制层。通过 
 ### Approach
 
 - **基础限流：** API Gateway Usage Plans + API Keys，对所有 API 进行全局限流
-- **用户级限流：** DynamoDB 记录每个用户的操作计数，使用 TTL 自动过期
+- **用户级限流：** ElastiCache 记录每个用户的操作计数，使用 EX/PX 自动过期
 - **应用方式：** 作为 Lambda middleware 或 API Gateway Authorizer 在请求处理前检查限流
 
 ---
@@ -110,18 +110,19 @@ POST /ratelimit/reset/user-123
 
 ---
 
-## DynamoDB Table
+## ElastiCache (Redis) Schema
 
-**Table:** `kismet-rate-limits`
+**Key Format:** `ratelimit:{userId}:{action}:{windowTimestamp}`
 
-| Attribute | Type | Key |
-|-----------|------|-----|
-| `pk` | String | Partition Key (USER#{userId}#ACTION#{action}) |
-| `sk` | String | Sort Key (WINDOW#{timestamp}) |
-| `count` | Number | — |
-| `ttl` | Number | TTL (Unix timestamp, 自动过期) |
+| Component | Example | Description |
+|-----------|---------|-------------|
+| `{userId}` | `user-123` | 用户 ID |
+| `{action}` | `swipes` | 操作类型 (`swipes`, `messages`, `reports`) |
+| `{windowTimestamp}` | `1711929600000` | 时间窗口的起始 Unix 时间戳 |
 
-**TTL:** 记录在时间窗口结束后自动删除，无需手动清理。
+**Value Type:** String (integer)
+
+**TTL:** 记录在时间窗口结束后自动使用 Redis 过期机制删除。
 
 ---
 

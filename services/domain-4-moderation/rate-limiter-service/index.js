@@ -1,8 +1,18 @@
-import { DynamoDBClient, UpdateItemCommand, QueryCommand, DeleteItemCommand } from "@aws-sdk/client-dynamodb";
-import { marshall, unmarshall } from "@aws-sdk/util-dynamodb";
+import { createClient } from "redis";
 
-const dbClient = new DynamoDBClient({});
-const TABLE_NAME = "kismet-rate-limits";
+const redisClient = createClient({
+  url: process.env.REDIS_URL || "redis://localhost:6379"
+});
+
+redisClient.on("error", (err) => console.error("Redis Client Error", err));
+let redisConnected = false;
+
+async function connectRedis() {
+  if (!redisConnected) {
+    await redisClient.connect();
+    redisConnected = true;
+  }
+}
 
 const LIMITS = {
   swipes: { limit: 100, windowSeconds: 24 * 60 * 60 },
@@ -29,37 +39,29 @@ function getWindowInfo(action) {
     resetsAt = new Date(windowStart + 3600 * 1000);
   }
 
-  return { timestamp: windowStart, resetsAt: resetsAt.toISOString(), ttl: Math.floor(resetsAt.getTime() / 1000) };
+  return { timestamp: windowStart, resetsAt: resetsAt.toISOString(), ttlSeconds: Math.floor((resetsAt.getTime() - now.getTime()) / 1000) };
 }
 
 // Middleware function to check and increment limit
 export async function checkRateLimit(userId, action) {
   if (!LIMITS[action]) return { allowed: true };
+  await connectRedis();
 
-  const { timestamp, resetsAt, ttl } = getWindowInfo(action);
-  const pk = `USER#${userId}#ACTION#${action}`;
-  const sk = `WINDOW#${timestamp}`;
+  const { timestamp, resetsAt, ttlSeconds } = getWindowInfo(action);
+  const key = `ratelimit:${userId}:${action}:${timestamp}`;
 
   try {
-    const result = await dbClient.send(new UpdateItemCommand({
-      TableName: TABLE_NAME,
-      Key: marshall({ pk, sk }),
-      UpdateExpression: "ADD #count :inc SET #ttl = if_not_exists(#ttl, :ttl)",
-      ExpressionAttributeNames: {
-        "#count": "count",
-        "#ttl": "ttl"
-      },
-      ExpressionAttributeValues: marshall({
-        ":inc": 1,
-        ":ttl": ttl
-      }),
-      ReturnValues: "UPDATED_NEW"
-    }));
+    // Increment the key
+    const currentCount = await redisClient.incr(key);
 
-    const count = unmarshall(result.Attributes).count;
+    // If it's a new key, set the expiration
+    if (currentCount === 1) {
+      await redisClient.expire(key, ttlSeconds + 60); // adding 60s buffer
+    }
+
     const limit = LIMITS[action].limit;
 
-    if (count > limit) {
+    if (currentCount > limit) {
       return {
         allowed: false,
         statusCode: 429,
@@ -69,10 +71,10 @@ export async function checkRateLimit(userId, action) {
       };
     }
 
-    return { allowed: true, remaining: limit - count };
+    return { allowed: true, remaining: limit - currentCount };
   } catch (error) {
     console.error("Rate limit check failed", error);
-    // Allow through if DB fails to not block users, but log it
+    // Allow through if Redis fails to not block users, but log it
     return { allowed: true };
   }
 }
@@ -88,6 +90,8 @@ export const handler = async (event) => {
   if (!isAdmin) {
     return { statusCode: 403, body: JSON.stringify({ error: "FORBIDDEN" }) };
   }
+
+  await connectRedis();
 
   try {
     if (method === "GET" && path.startsWith("/ratelimit/status/")) {
@@ -115,20 +119,14 @@ async function getStatus(event) {
 
   for (const action of actions) {
     const { timestamp, resetsAt } = getWindowInfo(action);
-    const pk = `USER#${userId}#ACTION#${action}`;
-    const sk = `WINDOW#${timestamp}`;
+    const key = `ratelimit:${userId}:${action}:${timestamp}`;
 
-    // Use Query to get the exact current window count
-    const result = await dbClient.send(new QueryCommand({
-      TableName: TABLE_NAME,
-      KeyConditionExpression: "pk = :pk AND sk = :sk",
-      ExpressionAttributeValues: marshall({ ":pk": pk, ":sk": sk })
-    }));
-
-    const limit = LIMITS[action].limit;
-    const used = result.Items && result.Items.length > 0 ? unmarshall(result.Items[0]).count : 0;
+    const value = await redisClient.get(key);
+    const used = value ? parseInt(value, 10) : 0;
     
     if (used > 0) foundAny = true;
+
+    const limit = LIMITS[action].limit;
 
     statusLimits[action] = {
       used,
@@ -156,17 +154,8 @@ async function resetLimit(event) {
 
   for (const action of actions) {
     const { timestamp } = getWindowInfo(action);
-    const pk = `USER#${userId}#ACTION#${action}`;
-    const sk = `WINDOW#${timestamp}`;
-
-    try {
-      await dbClient.send(new DeleteItemCommand({
-        TableName: TABLE_NAME,
-        Key: marshall({ pk, sk })
-      }));
-    } catch (e) {
-      // Ignore if not exists
-    }
+    const key = `ratelimit:${userId}:${action}:${timestamp}`;
+    await redisClient.del(key);
   }
 
   return {

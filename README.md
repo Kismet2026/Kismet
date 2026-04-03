@@ -90,7 +90,7 @@ A microservice dating app built on AWS — with BaZi (八字) compatibility matc
 | Text Moderation | Yue | Comprehend, Lambda | Flag toxic content |
 | Image Moderation | KS | Rekognition, Lambda | Block inappropriate photos |
 | Report Service | Amber | Lambda, DynamoDB, SES | User reports → admin alerts |
-| Rate Limiter | Amber | API Gateway, DynamoDB | Anti-spam protection |
+| Rate Limiter | Amber | API Gateway, ElastiCache | Anti-spam protection |
 
 ### Domain 5 — Notifications & Engagement
 
