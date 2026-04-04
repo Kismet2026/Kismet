@@ -1,110 +1,117 @@
 import streamlit as st
 import pandas as pd
 
-# TODO: Replace mock data with real API calls to admin-dashboard-service and health-monitor-service
+# TODO: Replace mock data with real API calls
 # Example: response = requests.get(f"{API_BASE_URL}/admin/stats", headers={"Authorization": f"Bearer {token}"})
 API_BASE_URL = "https://<your-api-gateway-url>/prod"
 
 st.set_page_config(page_title="Kismet Admin", layout="wide")
 st.title("Kismet Admin Dashboard")
 
-tab1, tab2, tab3 = st.tabs(["Stats", "Reports", "Health Monitor"])
+tab1, tab2, tab3 = st.tabs(["Stats", "Flagged Content", "Health Monitor"])
 
-# ─── Tab 1: Stats ────────────────────────────────────────────────────────────
+# ─── Tab 1: Stats ─────────────────────────────────────────────────────────────
 with tab1:
     st.header("App Overview")
 
     # TODO: Replace with GET /admin/stats
+    # Response shape: { totalUsers, activeUsers, matchesToday, messagesToday, flaggedContentCount, generatedAt }
     stats = {
-        "Total Users": 1024,
-        "New Users Today": 38,
-        "Total Matches": 412,
-        "Matches Today": 21,
-        "Messages Today": 890,
-        "Swipes Today": 3200,
+        "Total Users": 8500,
+        "Active Users": 1250,
+        "Matches Today": 234,
+        "Messages Today": 892,
+        "Flagged Content": 15,
     }
 
-    col1, col2, col3 = st.columns(3)
-    items = list(stats.items())
-    for i, col in enumerate([col1, col2, col3]):
-        with col:
-            k, v = items[i * 2]
-            st.metric(k, v)
-            k2, v2 = items[i * 2 + 1]
-            st.metric(k2, v2)
+    cols = st.columns(len(stats))
+    for col, (k, v) in zip(cols, stats.items()):
+        col.metric(k, v)
 
-# ─── Tab 2: Reports ───────────────────────────────────────────────────────────
+# ─── Tab 2: Flagged Content ────────────────────────────────────────────────────
 with tab2:
-    st.header("User Reports")
+    st.header("Flagged Content")
 
-    status_filter = st.selectbox("Filter by status", ["pending", "resolved", "dismissed"])
+    type_filter = st.selectbox("Filter by type", ["all", "text", "image"])
 
-    # TODO: Replace with GET /admin/reports?status={status_filter}
-    mock_reports = [
-        {"reportId": "rpt_001", "reporterId": "user_111", "reportedUserId": "user_222",
-         "reason": "Harassment", "status": "pending", "createdAt": "2026-03-31"},
-        {"reportId": "rpt_002", "reporterId": "user_333", "reportedUserId": "user_444",
-         "reason": "Inappropriate photo", "status": "pending", "createdAt": "2026-03-30"},
+    # TODO: Replace with GET /admin/flagged-content?type={type_filter}
+    # Response shape: { items: [{ contentId, type, content/imageUrl, userId, reason, confidence, flaggedAt, status }], nextCursor, count }
+    mock_flagged = [
+        {
+            "contentId": "flag-001", "type": "text",
+            "content": "Inappropriate message...",
+            "userId": "user-456", "reason": "hate_speech",
+            "confidence": 0.92, "flaggedAt": "2026-03-31", "status": "pending",
+        },
+        {
+            "contentId": "flag-002", "type": "image",
+            "imageUrl": "https://cdn.kismet.com/photos/flagged/img-002.jpg",
+            "userId": "user-789", "reason": "explicit_content",
+            "confidence": 0.88, "flaggedAt": "2026-03-30", "status": "pending",
+        },
     ]
-    reports = [r for r in mock_reports if r["status"] == status_filter]
+    items = [i for i in mock_flagged if type_filter == "all" or i["type"] == type_filter]
 
-    if not reports:
-        st.info("No reports found.")
+    if not items:
+        st.info("No flagged content.")
     else:
-        for r in reports:
-            with st.expander(f"{r['reportId']} — {r['reason']} ({r['createdAt']})"):
-                st.write(f"**Reporter:** {r['reporterId']}")
-                st.write(f"**Reported user:** {r['reportedUserId']}")
-                st.write(f"**Reason:** {r['reason']}")
-                st.write(f"**Status:** {r['status']}")
+        for item in items:
+            with st.expander(f"{item['contentId']} — {item['reason']} ({item['flaggedAt']})"):
+                st.write(f"**Type:** {item['type']}")
+                st.write(f"**User:** {item['userId']}")
+                st.write(f"**Reason:** {item['reason']}")
+                st.write(f"**Confidence:** {item['confidence']}")
 
-                if r["status"] == "pending":
-                    col_a, col_b = st.columns(2)
+                if item["status"] == "pending":
+                    col_a, col_b, col_c = st.columns(3)
                     with col_a:
-                        if st.button("Ban user", key=f"ban_{r['reportId']}"):
-                            # TODO: Call PUT /admin/reports/{reportId}/resolve with action="ban"
-                            st.success("User banned (mock)")
+                        if st.button("Approve", key=f"approve_{item['contentId']}"):
+                            # TODO: PUT /admin/flagged-content/{contentId}/resolve {"action": "approve"}
+                            st.success("Approved (mock)")
                     with col_b:
-                        if st.button("Dismiss", key=f"dismiss_{r['reportId']}"):
-                            # TODO: Call PUT /admin/reports/{reportId}/resolve with action="dismiss"
-                            st.success("Report dismissed (mock)")
+                        if st.button("Remove", key=f"remove_{item['contentId']}"):
+                            # TODO: PUT /admin/flagged-content/{contentId}/resolve {"action": "remove"}
+                            st.success("Removed (mock)")
+                    with col_c:
+                        if st.button("Ban User", key=f"ban_{item['contentId']}"):
+                            # TODO: PUT /admin/flagged-content/{contentId}/resolve {"action": "ban_user"}
+                            st.success("User banned (mock)")
 
-# ─── Tab 3: Health Monitor ────────────────────────────────────────────────────
+# ─── Tab 3: Health Monitor ─────────────────────────────────────────────────────
 with tab3:
     st.header("Service Health")
 
     if st.button("Refresh"):
         st.rerun()
 
-    # TODO: Replace with GET /admin/health
-    mock_health = [
-        {"service": "auth-service",        "status": "OK",    "errorRate": 0.0,  "avgDurationMs": 45},
-        {"service": "profile-service",     "status": "OK",    "errorRate": 0.1,  "avgDurationMs": 120},
-        {"service": "bazi-service",        "status": "ALARM", "errorRate": 12.5, "avgDurationMs": 3200},
-        {"service": "chat-gateway",        "status": "ALARM", "errorRate": 6.1,  "avgDurationMs": 800},
-        {"service": "match-service",       "status": "OK",    "errorRate": 0.0,  "avgDurationMs": 200},
-        {"service": "discovery-service",   "status": "OK",    "errorRate": 0.3,  "avgDurationMs": 310},
-        {"service": "message-service",     "status": "OK",    "errorRate": 0.0,  "avgDurationMs": 95},
-        {"service": "health-monitor",      "status": "OK",    "errorRate": 0.0,  "avgDurationMs": 60},
-    ]
+    # TODO: Replace with GET /health  (base path: /health, not /admin/health)
+    # Response shape: { status, services: { name: { status, latency } }, checkedAt }
+    mock_health = {
+        "status": "degraded",
+        "services": {
+            "auth-service":    {"status": "healthy",  "latency": 45},
+            "profile-service": {"status": "healthy",  "latency": 120},
+            "bazi-service":    {"status": "degraded", "latency": 3200},
+            "match-service":   {"status": "healthy",  "latency": 200},
+            "message-service": {"status": "healthy",  "latency": 95},
+            "health-monitor":  {"status": "healthy",  "latency": 60},
+        },
+        "checkedAt": "2026-04-03T12:00:00Z",
+    }
 
-    df = pd.DataFrame(mock_health)
-
-    def status_icon(s):
-        return "🟢 OK" if s == "OK" else "🔴 ALARM"
-
-    df["Status"] = df["status"].apply(status_icon)
-    df["Error Rate"] = df["errorRate"].apply(lambda x: f"{x}%")
-    df["Avg Duration"] = df["avgDurationMs"].apply(lambda x: f"{x} ms")
-
-    st.dataframe(
-        df[["service", "Status", "Error Rate", "Avg Duration"]].rename(columns={"service": "Service"}),
-        use_container_width=True,
-        hide_index=True,
-    )
-
-    alarm_count = sum(1 for r in mock_health if r["status"] == "ALARM")
-    if alarm_count > 0:
-        st.error(f"{alarm_count} service(s) in ALARM state")
-    else:
+    overall = mock_health["status"]
+    if overall == "healthy":
         st.success("All services healthy")
+    elif overall == "degraded":
+        st.warning("Some services degraded")
+    else:
+        st.error("One or more services unhealthy")
+
+    def _status_label(s):
+        return {"healthy": "🟢 Healthy", "degraded": "🟡 Degraded", "unhealthy": "🔴 Unhealthy"}.get(s, s)
+
+    rows = [
+        {"Service": name, "Status": _status_label(svc["status"]), "Latency (ms)": svc["latency"]}
+        for name, svc in mock_health["services"].items()
+    ]
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
