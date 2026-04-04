@@ -1,0 +1,194 @@
+import requests
+import streamlit as st
+import pandas as pd
+
+# TODO: Replace actual API Gateway URL
+API_BASE_URL = ""
+
+st.set_page_config(page_title="Kismet Admin", layout="wide")
+st.title("Kismet Admin Dashboard")
+
+
+def api_get(path, params=None):
+    try:
+        r = requests.get(f"{API_BASE_URL}{path}", params=params, timeout=10)
+        r.raise_for_status()
+        return r.json(), None
+    except Exception as e:
+        return None, str(e)
+
+
+def api_put(path, body=None):
+    try:
+        r = requests.put(f"{API_BASE_URL}{path}", json=body, timeout=10)
+        r.raise_for_status()
+        return r.json(), None
+    except Exception as e:
+        return None, str(e)
+
+
+def api_post(path):
+    try:
+        r = requests.post(f"{API_BASE_URL}{path}", timeout=10)
+        r.raise_for_status()
+        return r.json(), None
+    except Exception as e:
+        return None, str(e)
+
+
+tab1, tab2, tab3, tab4 = st.tabs(
+    ["Stats", "Flagged Content", "Users", "Health Monitor"]
+)
+
+# ─── Tab 1: Stats ─────────────────────────────────────────────────────────────
+with tab1:
+    st.header("App Overview")
+    if st.button("Refresh", key="refresh_stats"):
+        st.rerun()
+
+    data, err = api_get("/admin/stats")
+    if err:
+        st.error(f"Failed to load stats: {err}")
+    else:
+        cols = st.columns(5)
+        cols[0].metric("Total Users", data["totalUsers"])
+        cols[1].metric("Active Users", data["activeUsers"])
+        cols[2].metric("Matches Today", data["matchesToday"])
+        cols[3].metric("Messages Today", data["messagesToday"])
+        cols[4].metric("Flagged Content", data["flaggedContentCount"])
+        st.caption(f"Generated at: {data.get('generatedAt', '')}")
+
+# ─── Tab 2: Flagged Content ──────────────────────────────��─────────────────────
+with tab2:
+    st.header("Flagged Content")
+    type_filter = st.selectbox("Filter by type", ["all", "text", "image"])
+
+    params = {} if type_filter == "all" else {"type": type_filter}
+    data, err = api_get("/admin/flagged-content", params=params)
+
+    if err:
+        st.error(f"Failed to load flagged content: {err}")
+    elif not data["items"]:
+        st.info("No flagged content.")
+    else:
+        for item in data["items"]:
+            with st.expander(
+                f"{item['contentId']} — {item['reason']} ({item.get('flaggedAt', '')})"
+            ):
+                st.write(f"**Type:** {item['type']}")
+                st.write(f"**User:** {item['userId']}")
+                st.write(f"**Reason:** {item['reason']}")
+                st.write(f"**Confidence:** {item['confidence']}")
+                if item["type"] == "image":
+                    st.write(f"**Image URL:** {item.get('imageUrl')}")
+                else:
+                    st.write(f"**Content:** {item.get('content')}")
+
+                if item["status"] == "pending":
+                    col_a, col_b, col_c = st.columns(3)
+                    with col_a:
+                        if st.button("Approve", key=f"approve_{item['contentId']}"):
+                            _, err = api_put(
+                                f"/admin/flagged-content/{item['contentId']}/resolve",
+                                {"action": "approve"},
+                            )
+                            st.success("Approved") if not err else st.error(err)
+                    with col_b:
+                        if st.button("Remove", key=f"remove_{item['contentId']}"):
+                            _, err = api_put(
+                                f"/admin/flagged-content/{item['contentId']}/resolve",
+                                {"action": "remove"},
+                            )
+                            st.success("Removed") if not err else st.error(err)
+                    with col_c:
+                        if st.button("Ban User", key=f"ban_{item['contentId']}"):
+                            _, err = api_put(
+                                f"/admin/flagged-content/{item['contentId']}/resolve",
+                                {"action": "ban_user"},
+                            )
+                            st.success("User banned") if not err else st.error(err)
+
+# ─── Tab 3: Users ────────────────────────────────────────────────────────���────
+with tab3:
+    st.header("Users")
+    search = st.text_input("Search by name", placeholder="e.g. John")
+
+    params = {"search": search} if search else {}
+    data, err = api_get("/admin/users", params=params)
+
+    if err:
+        st.error(f"Failed to load users: {err}")
+    elif not data["items"]:
+        st.info("No users found.")
+    else:
+        for user in data["items"]:
+            status_icon = "🔴" if user["status"] == "banned" else "🟢"
+            with st.expander(
+                f"{status_icon} {user.get('displayName', user['userId'])} — {user['status']}"
+            ):
+                st.write(f"**User ID:** {user['userId']}")
+                st.write(f"**Email:** {user.get('email') or '—'}")
+                st.write(f"**Created:** {user.get('createdAt', '—')}")
+                st.write(f"**Report Count:** {user.get('reportCount', 0)}")
+
+                if user["status"] != "banned":
+                    if st.button("Ban", key=f"ban_user_{user['userId']}"):
+                        _, err = api_put(f"/admin/users/{user['userId']}/ban")
+                        st.success("User banned") if not err else st.error(err)
+                else:
+                    if st.button("Unban", key=f"unban_user_{user['userId']}"):
+                        _, err = api_put(f"/admin/users/{user['userId']}/unban")
+                        st.success("User unbanned") if not err else st.error(err)
+
+# ─── Tab 4: Health Monitor ──────────────────────────────────��──────────────────
+with tab4:
+    st.header("Service Health")
+    col_refresh, col_check = st.columns([1, 1])
+
+    with col_refresh:
+        if st.button("Refresh"):
+            st.rerun()
+    with col_check:
+        if st.button("Run Health Check"):
+            result, err = api_post("/health/check")
+            if err:
+                st.error(f"Health check failed: {err}")
+            else:
+                st.success(f"Check complete — overall: {result['status']}")
+
+    data, err = api_get("/health")
+    if err:
+        st.error(f"Failed to load health: {err}")
+    else:
+        overall = data["status"]
+        if overall == "healthy":
+            st.success("All services healthy")
+        elif overall == "degraded":
+            st.warning("Some services degraded")
+        else:
+            st.error("One or more services unhealthy")
+
+        def _status_label(s):
+            return {
+                "healthy": "🟢 Healthy",
+                "degraded": "🟡 Degraded",
+                "unhealthy": "🔴 Unhealthy",
+            }.get(s, s)
+
+        rows = [
+            {
+                "Service": name,
+                "Status": _status_label(svc["status"]),
+                "Latency (ms)": svc["latency"],
+            }
+            for name, svc in data["services"].items()
+        ]
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        st.caption(f"Checked at: {data.get('checkedAt', '')}")
+
+    # Active alarms
+    alarms, err = api_get("/health/alarms")
+    if not err and alarms["activeCount"] > 0:
+        st.subheader(f"Active Alarms ({alarms['activeCount']})")
+        for alarm in alarms["alarms"]:
+            st.error(f"**{alarm['alarmName']}** — {alarm['reason']}")
