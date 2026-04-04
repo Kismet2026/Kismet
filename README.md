@@ -80,7 +80,7 @@ A microservice dating app built on AWS — with BaZi (八字) compatibility matc
 |---------|-------|-------------|-------------|
 | Chat Gateway | Parker | API Gateway WebSocket, Lambda | Real-time message routing |
 | Message Service | Parker | Lambda, DynamoDB | Persist and retrieve chats |
-| Presence Service | QX | ElastiCache, Lambda | Online/offline/typing status |
+| Presence Service | QX | DynamoDB, Lambda | Online/offline/typing status |
 | Icebreaker Service | Jiaxin | Bedrock, Lambda | AI conversation starters |
 
 ### Domain 4 — Safety & Moderation
@@ -90,7 +90,7 @@ A microservice dating app built on AWS — with BaZi (八字) compatibility matc
 | Text Moderation | Yue | Comprehend, Lambda | Flag toxic content |
 | Image Moderation | KS | Rekognition, Lambda | Block inappropriate photos |
 | Report Service | Amber | Lambda, DynamoDB, SES | User reports → admin alerts |
-| Rate Limiter | Amber | API Gateway, ElastiCache | Anti-spam protection |
+| Rate Limiter | Amber | API Gateway, DynamoDB | Anti-spam protection |
 
 ### Domain 5 — Notifications & Engagement
 
@@ -122,7 +122,7 @@ A microservice dating app built on AWS — with BaZi (八字) compatibility matc
 | Database | DynamoDB, DynamoDB Streams |
 | Storage | S3 |
 | CDN | CloudFront |
-| Caching | ElastiCache (Redis) |
+| Caching | DynamoDB TTL (ElastiCache removed) |
 | AI/ML | Rekognition, Comprehend, Bedrock |
 | Messaging | SNS, SES |
 | Event-Driven | EventBridge, EventBridge Scheduler |
@@ -139,9 +139,10 @@ A microservice dating app built on AWS — with BaZi (八字) compatibility matc
 kismet/
 ├── README.md
 ├── docs/
-│   ├── architecture.md
+│   ├── PRD.md
 │   ├── api-contracts/          ← one file per service
-│   └── onboarding.md
+│   ├── system-design/          ← architecture & infra design docs
+│   └── guides/                 ← setup guide, communication guide, templates
 ├── frontend/
 ├── services/
 │   ├── domain-1-identity/
