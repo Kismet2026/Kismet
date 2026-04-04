@@ -86,8 +86,7 @@ GET /events/history?source=kismet.match-service&detailType=match.created&limit=2
       "detailType": "match.created",
       "detail": {
         "matchId": "match-001",
-        "userId1": "user-123",
-        "userId2": "user-456"
+        "userIds": ["user-123", "user-456"]
       },
       "timestamp": "2026-04-01T12:00:00Z",
       "status": "delivered"

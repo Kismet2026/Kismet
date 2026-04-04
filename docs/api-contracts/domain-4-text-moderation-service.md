@@ -135,12 +135,15 @@ GET /moderate/text/history?limit=20&cursor=xxx
 
 ```json
 {
-  "source": "kismet.messaging-service",
+  "source": "kismet.message-service",
   "detail-type": "message.sent",
   "detail": {
     "messageId": "msg-123",
+    "matchId": "match-789",
     "senderId": "user-123",
-    "content": "message text"
+    "content": "message text",
+    "messageType": "text",
+    "timestamp": "2026-04-01T12:05:00Z"
   }
 }
 ```
@@ -151,19 +154,20 @@ GET /moderate/text/history?limit=20&cursor=xxx
 
 ```json
 {
-  "source": "kismet.text-moderation-service",
+  "source": "kismet.moderation",
   "detail-type": "content.flagged",
   "detail": {
     "contentId": "msg-123",
-    "contentType": "message",
-    "toxicityScore": 0.87,
-    "categories": ["HATE_SPEECH", "INSULT"],
+    "contentType": "text",
+    "userId": "user-123",
+    "reason": "toxicity_detected",
+    "score": 0.87,
     "timestamp": "2026-04-01T12:00:00Z"
   }
 }
 ```
 
-**Consumed by:** Admin Dashboard
+**Consumed by:** Admin Dashboard, Activity Logger
 
 ---
 
@@ -171,7 +175,7 @@ GET /moderate/text/history?limit=20&cursor=xxx
 
 | Direction | Service | How |
 |-----------|---------|-----|
-| **Called by** | EventBridge (message.sent) | 自动触发审核 |
+| **Called by** | EventBridge (`message.sent`) | 自动触发审核 |
 | **Publishes to** | Admin Dashboard | EventBridge `content.flagged` |
 | **Depends on** | AWS Comprehend | DetectToxicContent API |
 | **Depends on** | Auth (Cognito) | JWT validation（GET 端点，管理员权限） |

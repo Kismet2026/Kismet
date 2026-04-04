@@ -101,7 +101,7 @@ GET /analytics/log/recent?userId=user-123&eventType=swipe.created&limit=50
       "userId": "user-123",
       "eventData": {
         "messageId": "msg-001",
-        "chatId": "chat-001"
+        "matchId": "match-789"
       },
       "timestamp": "2026-04-01T11:55:00Z"
     }
@@ -162,7 +162,7 @@ Example event types consumed:
 - `swipe.created`
 - `match.created`
 - `message.sent`
-- `user.registered`
+- `user.created`
 - `content.flagged`
 - `user.reported`
 - (all other events)
