@@ -27,3 +27,5 @@ Thumbs.db
 dist/
 build/
 *.zip
+__pycache__
+*.pyc
