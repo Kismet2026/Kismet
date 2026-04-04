@@ -235,7 +235,29 @@ analytics_bucket = s3.Bucket(self, 'AnalyticsBucket',
 )
 ```
 
-### 5.5 导出
+### 5.5 Kinesis
+
+Activity Logger 写入、Analytics Pipeline 读取，属于跨 service 共享资源，统一在 SharedStack 创建。
+
+```python
+activity_stream = kinesis.Stream(self, 'ActivityStream',
+    stream_name='kismet-activity-stream',
+    shard_count=1,
+    removal_policy=RemovalPolicy.DESTROY,
+)
+```
+
+### 5.6 SNS
+
+Health Monitor 告警用，统一在 SharedStack 创建。
+
+```python
+health_alerts_topic = sns.Topic(self, 'HealthAlertsTopic',
+    topic_name='kismet-health-alerts',
+)
+```
+
+### 5.7 导出
 
 SharedStack 把所有共享资源通过属性暴露给域栈：
 
@@ -246,6 +268,9 @@ class Domain2Stack(Stack):
         api = shared.api
         event_bus = shared.event_bus
         authorizer = shared.authorizer
+        # Domain 6 also uses:
+        # shared.activity_stream
+        # shared.health_alerts_topic
 ```
 
 ---
