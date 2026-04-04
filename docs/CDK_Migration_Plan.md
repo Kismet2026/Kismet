@@ -484,6 +484,36 @@ usage_plan = api.add_usage_plan('RateLimitPlan',
 
 加上 DynamoDB TTL 的 per-user 限流逻辑在 Lambda middleware 中实现。
 
+### 7.9 Push Notification Service — 需要 SNS 权限
+
+```python
+KismetService(self, 'PushNotificationService',
+    service_name='push-notification',
+    ...,
+    extra_policies=[
+        iam.PolicyStatement(
+            actions=['sns:Publish', 'sns:CreatePlatformEndpoint'],
+            resources=[f'arn:aws:sns:{self.region}:{self.account}:app/*/kismet-*'],
+        ),
+    ],
+)
+```
+
+### 7.10 Email Service — 需要 SES 权限
+
+```python
+KismetService(self, 'EmailService',
+    service_name='email',
+    ...,
+    extra_policies=[
+        iam.PolicyStatement(
+            actions=['ses:SendEmail', 'ses:SendTemplatedEmail'],
+            resources=[f'arn:aws:ses:{self.region}:{self.account}:identity/*'],
+        ),
+    ],
+)
+```
+
 ---
 
 ## 8. 队友需要做的事

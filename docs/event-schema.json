@@ -44,6 +44,7 @@
         "messageId": { "type": "string", "example": "msg-001" },
         "matchId": { "type": "string", "example": "match-789" },
         "senderId": { "type": "string", "example": "user-123" },
+        "recipientId": { "type": "string", "example": "user-456", "description": "消息接收方" },
         "content": { "type": "string", "example": "Hey! Nice to meet you" },
         "messageType": { "type": "string", "enum": ["text"], "description": "目前只支持 text" },
         "timestamp": { "type": "string", "format": "date-time", "example": "2026-04-01T12:05:00Z" }

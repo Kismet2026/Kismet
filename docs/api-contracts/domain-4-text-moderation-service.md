@@ -141,6 +141,7 @@ GET /moderate/text/history?limit=20&cursor=xxx
     "messageId": "msg-123",
     "matchId": "match-789",
     "senderId": "user-123",
+    "recipientId": "user-456",
     "content": "message text",
     "messageType": "text",
     "timestamp": "2026-04-01T12:05:00Z"
