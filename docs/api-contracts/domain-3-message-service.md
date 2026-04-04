@@ -224,6 +224,7 @@ Published when a new message is persisted.
     "messageId": "msg-001",
     "matchId": "match-123",
     "senderId": "user-123",
+    "recipientId": "user-456",
     "content": "Hey, nice to meet you!",
     "messageType": "text",
     "timestamp": "2026-04-01T12:00:00Z"

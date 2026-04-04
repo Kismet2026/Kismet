@@ -225,6 +225,7 @@ Triggers a push notification: "New message from {senderName}"
     "messageId": "msg-001",
     "matchId": "match-789",
     "senderId": "user-123",
+    "recipientId": "user-456",
     "content": "Hey! Nice to meet you",
     "messageType": "text",
     "timestamp": "2026-04-01T12:00:00Z"
