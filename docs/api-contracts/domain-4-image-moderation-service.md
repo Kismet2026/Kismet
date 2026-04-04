@@ -168,19 +168,20 @@ GET /moderate/image/history?limit=20&cursor=xxx
 
 ```json
 {
-  "source": "kismet.image-moderation-service",
+  "source": "kismet.moderation",
   "detail-type": "content.flagged",
   "detail": {
-    "photoId": "photo-001",
+    "contentId": "photo-001",
+    "contentType": "image",
     "userId": "user-123",
-    "labels": ["Explicit Nudity"],
-    "confidence": 95.6,
+    "reason": "explicit_nudity",
+    "score": 0.96,
     "timestamp": "2026-04-01T12:00:00Z"
   }
 }
 ```
 
-**Consumed by:** Admin Dashboard
+**Consumed by:** Admin Dashboard, Activity Logger
 
 ---
 

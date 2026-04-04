@@ -231,7 +231,7 @@ Published when a new message is persisted.
 }
 ```
 
-**Consumed by:** Notification Service, Activity Logger
+**Consumed by:** Text Moderation, Activity Logger
 
 ---
 

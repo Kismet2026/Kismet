@@ -207,8 +207,7 @@ Triggers a push notification: "You have a new match!"
   "detail-type": "match.created",
   "detail": {
     "matchId": "match-001",
-    "userId1": "user-123",
-    "userId2": "user-456",
+    "userIds": ["user-123", "user-456"],
     "timestamp": "2026-04-01T12:00:00Z"
   }
 }
@@ -220,13 +219,14 @@ Triggers a push notification: "New message from {senderName}"
 
 ```json
 {
-  "source": "kismet.chat-service",
+  "source": "kismet.message-service",
   "detail-type": "message.sent",
   "detail": {
     "messageId": "msg-001",
-    "conversationId": "conv-001",
+    "matchId": "match-789",
     "senderId": "user-123",
-    "recipientId": "user-456",
+    "content": "Hey! Nice to meet you",
+    "messageType": "text",
     "timestamp": "2026-04-01T12:00:00Z"
   }
 }
@@ -249,6 +249,6 @@ Triggers a push notification: "New message from {senderName}"
 |-----------|---------|-----|
 | **Called by** | Frontend (React) | HTTP via API Gateway |
 | **Consumes from** | Match Service | EventBridge `match.created` |
-| **Consumes from** | Chat Service | EventBridge `message.sent` |
+| **Consumes from** | Message Service | EventBridge `message.sent` |
 | **Depends on** | Auth (Cognito) | JWT validation via API Gateway Authorizer |
 | **Uses** | SNS | Push notification delivery |
