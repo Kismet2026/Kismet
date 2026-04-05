@@ -1,0 +1,80 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Kismet Text Moderation — Week 1 Lambda scaffold + DynamoDB table + API routes.
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: dev
+  SharedApiId:
+    Type: String
+    Default: ''
+  TextModerationTableName:
+    Type: String
+    Default: kismet-text-moderation-dev
+
+Conditions:
+  HasSharedApiId: !Not [!Equals [!Ref SharedApiId, '']]
+
+Globals:
+  Function:
+    Runtime: python3.12
+    Timeout: 10
+    MemorySize: 256
+    Tracing: Active
+
+Resources:
+  TextModerationTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Ref TextModerationTableName
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: contentId
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: contentId
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+
+  TextModerationFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub kismet-text-moderation-service-${EnvironmentName}
+      Description: Week 1 scaffold — routes only; Week 2 adds Comprehend, EventBridge, auth.
+      CodeUri: .
+      Handler: lambda_function.lambda_handler
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TextModerationTableName
+      Events:
+        PostModerateText:
+          Type: Api
+          Properties:
+            Path: /moderate/text
+            Method: post
+            RestApiId: !If [HasSharedApiId, !Ref SharedApiId, !Ref AWS::NoValue]
+        GetModerateHistory:
+          Type: Api
+          Properties:
+            Path: /moderate/text/history
+            Method: get
+            RestApiId: !If [HasSharedApiId, !Ref SharedApiId, !Ref AWS::NoValue]
+
+Outputs:
+  TextModerationFunctionName:
+    Description: Lambda function name.
+    Value: !Ref TextModerationFunction
+  TextModerationFunctionArn:
+    Description: Lambda function ARN.
+    Value: !GetAtt TextModerationFunction.Arn
+  TextModerationTableName:
+    Description: DynamoDB table name.
+    Value: !Ref TextModerationTableName
+  TextModerationTableArn:
+    Description: DynamoDB table ARN.
+    Value: !GetAtt TextModerationTable.Arn
