@@ -29,3 +29,6 @@ build/
 *.zip
 __pycache__
 *.pyc
+
+# Worktrees
+.worktrees/
