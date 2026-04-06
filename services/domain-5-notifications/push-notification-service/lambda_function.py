@@ -1,3 +1,4 @@
+import base64
 import json
 import os
 import uuid
@@ -43,7 +44,7 @@ def handler(event, context):
         return get_unread_count(user_id)
     elif http_method == "GET" and path == "/notifications":
         return list_notifications(event, user_id)
-    elif http_method == "PUT" and "/read" in path:
+    elif http_method == "PUT" and path.endswith("/read"):
         return mark_as_read(event, user_id)
     else:
         return response(404, {"error": {"code": "NOT_FOUND", "message": "Route not found"}})
@@ -68,8 +69,8 @@ def handle_event(event, context):
 
 def on_match_created(detail):
     """Send push notification to both matched users."""
-    match_id = detail.get("matchId", "")
     user_ids = detail.get("userIds", [])
+    match_id = detail.get("matchId", "")
     timestamp = detail.get("timestamp", datetime.now(timezone.utc).isoformat())
 
     for user_id in user_ids:
@@ -79,23 +80,19 @@ def on_match_created(detail):
             title="You have a new match!",
             body="You matched with someone new. Start a conversation!",
             timestamp=timestamp,
+            reference_id=match_id,
         )
-        send_push_to_user(user_id, notif["title"], notif["body"])
+        send_push_to_user(user_id, notif["title"], notif["body"], reference_id=match_id)
 
     return {"statusCode": 200}
 
 
 def on_message_sent(detail):
     """Send push notification to the message recipient."""
-    sender_id = detail.get("senderId", "")
     match_id = detail.get("matchId", "")
     content = detail.get("content", "")
     timestamp = detail.get("timestamp", datetime.now(timezone.utc).isoformat())
 
-    # Determine recipient: from event schema, message.sent has senderId + matchId
-    # The recipient lookup would require querying the match table, but since
-    # the push-notification-service shouldn't couple to match-service's DB,
-    # we rely on the event payload. If recipientId is present, use it directly.
     recipient_id = detail.get("recipientId", "")
     if not recipient_id:
         print(f"message.sent event missing recipientId, skipping push for match {match_id}")
@@ -108,8 +105,9 @@ def on_message_sent(detail):
         title="New message",
         body=preview,
         timestamp=timestamp,
+        reference_id=match_id,
     )
-    send_push_to_user(recipient_id, notif["title"], notif["body"])
+    send_push_to_user(recipient_id, notif["title"], notif["body"], reference_id=match_id)
     return {"statusCode": 200}
 
 
@@ -180,7 +178,7 @@ def list_notifications(event, user_id):
     }
     if cursor:
         query_params["ExclusiveStartKey"] = json.loads(
-            __import__("base64").b64decode(cursor).decode()
+            base64.b64decode(cursor).decode()
         )
 
     result = notifications_table.query(**query_params)
@@ -192,13 +190,13 @@ def list_notifications(event, user_id):
             "body": item["body"],
             "read": item["read"],
             "timestamp": item["timestamp"],
+            "referenceId": item.get("referenceId", ""),
         }
         for item in result.get("Items", [])
     ]
 
     next_cursor = None
     if "LastEvaluatedKey" in result:
-        import base64
         next_cursor = base64.b64encode(
             json.dumps(result["LastEvaluatedKey"]).encode()
         ).decode()
@@ -265,7 +263,7 @@ def get_unread_count(user_id):
 # Helpers
 # ---------------------------------------------------------------------------
 
-def create_notification(user_id, notif_type, title, body, timestamp=None):
+def create_notification(user_id, notif_type, title, body, timestamp=None, reference_id=""):
     """Write a notification record to DynamoDB."""
     now = timestamp or datetime.now(timezone.utc).isoformat()
     # epoch_ms prefix: chronological SK sort; uuid suffix: collision-safe under concurrency
@@ -281,6 +279,7 @@ def create_notification(user_id, notif_type, title, body, timestamp=None):
         "body": body,
         "read": False,
         "timestamp": now,
+        "referenceId": reference_id,
     })
 
     # ADD is atomic and initialises count=1 if the item does not yet exist
@@ -294,7 +293,7 @@ def create_notification(user_id, notif_type, title, body, timestamp=None):
     return {"notificationId": notif_id, "title": title, "body": body}
 
 
-def send_push_to_user(user_id, title, body):
+def send_push_to_user(user_id, title, body, reference_id=""):
     """Send push notification to all registered devices for a user."""
     result = tokens_table.query(
         KeyConditionExpression=Key("PK").eq(f"USER#{user_id}") & Key("SK").begins_with("DEVICE#"),
@@ -309,8 +308,14 @@ def send_push_to_user(user_id, title, body):
                 TargetArn=endpoint_arn,
                 Message=json.dumps({
                     "default": body,
-                    "GCM": json.dumps({"notification": {"title": title, "body": body}}),
-                    "APNS": json.dumps({"aps": {"alert": {"title": title, "body": body}}}),
+                    "GCM": json.dumps({
+                        "notification": {"title": title, "body": body},
+                        "data": {"referenceId": reference_id},
+                    }),
+                    "APNS": json.dumps({
+                        "aps": {"alert": {"title": title, "body": body}},
+                        "referenceId": reference_id,
+                    }),
                 }),
                 MessageStructure="json",
             )
