@@ -61,8 +61,8 @@ A microservice dating app built on AWS — with BaZi (八字) compatibility matc
 |---------|-------|-------------|-------------|
 | Auth Service | Quinn Gao | Cognito, Lambda | Sign up, login, JWT tokens |
 | Profile Service | Quinn Gao | Lambda, DynamoDB | CRUD for user profiles |
-| Photo Service | Zhiping | S3, Lambda, CloudFront | Upload, resize, serve photos |
-| Email Verification | Zhiping | SES, Lambda, Cognito | .edu email verification |
+| Photo Service | KS | S3, Lambda, CloudFront | Upload, resize, serve photos |
+| Email Verification | KS | SES, Lambda, Cognito | .edu email verification |
 
 ### Domain 2 — Discovery & Matching
 
@@ -88,7 +88,7 @@ A microservice dating app built on AWS — with BaZi (八字) compatibility matc
 | Service | Owner | AWS Services | Description |
 |---------|-------|-------------|-------------|
 | Text Moderation | Yue | Comprehend, Lambda | Flag toxic content |
-| Image Moderation | KS | Rekognition, Lambda | Block inappropriate photos |
+| Image Moderation | Yue | Rekognition, Lambda | Block inappropriate photos |
 | Report Service | Amber | Lambda, DynamoDB, SES | User reports → admin alerts |
 | Rate Limiter | Amber | API Gateway, DynamoDB | Anti-spam protection |
 
