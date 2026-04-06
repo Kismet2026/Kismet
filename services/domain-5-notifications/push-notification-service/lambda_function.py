@@ -220,28 +220,31 @@ def mark_as_read(event, user_id):
             "error": {"code": "VALIDATION_ERROR", "message": "Missing notificationId"}
         })
 
-    # Find the notification by scanning user's items for matching notificationId
-    result = notifications_table.query(
-        KeyConditionExpression=Key("PK").eq(f"USER#{user_id}") & Key("SK").begins_with("NOTIF#"),
-    )
-    target = None
-    for item in result.get("Items", []):
-        if item["notificationId"] == notification_id:
-            target = item
-            break
+    # notif_id is the SK suffix — direct O(1) lookup, no scan needed
+    item = notifications_table.get_item(
+        Key={"PK": f"USER#{user_id}", "SK": f"NOTIF#{notification_id}"}
+    ).get("Item")
 
-    if not target:
+    if not item:
         return response(404, {
             "error": {"code": "NOT_FOUND", "message": "Notification not found"}
         })
 
     now = datetime.now(timezone.utc).isoformat()
     notifications_table.update_item(
-        Key={"PK": target["PK"], "SK": target["SK"]},
+        Key={"PK": f"USER#{user_id}", "SK": f"NOTIF#{notification_id}"},
         UpdateExpression="SET #r = :val, updatedAt = :now",
         ExpressionAttributeNames={"#r": "read"},
         ExpressionAttributeValues={":val": True, ":now": now},
     )
+
+    if not item.get("read", False):
+        notifications_table.update_item(
+            Key={"PK": f"USER#{user_id}", "SK": "UNREAD_COUNT"},
+            UpdateExpression="ADD #c :dec",
+            ExpressionAttributeNames={"#c": "count"},
+            ExpressionAttributeValues={":dec": -1},
+        )
 
     return response(200, {
         "notificationId": notification_id,
@@ -251,14 +254,11 @@ def mark_as_read(event, user_id):
 
 
 def get_unread_count(user_id):
-    result = notifications_table.query(
-        KeyConditionExpression=Key("PK").eq(f"USER#{user_id}") & Key("SK").begins_with("NOTIF#"),
-        FilterExpression="#r = :val",
-        ExpressionAttributeNames={"#r": "read"},
-        ExpressionAttributeValues={":val": False},
-        Select="COUNT",
-    )
-    return response(200, {"unreadCount": result.get("Count", 0)})
+    # Single get_item on the counter item — O(1) instead of scanning all notifications
+    item = notifications_table.get_item(
+        Key={"PK": f"USER#{user_id}", "SK": "UNREAD_COUNT"}
+    ).get("Item")
+    return response(200, {"unreadCount": int(item["count"]) if item else 0})
 
 
 # ---------------------------------------------------------------------------
@@ -268,11 +268,13 @@ def get_unread_count(user_id):
 def create_notification(user_id, notif_type, title, body, timestamp=None):
     """Write a notification record to DynamoDB."""
     now = timestamp or datetime.now(timezone.utc).isoformat()
-    notif_id = f"notif-{uuid.uuid4().hex[:8]}"
+    # epoch_ms prefix: chronological SK sort; uuid suffix: collision-safe under concurrency
+    epoch_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    notif_id = f"{epoch_ms:013d}-{uuid.uuid4().hex[:8]}"
 
     notifications_table.put_item(Item={
         "PK": f"USER#{user_id}",
-        "SK": f"NOTIF#{now}#{notif_id}",
+        "SK": f"NOTIF#{notif_id}",
         "notificationId": notif_id,
         "type": notif_type,
         "title": title,
@@ -280,6 +282,14 @@ def create_notification(user_id, notif_type, title, body, timestamp=None):
         "read": False,
         "timestamp": now,
     })
+
+    # ADD is atomic and initialises count=1 if the item does not yet exist
+    notifications_table.update_item(
+        Key={"PK": f"USER#{user_id}", "SK": "UNREAD_COUNT"},
+        UpdateExpression="ADD #c :inc",
+        ExpressionAttributeNames={"#c": "count"},
+        ExpressionAttributeValues={":inc": 1},
+    )
 
     return {"notificationId": notif_id, "title": title, "body": body}
 
