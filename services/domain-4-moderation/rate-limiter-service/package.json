@@ -1,0 +1,10 @@
+{
+  "name": "rate-limiter-service",
+  "version": "1.0.0",
+  "description": "Rate Limiter Service for Kismet",
+  "main": "index.js",
+  "type": "module",
+  "dependencies": {
+    "redis": "^4.6.10"
+  }
+}
