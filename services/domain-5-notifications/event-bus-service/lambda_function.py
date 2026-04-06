@@ -164,10 +164,11 @@ def _get_history(event):
         for item in response.get("Items", [])
     ]
 
-    # Sort by timestamp descending
-    items.sort(key=lambda x: x["timestamp"], reverse=True)
+    # Sort by timestamp descending (needed for scan path; GSI path already sorted)
+    if not source_filter:
+        items.sort(key=lambda x: x["timestamp"], reverse=True)
 
-    return _response(200, {"items": items[:limit], "count": len(items[:limit])})
+    return _response(200, {"items": items, "count": len(items)})
 
 
 # ─── POST /events/replay ─────────────────────────────────────

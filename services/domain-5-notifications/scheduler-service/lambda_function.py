@@ -12,7 +12,7 @@ import uuid
 from datetime import datetime, timezone
 
 import boto3
-from boto3.dynamodb.conditions import Key
+from boto3.dynamodb.conditions import Key, Attr
 
 # ─── Clients ──────────────────────────────────────────────────
 dynamodb = boto3.resource("dynamodb")
@@ -142,8 +142,8 @@ def _create_job(event):
 
     # Check for duplicate job type + schedule
     existing = table.scan(
-        FilterExpression=Key("jobType").eq(job_type)
-        & Key("schedule").eq(schedule)
+        FilterExpression=Attr("jobType").eq(job_type)
+        & Attr("schedule").eq(schedule)
     )
     if existing.get("Items"):
         return _error(
