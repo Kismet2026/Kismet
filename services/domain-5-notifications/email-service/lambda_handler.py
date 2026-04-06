@@ -2,7 +2,6 @@ import json
 import os
 import uuid
 import boto3
-from boto3.dynamodb.conditions import Key
 from datetime import datetime, timezone
 
 dynamodb = boto3.resource("dynamodb")
@@ -108,7 +107,7 @@ def on_user_created(detail):
     send_ses_email(
         recipient=email,
         subject="Welcome to Kismet!",
-        body_text=f"Welcome to Kismet! We're excited to have you. Start by completing your profile to get discovered.",
+        body_text="Welcome to Kismet! We're excited to have you. Start by completing your profile to get discovered.",
         body_html=render_template("welcome", {"email": email}),
     )
 
@@ -121,11 +120,12 @@ def on_match_created(detail):
     user_ids = detail.get("userIds", [])
 
     for user_id in user_ids:
-        if not check_preference(user_id, "matchNotifications"):
-            continue
+        # Single read for both preference check and email lookup
         prefs = prefs_table.get_item(
             Key={"PK": f"USER#{user_id}", "SK": "PREFS"}
         ).get("Item", {})
+        if not prefs.get("matchNotifications", True):
+            continue
         email = prefs.get("email", "")
         if not email:
             print(f"No email on record for {user_id}, skipping match email")
@@ -188,22 +188,31 @@ def send_email(event):
             "error": {"code": "VALIDATION_ERROR", "message": "Missing recipientUserId"}
         })
 
-    # Check user preference for this template type
+    # Single read for both preference check and email lookup
+    prefs = prefs_table.get_item(
+        Key={"PK": f"USER#{recipient_user_id}", "SK": "PREFS"}
+    ).get("Item", {})
+
     pref_field = TEMPLATE_PREF_MAP.get(template_name)
-    if pref_field and not check_preference(recipient_user_id, pref_field):
+    if pref_field and not prefs.get(pref_field, True):
         return response(422, {
             "error": {"code": "EMAIL_OPTED_OUT", "message": f"User has opted out of {template_name} emails"}
+        })
+
+    recipient_email = prefs.get("email", "")
+    if not recipient_email:
+        return response(404, {
+            "error": {"code": "USER_NOT_FOUND", "message": "No email on record for recipient"}
         })
 
     now = datetime.now(timezone.utc).isoformat()
     email_id = f"email-{uuid.uuid4().hex[:8]}"
 
     send_ses_email(
-        recipient=None,  # resolved via user lookup in production
+        recipient=recipient_email,
         subject=get_subject_for_template(template_name),
         body_text=json.dumps(template_data),
         body_html=render_template(template_name, template_data),
-        user_id=recipient_user_id,
     )
 
     return response(200, {
@@ -286,29 +295,8 @@ def update_preferences(event, user_id):
 # Helpers
 # ---------------------------------------------------------------------------
 
-def check_preference(user_id, pref_field):
-    """Check if user has a specific email preference enabled. Defaults to True."""
-    result = prefs_table.get_item(
-        Key={"PK": f"USER#{user_id}", "SK": "PREFS"}
-    )
-    item = result.get("Item")
-    if not item:
-        return True  # default: opted in
-    return item.get(pref_field, True)
-
-
-def send_ses_email(recipient, subject, body_text, body_html=None, user_id=None):
-    """Send an email via SES. If recipient is None and user_id is provided,
-    the email address would be resolved from a user profile service in production."""
-    if not recipient and not user_id:
-        print("send_ses_email: no recipient or user_id provided, skipping")
-        return
-
-    # In production, resolve user_id → email via profile service or Cognito
-    if not recipient and user_id:
-        print(f"send_ses_email: would resolve email for user {user_id} in production")
-        return
-
+def send_ses_email(recipient, subject, body_text, body_html=None):
+    """Send an email via SES."""
     try:
         ses.send_email(
             Source=SENDER_EMAIL,
