@@ -89,12 +89,13 @@ def on_user_created(detail):
     email = detail.get("email", "")
     timestamp = detail.get("timestamp", datetime.now(timezone.utc).isoformat())
 
-    # Initialize default email preferences for the new user (skip if already exists)
+    # Initialize default preferences and persist email for later event-driven lookups
     try:
         prefs_table.put_item(
             Item={
                 "PK": f"USER#{user_id}",
                 "SK": "PREFS",
+                "email": email,
                 **DEFAULT_PREFERENCES,
                 "updatedAt": timestamp,
             },
@@ -122,15 +123,18 @@ def on_match_created(detail):
     for user_id in user_ids:
         if not check_preference(user_id, "matchNotifications"):
             continue
-        # In production, we'd look up the user's email from a user profile service.
-        # For now, we use the internal send_email path which would be invoked
-        # by EventBridge → this Lambda, then call SES.
+        prefs = prefs_table.get_item(
+            Key={"PK": f"USER#{user_id}", "SK": "PREFS"}
+        ).get("Item", {})
+        email = prefs.get("email", "")
+        if not email:
+            print(f"No email on record for {user_id}, skipping match email")
+            continue
         send_ses_email(
-            recipient=None,  # resolved via user lookup in production
+            recipient=email,
             subject="You have a new match on Kismet!",
             body_text=f"Great news! You have a new match (ID: {match_id}). Open Kismet to start chatting!",
             body_html=render_template("match_notification", {"matchId": match_id, "userId": user_id}),
-            user_id=user_id,
         )
 
     return {"statusCode": 200}
