@@ -118,7 +118,10 @@ def _list_jobs(event):
 # ─── POST /scheduler/jobs ─────────────────────────────────────
 def _create_job(event):
     """Create a new scheduled job: DynamoDB record + EventBridge Scheduler schedule."""
-    body = json.loads(event.get("body") or "{}")
+    try:
+        body = json.loads(event.get("body") or "{}")
+    except json.JSONDecodeError:
+        return _error(400, "VALIDATION_ERROR", "Request body must be valid JSON")
     job_type = body.get("jobType")
     schedule = body.get("schedule")
     params = body.get("params", {})
@@ -247,7 +250,7 @@ def job_executor_handler(event, context):
     job_config = JOB_EVENT_MAP.get(job_type)
     if not job_config:
         print(f"Unknown job type: {job_type}")
-        return {"statusCode": 400, "body": f"Unknown job type: {job_type}"}
+        return _error(400, "VALIDATION_ERROR", f"Unknown job type: {job_type}")
 
     now = _now_iso()
 

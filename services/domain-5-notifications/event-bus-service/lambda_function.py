@@ -122,7 +122,11 @@ def _get_history(event):
     params = event.get("queryStringParameters") or {}
     source_filter = params.get("source")
     detail_type_filter = params.get("detailType")
-    limit = min(int(params.get("limit", 20)), 100)
+    raw_limit = params.get("limit", 20)
+    try:
+        limit = min(int(raw_limit), 100)
+    except (TypeError, ValueError):
+        return _error(400, "VALIDATION_ERROR", "Query parameter 'limit' must be an integer")
 
     if source_filter:
         # Use GSI for efficient source-based queries
@@ -169,7 +173,10 @@ def _get_history(event):
 # ─── POST /events/replay ─────────────────────────────────────
 def _replay_event(event):
     """Re-publish a failed event from the event log to the EventBridge bus."""
-    body = json.loads(event.get("body") or "{}")
+    try:
+        body = json.loads(event.get("body") or "{}")
+    except json.JSONDecodeError:
+        return _error(400, "VALIDATION_ERROR", "Request body must be valid JSON")
     event_id = body.get("eventId")
 
     if not event_id:
