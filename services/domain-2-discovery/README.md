@@ -7,7 +7,7 @@ Five microservices handling user discovery, swiping, matching, recommendations, 
 ## Architecture Overview
 
 ```
-profile.completed ──→ Discovery Service (indexes candidates)
+profile.completed ──→ Discovery Service (index candidate + pre-warm BaZi cache)
                   ──→ Recommendation Service (notes new user)
 
 User swipes ──→ Swipe Service ──→ swipe.created event
@@ -19,6 +19,8 @@ User swipes ──→ Swipe Service ──→ swipe.created event
                         │
                         ▼
                  match.created event → Chat, Notification, Analytics
+
+External BaZi API ←── Discovery Service (cached by birthDate in DynamoDB)
 ```
 
 ## Services
@@ -68,16 +70,24 @@ Detects mutual likes via events and creates matches atomically.
 
 ### 3. Discovery Service
 
-Indexes user profiles and serves the discovery feed.
+Indexes user profiles, serves the discovery feed with BaZi compatibility scores.
 
 | Method | Path         | Auth | Description        |
 |--------|--------------|------|--------------------|
 | GET    | `/discovery` | Yes  | Get candidates     |
 
 - **Query params:** `limit` (max 50), `age_min`, `age_max`, `gender`, `cursor`
-- Consumes `profile.completed` events to index candidate profiles
+- Each candidate includes `baziScore` (from external BaZi API, cached per birthDate)
+- Filters out already-swiped users (reads `kismet-swipes` table)
+- Computes `age` from `birthDate` (not passed directly in event)
+- Consumes `profile.completed` events to index candidate profiles + pre-warm BaZi cache
 
-**Table:** `kismet-discovery` — PK: `PROFILE#{userId}`, SK: `META`
+**Table:** `kismet-discovery` (single-table design)
+
+| PK Pattern           | SK       | Purpose                         |
+|----------------------|----------|---------------------------------|
+| `PROFILE#{userId}`   | `META`   | Candidate profile               |
+| `BAZI#{birthDate}`   | `SCORES` | Cached BaZi scores (permanent)  |
 
 ---
 
@@ -102,17 +112,15 @@ Computes and caches personalized candidate recommendations.
 
 ### 5. BaZi Service (八字服务)
 
-Chinese astrology compatibility calculation. Stateless — no table, no events.
+Proxies to external BaZi API for compatibility scoring. Stateless — no table, no events.
 
-| Method | Path                     | Auth | Description             |
-|--------|--------------------------|------|-------------------------|
-| POST   | `/bazi/compatibility`    | Yes  | Compute compatibility   |
-| GET    | `/bazi/profile/{userId}` | Yes  | Get BaZi chart          |
+| Method | Path                  | Auth | Description                      |
+|--------|-----------------------|------|----------------------------------|
+| POST   | `/bazi/top-matches`   | Yes  | Get best matching birthdates     |
 
-- **POST body:** `{"userABirthDate": "1995-06-15", "userABirthTime": "14:30", "userBBirthDate": "1997-03-22", "userBBirthTime": "08:00"}`
-- Returns score (0–100), Five Elements breakdown, Chinese analysis
-- Scoring: generating pairs (+8), same element (+5), controlling pairs (-5), day pillar bonus (+10)
-- Analysis tiers: 天作之合 (85+) / 良缘佳配 (70+) / 中等缘分 (55+) / 需多磨合 (<55)
+- **POST body:** `{"birthDate": "1995-11-21", "limit": 50}`
+- Returns ranked list of best matching birthdates with scores (from external API)
+- `POST /bazi/compatibility` (1v1) planned — pending external API support
 
 ## Events Summary
 
@@ -124,19 +132,23 @@ Chinese astrology compatibility calculation. Stateless — no table, no events.
 
 ## Cross-Service Dependencies
 
-| Service         | Reads From              | Why                              |
-|-----------------|-------------------------|----------------------------------|
-| Match           | `kismet-swipes` table   | Check reverse like for mutual match |
-| Recommendation  | `kismet-discovery` table| Fetch candidate profiles for scoring |
+| Service         | Reads From              | Why                                    |
+|-----------------|-------------------------|----------------------------------------|
+| Match           | `kismet-swipes` table   | Check reverse like for mutual match    |
+| Discovery       | `kismet-swipes` table   | Filter out already-swiped candidates   |
+| Discovery       | External BaZi API       | Fetch compatibility scores (cached)    |
+| Recommendation  | `kismet-discovery` table| Fetch candidate profiles for scoring   |
 
 ## Environment Variables
 
-| Variable               | Used By          | Default                  |
-|------------------------|------------------|--------------------------|
-| `TABLE_NAME`           | All (except BaZi)| Service-specific         |
-| `EVENT_BUS_NAME`       | All (except BaZi)| `kismet-events`          |
-| `SWIPE_TABLE_NAME`     | Match            | `kismet-swipes`          |
-| `DISCOVERY_TABLE_NAME` | Recommendation   | `kismet-discovery`       |
+| Variable               | Used By             | Default                  |
+|------------------------|---------------------|--------------------------|
+| `TABLE_NAME`           | All (except BaZi)   | Service-specific         |
+| `EVENT_BUS_NAME`       | All (except BaZi)   | `kismet-events`          |
+| `SWIPE_TABLE_NAME`     | Match, Discovery    | `kismet-swipes`          |
+| `DISCOVERY_TABLE_NAME` | Recommendation      | `kismet-discovery`       |
+| `BAZI_API_URL`         | Discovery, BaZi     | `https://match-date-nu.vercel.app/api/match` |
+| `BAZI_API_KEY`         | Discovery, BaZi     | `ABC`                    |
 
 ## Running Tests
 

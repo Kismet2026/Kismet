@@ -173,8 +173,9 @@ class TestGetMatchDetail:
 
 
 class TestUnmatch:
+    @patch('lambda_function.dynamodb_client')
     @patch('lambda_function.match_table')
-    def test_unmatch_success(self, mock_table):
+    def test_unmatch_success(self, mock_table, mock_ddb_client):
         mock_table.get_item.return_value = {
             'Item': {
                 'matchId': 'match-1', 'userAId': 'user-123', 'userBId': 'user-456',
@@ -187,4 +188,15 @@ class TestUnmatch:
         assert resp['statusCode'] == 200
         body = json.loads(resp['body'])
         assert body['status'] == 'unmatched'
-        mock_table.update_item.assert_called_once()
+
+        # Verify transaction updates META + both user-index entries
+        mock_ddb_client.transact_write_items.assert_called_once()
+        items = mock_ddb_client.transact_write_items.call_args[1]['TransactItems']
+        assert len(items) == 3
+        # All three should be Update operations
+        assert all('Update' in item for item in items)
+        # Check keys: MATCH#META, USER#user-123, USER#user-456
+        pks = [item['Update']['Key']['PK']['S'] for item in items]
+        assert 'MATCH#match-1' in pks
+        assert 'USER#user-123' in pks
+        assert 'USER#user-456' in pks

@@ -25,13 +25,16 @@ def handler(event, context):
     method = _get_method(event)
     path = _get_path(event)
 
+    # Extract path parameter (API Gateway sets pathParameters; fallback to path parsing for local tests)
+    match_id = (event.get('pathParameters') or {}).get('matchId')
+    if not match_id and path.startswith('/matches/'):
+        match_id = path.split('/matches/')[1].split('/')[0]
+
     if method == 'GET' and path == '/matches':
         return get_matches(event)
-    elif method == 'GET' and path.startswith('/matches/'):
-        match_id = path.split('/matches/')[1]
+    elif method == 'GET' and match_id:
         return get_match_detail(event, match_id)
-    elif method == 'DELETE' and path.startswith('/matches/'):
-        match_id = path.split('/matches/')[1]
+    elif method == 'DELETE' and match_id:
         return unmatch(event, match_id)
     else:
         return _response(404, {'code': 'NOT_FOUND', 'message': f'No route: {method} {path}'})
@@ -221,12 +224,42 @@ def unmatch(event, match_id):
         return _response(403, {'code': 'FORBIDDEN', 'message': 'Not your match'})
 
     timestamp = datetime.utcnow().isoformat() + 'Z'
+    matched_at = item['matchedAt']
+    user_a = item['userAId']
+    user_b = item['userBId']
+    user_index_sk = f'MATCH#{matched_at}#{match_id}'
 
-    match_table.update_item(
-        Key={'PK': f'MATCH#{match_id}', 'SK': 'META'},
-        UpdateExpression='SET #s = :s, unmatchedAt = :t',
-        ExpressionAttributeNames={'#s': 'status'},
-        ExpressionAttributeValues={':s': 'unmatched', ':t': timestamp},
+    # Update META + both user-index entries atomically
+    dynamodb_client.transact_write_items(
+        TransactItems=[
+            {
+                'Update': {
+                    'TableName': MATCH_TABLE,
+                    'Key': {'PK': {'S': f'MATCH#{match_id}'}, 'SK': {'S': 'META'}},
+                    'UpdateExpression': 'SET #s = :s, unmatchedAt = :t',
+                    'ExpressionAttributeNames': {'#s': 'status'},
+                    'ExpressionAttributeValues': {':s': {'S': 'unmatched'}, ':t': {'S': timestamp}},
+                }
+            },
+            {
+                'Update': {
+                    'TableName': MATCH_TABLE,
+                    'Key': {'PK': {'S': f'USER#{user_a}'}, 'SK': {'S': user_index_sk}},
+                    'UpdateExpression': 'SET #s = :s',
+                    'ExpressionAttributeNames': {'#s': 'status'},
+                    'ExpressionAttributeValues': {':s': {'S': 'unmatched'}},
+                }
+            },
+            {
+                'Update': {
+                    'TableName': MATCH_TABLE,
+                    'Key': {'PK': {'S': f'USER#{user_b}'}, 'SK': {'S': user_index_sk}},
+                    'UpdateExpression': 'SET #s = :s',
+                    'ExpressionAttributeNames': {'#s': 'status'},
+                    'ExpressionAttributeValues': {':s': {'S': 'unmatched'}},
+                }
+            },
+        ]
     )
 
     return _response(200, {

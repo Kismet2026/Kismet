@@ -92,6 +92,20 @@ class Domain2Stack(cdk.Stack):
                 {"method": "GET", "path": "/discovery", "auth": True},
             ],
             consume_events=["profile.completed"],
+            environment={
+                "SWIPE_TABLE_NAME": "kismet-swipes",
+                "BAZI_API_URL": "https://match-date-nu.vercel.app/api/match",
+                "BAZI_API_KEY": "ABC",
+            },
+            extra_policies=[
+                # Discovery needs to read swipe table to filter already-swiped candidates
+                iam.PolicyStatement(
+                    actions=["dynamodb:Query"],
+                    resources=[
+                        f"arn:aws:dynamodb:{self.region}:{self.account}:table/kismet-swipes",
+                    ],
+                ),
+            ],
             api=shared.api,
             authorizer=shared.authorizer,
             event_bus=shared.event_bus,
@@ -133,15 +147,14 @@ class Domain2Stack(cdk.Stack):
         )
 
         # ── BaZi Service ─────────────────────────────────────────────────────
-        # Stateless service — no DynamoDB table, no events
+        # Stateless service — proxies to external BaZi API, no DynamoDB table
         KismetService(
             self,
             "BaZiService",
             service_name="bazi",
             code_path="../services/domain-2-discovery/bazi-service",
             routes=[
-                {"method": "POST", "path": "/bazi/compatibility", "auth": True},
-                {"method": "GET", "path": "/bazi/profile/{userId}", "auth": True},
+                {"method": "POST", "path": "/bazi/top-matches", "auth": True},
             ],
             api=shared.api,
             authorizer=shared.authorizer,

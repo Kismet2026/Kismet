@@ -2,13 +2,19 @@ import json
 import boto3
 import os
 from datetime import datetime
+from urllib import request as urllib_request
+from urllib.error import URLError
 
 dynamodb = boto3.resource('dynamodb')
 
 TABLE_NAME = os.environ.get('TABLE_NAME', 'kismet-discovery')
+SWIPE_TABLE_NAME = os.environ.get('SWIPE_TABLE_NAME', 'kismet-swipes')
 EVENT_BUS_NAME = os.environ.get('EVENT_BUS_NAME', 'kismet-events')
+BAZI_API_URL = os.environ.get('BAZI_API_URL', 'https://match-date-nu.vercel.app/api/match')
+BAZI_API_KEY = os.environ.get('BAZI_API_KEY', 'ABC')
 
 table = dynamodb.Table(TABLE_NAME)
+swipe_table = dynamodb.Table(SWIPE_TABLE_NAME)
 
 
 def handler(event, context):
@@ -34,18 +40,33 @@ def handle_profile_completed(event):
 
     timestamp = datetime.utcnow().isoformat() + 'Z'
 
+    # Compute age from birthDate (event doesn't carry age directly)
+    age = _calculate_age(detail.get('birthDate', ''))
+
+    # location_coordinates comes as [lat, lng] from profile.completed event
+    location = detail.get('location_coordinates', [])
+
+    birth_date = detail.get('birthDate', '')
+
     table.put_item(Item={
         'PK': f'PROFILE#{user_id}',
         'SK': 'META',
         'userId': user_id,
         'displayName': detail.get('name', ''),
         'gender': detail.get('gender', ''),
-        'location': detail.get('location', ''),
-        'age': detail.get('age', 0),
+        'preferredGender': detail.get('preferred_gender', ''),
+        'location': location,
+        'city': detail.get('city', ''),
+        'age': age,
+        'birthDate': birth_date,
         'avatarUrl': detail.get('avatarUrl', ''),
         'bio': detail.get('bio', ''),
         'cachedAt': timestamp,
     })
+
+    # Pre-warm BaZi cache for this birthDate (if not already cached)
+    if birth_date:
+        _ensure_bazi_cache(birth_date)
 
     return {'statusCode': 200, 'body': 'Profile indexed'}
 
@@ -64,6 +85,12 @@ def get_candidates(event):
 
     from boto3.dynamodb.conditions import Key, Attr
 
+    # Get user's already-swiped targets to exclude them
+    swiped_ids = _get_swiped_user_ids(user_id)
+
+    # Get current user's birthDate for BaZi scoring
+    bazi_scores = _get_bazi_scores_for_user(user_id)
+
     # Scan all profiles (in production, use GSI or pre-computed candidate lists)
     scan_params = {
         'FilterExpression': Key('SK').eq('META') & Attr('userId').ne(user_id),
@@ -80,23 +107,35 @@ def get_candidates(event):
 
     candidates = []
     for item in result.get('Items', []):
+        candidate_id = item['userId']
+
+        # Skip already-swiped users
+        if candidate_id in swiped_ids:
+            continue
+
         age = item.get('age', 0)
-        if isinstance(age, str):
-            age = int(age) if age.isdigit() else 0
+        if isinstance(age, (str, float)):
+            age = int(age) if str(age).replace('.', '').isdigit() else 0
 
         if age < age_min or age > age_max:
             continue
         if gender_filter and item.get('gender') != gender_filter:
             continue
 
+        # Look up BaZi score by candidate's birthDate
+        candidate_birth = item.get('birthDate', '')
+        bazi_score = bazi_scores.get(candidate_birth)
+
         candidates.append({
-            'userId': item['userId'],
+            'userId': candidate_id,
             'displayName': item.get('displayName', ''),
             'age': age,
             'gender': item.get('gender', ''),
             'location': item.get('location', ''),
+            'city': item.get('city', ''),
             'avatarUrl': item.get('avatarUrl', ''),
             'bio': item.get('bio', ''),
+            'baziScore': bazi_score,
         })
 
         if len(candidates) >= limit:
@@ -114,6 +153,104 @@ def get_candidates(event):
 
 
 # --- Helpers ---
+
+def _calculate_age(birth_date_str):
+    """Calculate age from YYYY-MM-DD birth date string."""
+    if not birth_date_str:
+        return 0
+    try:
+        birth = datetime.strptime(birth_date_str, '%Y-%m-%d')
+        today = datetime.utcnow()
+        age = today.year - birth.year
+        if (today.month, today.day) < (birth.month, birth.day):
+            age -= 1
+        return age
+    except ValueError:
+        return 0
+
+
+def _get_bazi_scores_for_user(user_id):
+    """Get BaZi scores for a user. Reads from cache, falls back to API."""
+    # Look up user's own birthDate
+    result = table.get_item(Key={'PK': f'PROFILE#{user_id}', 'SK': 'META'})
+    user_profile = result.get('Item')
+    if not user_profile or not user_profile.get('birthDate'):
+        return {}
+
+    birth_date = user_profile['birthDate']
+    return _ensure_bazi_cache(birth_date)
+
+
+def _ensure_bazi_cache(birth_date):
+    """Read BaZi cache for a birthDate. If cache miss, call API and store. Returns {date: score} dict."""
+    cache_key = {'PK': f'BAZI#{birth_date}', 'SK': 'SCORES'}
+
+    # Try cache first
+    result = table.get_item(Key=cache_key)
+    cached = result.get('Item')
+    if cached and 'scores' in cached:
+        # DynamoDB stores numbers as Decimal — convert to int for JSON
+        return {k: int(v) for k, v in cached['scores'].items()}
+
+    # Cache miss — call external API
+    try:
+        scores = _call_bazi_api(birth_date)
+    except (URLError, ValueError):
+        return {}
+
+    # Write to cache (birthDate never changes, so no TTL needed)
+    if scores:
+        table.put_item(Item={
+            **cache_key,
+            'birthDate': birth_date,
+            'scores': scores,
+            'cachedAt': datetime.utcnow().isoformat() + 'Z',
+        })
+
+    return scores
+
+
+def _call_bazi_api(birth_date):
+    """Call external BaZi API and return {birthdate: score} lookup dict."""
+    payload = json.dumps({'birth_date': birth_date, 'limit': 200}).encode()
+    req = urllib_request.Request(
+        BAZI_API_URL,
+        data=payload,
+        headers={
+            'Content-Type': 'application/json',
+            'X-API-KEY': BAZI_API_KEY,
+        },
+        method='POST',
+    )
+    with urllib_request.urlopen(req, timeout=10) as resp:
+        data = json.loads(resp.read().decode())
+
+    return {m['birthdate']: m['score'] for m in data.get('matches', [])}
+
+
+def _get_swiped_user_ids(user_id):
+    """Get set of user IDs that this user has already swiped on."""
+    from boto3.dynamodb.conditions import Key
+    swiped = set()
+    result = swipe_table.query(
+        KeyConditionExpression=Key('userId').eq(user_id),
+        ProjectionExpression='targetUserId',
+    )
+    for item in result.get('Items', []):
+        swiped.add(item['targetUserId'])
+
+    # Handle pagination for users with many swipes
+    while 'LastEvaluatedKey' in result:
+        result = swipe_table.query(
+            KeyConditionExpression=Key('userId').eq(user_id),
+            ProjectionExpression='targetUserId',
+            ExclusiveStartKey=result['LastEvaluatedKey'],
+        )
+        for item in result.get('Items', []):
+            swiped.add(item['targetUserId'])
+
+    return swiped
+
 
 def _get_method(event):
     return (
