@@ -102,9 +102,17 @@ def _parse_body(event):
         return None
 
 
+CORS_HEADERS = {
+    'Content-Type': 'application/json',
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'Content-Type,Authorization',
+    'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS',
+}
+
+
 def _response(status_code, body):
     return {
         'statusCode': status_code,
-        'headers': {'Content-Type': 'application/json'},
+        'headers': CORS_HEADERS,
         'body': json.dumps(body, ensure_ascii=False),
     }

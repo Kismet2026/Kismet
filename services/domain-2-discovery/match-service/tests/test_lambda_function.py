@@ -125,6 +125,22 @@ class TestGetMatches:
         resp = handler(_api_event('GET', '/matches'), None)
 
         assert resp['statusCode'] == 200
+
+    @patch('lambda_function.match_table')
+    def test_filters_out_unmatched(self, mock_table):
+        mock_table.query.return_value = {
+            'Items': [
+                {'matchId': 'match-1', 'matchedAt': '2026-04-01T12:00:00Z', 'status': 'active'},
+                {'matchId': 'match-2', 'matchedAt': '2026-04-02T12:00:00Z', 'status': 'unmatched'},
+            ]
+        }
+
+        resp = handler(_api_event('GET', '/matches'), None)
+
+        assert resp['statusCode'] == 200
+        body = json.loads(resp['body'])
+        assert body['count'] == 1
+        assert body['items'][0]['matchId'] == 'match-1'
         body = json.loads(resp['body'])
         assert body['count'] == 1
         assert body['items'][0]['matchId'] == 'match-1'
