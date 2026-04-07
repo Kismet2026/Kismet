@@ -284,7 +284,7 @@ class Domain2Stack(Stack):
     def __init__(self, scope, id, *, shared: SharedStack, **kwargs):
         super().__init__(scope, id, **kwargs)
 
-        # --- Hao 的 services ---
+        # --- Qinyuan 的 services ---
 
         KismetService(self, 'DiscoveryService',
             service_name='discovery',
@@ -507,7 +507,7 @@ usage_plan = api.add_usage_plan('RateLimitPlan',
 )
 ```
 
-加上 DynamoDB TTL 的 per-user 限流逻辑在 Lambda middleware 中实现。
+Rate Limiter 的 per-user 限流通过 ElastiCache (Redis) 实现，见 Rate Limiter Service 配置。
 
 ### 7.9 Push Notification Service — 需要 SNS 权限
 
@@ -546,7 +546,7 @@ KismetService(self, 'EmailService',
 ### 他们看到的：
 
 ```python
-# stacks/domain2_stack.py — Hao 需要做的事：
+# stacks/domain2_stack.py — Qinyuan 需要做的事：
 
 # 1. 确认自己 service 的配置（路由、表结构、事件）
 KismetService(self, 'SwipeService',
@@ -592,10 +592,10 @@ cdk bootstrap                    ← PM 执行一次（初始化 CDK 环境）
 cdk deploy KismetShared          ← PM 部署共享资源
     │                               （Cognito, API GW, EventBridge, S3）
     │
-    ├──→ cdk deploy KismetDomain1   ← Quinn Gao, Zhiping
-    ├──→ cdk deploy KismetDomain2   ← Hao, Qinyuan
+    ├──→ cdk deploy KismetDomain1   ← Quinn Gao, KS
+    ├──→ cdk deploy KismetDomain2   ← Qinyuan
     ├──→ cdk deploy KismetDomain3   ← Parker, QX, Jiaxin
-    ├──→ cdk deploy KismetDomain4   ← Yue, KS, Amber
+    ├──→ cdk deploy KismetDomain4   ← Yue, Amber
     ├──→ cdk deploy KismetDomain5   ← Nili, Xiaoyuan
     └──→ cdk deploy KismetDomain6   ← Jessica, Lingyun
               │
