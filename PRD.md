@@ -95,7 +95,7 @@ The app is built entirely on AWS using a **serverless, event-driven architecture
 **Key architectural decisions:**
 - **Serverless-first:** All compute runs on AWS Lambda — no servers to manage
 - **Event-driven:** Domains communicate asynchronously via EventBridge, reducing coupling
-- **Real-time:** WebSocket API Gateway for chat; ElastiCache for presence
+- **Real-time:** WebSocket API Gateway for chat; DynamoDB TTL for presence; ElastiCache (Redis) for rate limiting
 - **AI/ML native:** Rekognition (image moderation), Comprehend (text moderation), Bedrock (icebreakers)
 
 ---
@@ -108,16 +108,16 @@ The app is built entirely on AWS using a **serverless, event-driven architecture
 |---------|-------|-------------|-------------|
 | Auth Service | Quinn Gao | Cognito, Lambda | Sign up, login, JWT tokens |
 | Profile Service | Quinn Gao | Lambda, DynamoDB | CRUD for user profiles |
-| Photo Service | Zhiping | S3, Lambda, CloudFront | Upload, resize, serve photos |
-| Email Verification | Zhiping | SES, Lambda, Cognito | .edu email verification |
+| Photo Service | KS | S3, Lambda, CloudFront | Upload, resize, serve photos |
+| Email Verification | KS | SES, Lambda, Cognito | .edu email verification |
 
 ### Domain 2 — Discovery & Matching
 
 | Service | Owner | AWS Services | Description |
 |---------|-------|-------------|-------------|
-| Discovery Service | Hao | Lambda, DynamoDB | Filter and browse candidates |
-| Swipe Service | Hao | Lambda, DynamoDB | Record like/pass actions |
-| Match Service | Hao | Lambda, DynamoDB Streams, SNS | Detect mutual likes |
+| Discovery Service | Qinyuan | Lambda, DynamoDB | Filter and browse candidates |
+| Swipe Service | Qinyuan | Lambda, DynamoDB | Record like/pass actions |
+| Match Service | Qinyuan | Lambda, DynamoDB Streams, SNS | Detect mutual likes |
 | Recommendation Service | Qinyuan | Lambda, DynamoDB | Score and rank candidates |
 | BaZi Service | Qinyuan | Lambda | BaZi compatibility via external API |
 
@@ -127,7 +127,7 @@ The app is built entirely on AWS using a **serverless, event-driven architecture
 |---------|-------|-------------|-------------|
 | Chat Gateway | Parker | API Gateway WebSocket, Lambda | Real-time message routing |
 | Message Service | Parker | Lambda, DynamoDB | Persist and retrieve chats |
-| Presence Service | QX | ElastiCache, Lambda | Online/offline/typing status |
+| Presence Service | QX | DynamoDB TTL, Lambda | Online/offline/typing status |
 | Icebreaker Service | Jiaxin | Bedrock, Lambda | AI conversation starters |
 
 ### Domain 4 — Safety & Moderation
@@ -135,9 +135,9 @@ The app is built entirely on AWS using a **serverless, event-driven architecture
 | Service | Owner | AWS Services | Description |
 |---------|-------|-------------|-------------|
 | Text Moderation | Yue | Comprehend, Lambda | Flag toxic content |
-| Image Moderation | KS | Rekognition, Lambda | Block inappropriate photos |
+| Image Moderation | Yue | Rekognition, Lambda | Block inappropriate photos |
 | Report Service | Amber | Lambda, DynamoDB, SES | User reports with admin alerts |
-| Rate Limiter | Amber | API Gateway, ElastiCache | Anti-spam protection |
+| Rate Limiter | Amber | API Gateway, ElastiCache (Redis) | Anti-spam protection |
 
 ### Domain 5 — Notifications & Engagement
 
@@ -220,7 +220,7 @@ The app is built entirely on AWS using a **serverless, event-driven architecture
 | Database | DynamoDB, DynamoDB Streams |
 | Storage | S3 |
 | CDN | CloudFront |
-| Caching | ElastiCache (Redis) |
+| Caching / Rate Limiting | ElastiCache (Redis) |
 | AI/ML | Rekognition, Comprehend, Bedrock |
 | Messaging | SNS, SES |
 | Event-Driven | EventBridge, EventBridge Scheduler |
@@ -248,18 +248,18 @@ The app is built entirely on AWS using a **serverless, event-driven architecture
 
 ## 10. Team & Ownership
 
-**14 team members** across 6 domains + integration + PM/frontend.
+**12 team members** across 6 domains + integration + PM/frontend.
 
 | Role | Members |
 |------|---------|
 | **PM / Architect / Frontend** | Qinyuan |
-| **Domain 1 — Identity & Profiles** | Quinn Gao, Zhiping |
-| **Domain 2 — Discovery & Matching** | Qinyuan, Hao |
+| **Domain 1 — Identity & Profiles** | Quinn Gao, KS |
+| **Domain 2 — Discovery & Matching** | Qinyuan |
 | **Domain 3 — Messaging** | Parker, QX, Jiaxin |
 | **Domain 4 — Safety & Moderation** | Yue, KS, Amber |
 | **Domain 5 — Notifications** | Nili, Xiaoyuan |
 | **Domain 6 — Analytics & Admin** | Jessica, Lingyun |
-| **Integration Team** | Zhiping, QX, KS |
+| **Integration Team** | QX, KS |
 
 ---
 

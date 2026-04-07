@@ -1,6 +1,6 @@
 # Match Service — API Contract
 
-**Owner:** Hao
+**Owner:** Qinyuan
 **Domain:** Discovery & Matching
 **Base Path:** `/matches`
 **AWS Services:** Lambda, DynamoDB Streams, SNS

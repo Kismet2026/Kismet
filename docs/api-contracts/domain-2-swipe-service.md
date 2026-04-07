@@ -1,6 +1,6 @@
 # Swipe Service — API Contract
 
-**Owner:** Hao
+**Owner:** Qinyuan
 **Domain:** Discovery & Matching
 **Base Path:** `/swipe`
 **AWS Services:** Lambda, DynamoDB

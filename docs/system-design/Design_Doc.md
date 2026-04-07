@@ -83,7 +83,7 @@ Built entirely on AWS using a serverless, event-driven architecture: **25 micros
 | Text Moderation | Comprehend, Lambda | Detect toxic messages |
 | Image Moderation | Rekognition, Lambda | Block inappropriate photos |
 | Report Service | Lambda, DynamoDB, SES | User reports with admin email alerts |
-| Rate Limiter | API Gateway, DynamoDB TTL | Anti-spam throttling |
+| Rate Limiter | API Gateway, ElastiCache (Redis) | Anti-spam throttling |
 
 ### Domain 5 — Notifications & Engagement
 
@@ -198,9 +198,9 @@ Key tables:
 | `kismet-activity-log` | Activity Logger | `USER#{userId}` | `EVENT#{timestamp}` |
 | `kismet-presence` | Presence | `USER#{userId}` | `STATUS` |
 
-**DynamoDB TTL** is used in two places as a replacement for Redis/ElastiCache:
-- Presence: status expires after 60s (user marked offline if no heartbeat)
-- Rate Limiter: sliding window keys expire automatically
+**DynamoDB TTL** is used for Presence Service: status expires after 60s (user marked offline if no heartbeat).
+
+**ElastiCache (Redis)** is used for Rate Limiter: per-user sliding window counters with automatic expiration via Redis TTL.
 
 ---
 
@@ -249,7 +249,7 @@ Deployment order: SharedStack first, then all domain stacks (can deploy in paral
 
 | Decision | Choice | Reason |
 |----------|--------|--------|
-| Caching | DynamoDB TTL (no Redis) | ElastiCache requires VPC + NAT Gateway; cost and complexity not worth it |
+| Rate Limiting | ElastiCache (Redis) + API Gateway | Redis for per-user limits; Presence still uses DynamoDB TTL |
 | Chat transport | HTTP polling first, WebSocket if time permits | De-risks Week 2; same Message Service backend either way |
 | Analytics ingestion | Kinesis Data Stream → Firehose → S3 → Athena | Course requirement; fallback: direct S3 write |
 | AI icebreakers | Bedrock (fallback: hardcoded templates) | Bedrock access may be delayed |
