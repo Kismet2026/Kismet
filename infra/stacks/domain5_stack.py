@@ -78,7 +78,7 @@ class Domain5Stack(cdk.Stack):
             "EmailService",
             service_name="email",
             code_path="../services/domain-5-notifications/email-service",
-            handler="lambda_handler.handler",  # NOTE: Nili used lambda_handler.py, not lambda_function.py
+            handler="lambda_function.handler",
             tables=[
                 {
                     "table_name": "kismet-email-preferences",
