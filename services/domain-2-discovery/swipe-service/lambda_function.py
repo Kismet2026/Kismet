@@ -43,11 +43,6 @@ def create_swipe(event):
     if target_user_id == user_id:
         return _response(400, {'code': 'VALIDATION_ERROR', 'message': 'Cannot swipe on yourself'})
 
-    # Check duplicate
-    existing = table.get_item(Key={'userId': user_id, 'targetUserId': target_user_id}).get('Item')
-    if existing:
-        return _response(409, {'code': 'CONFLICT', 'message': 'Already swiped on this user'})
-
     swipe_id = f'swipe-{uuid.uuid4().hex[:8]}'
     timestamp = datetime.utcnow().isoformat() + 'Z'
 
@@ -58,7 +53,15 @@ def create_swipe(event):
         'action': action,
         'timestamp': timestamp,
     }
-    table.put_item(Item=item)
+
+    # Atomic put — fails if swipe already exists
+    try:
+        table.put_item(
+            Item=item,
+            ConditionExpression='attribute_not_exists(userId) AND attribute_not_exists(targetUserId)',
+        )
+    except dynamodb.meta.client.exceptions.ConditionalCheckFailedException:
+        return _response(409, {'code': 'CONFLICT', 'message': 'Already swiped on this user'})
 
     # Publish event only for likes
     if action == 'like':

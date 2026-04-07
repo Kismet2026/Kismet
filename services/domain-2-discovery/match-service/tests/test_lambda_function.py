@@ -39,42 +39,52 @@ def _swipe_event(swiper_id, target_id):
 
 class TestHandleSwipeEvent:
     @patch('lambda_function.events_client')
-    @patch('lambda_function.match_table')
+    @patch('lambda_function.dynamodb_client')
     @patch('lambda_function.swipe_table')
-    def test_mutual_like_creates_match(self, mock_swipe, mock_match, mock_events):
+    def test_mutual_like_creates_match(self, mock_swipe, mock_ddb_client, mock_events):
         # Target already liked swiper
         mock_swipe.get_item.return_value = {
             'Item': {'userId': 'user-456', 'targetUserId': 'user-123', 'action': 'like'}
         }
-        # No existing match
-        mock_match.scan.return_value = {'Items': []}
 
         resp = handler(_swipe_event('user-123', 'user-456'), None)
 
         assert resp['statusCode'] == 200
-        assert mock_match.put_item.call_count == 3  # META + 2 user index entries
-        mock_events.put_events.assert_called_once()
+        body = json.loads(resp['body'])
+        assert 'matchId' in body
 
-        # Verify event payload
+        # Verify transact_write_items called with 4 items (pair, META, 2 user-index)
+        mock_ddb_client.transact_write_items.assert_called_once()
+        call_args = mock_ddb_client.transact_write_items.call_args
+        items = call_args[1]['TransactItems']
+        assert len(items) == 4
+
+        # First item should be the pair record with condition
+        pair_item = items[0]['Put']
+        assert pair_item['Item']['PK']['S'].startswith('PAIR#')
+        assert 'ConditionExpression' in pair_item
+
+        # Verify event published
+        mock_events.put_events.assert_called_once()
         event_entry = mock_events.put_events.call_args[1]['Entries'][0]
         assert event_entry['DetailType'] == 'match.created'
         detail = json.loads(event_entry['Detail'])
         assert 'user-123' in detail['userIds']
         assert 'user-456' in detail['userIds']
 
-    @patch('lambda_function.match_table')
+    @patch('lambda_function.dynamodb_client')
     @patch('lambda_function.swipe_table')
-    def test_no_reverse_like_no_match(self, mock_swipe, mock_match):
+    def test_no_reverse_like_no_match(self, mock_swipe, mock_ddb_client):
         mock_swipe.get_item.return_value = {}
 
         resp = handler(_swipe_event('user-123', 'user-456'), None)
 
         assert resp['statusCode'] == 200
-        mock_match.put_item.assert_not_called()
+        mock_ddb_client.transact_write_items.assert_not_called()
 
-    @patch('lambda_function.match_table')
+    @patch('lambda_function.dynamodb_client')
     @patch('lambda_function.swipe_table')
-    def test_reverse_pass_no_match(self, mock_swipe, mock_match):
+    def test_reverse_pass_no_match(self, mock_swipe, mock_ddb_client):
         mock_swipe.get_item.return_value = {
             'Item': {'userId': 'user-456', 'targetUserId': 'user-123', 'action': 'pass'}
         }
@@ -82,22 +92,25 @@ class TestHandleSwipeEvent:
         resp = handler(_swipe_event('user-123', 'user-456'), None)
 
         assert resp['statusCode'] == 200
-        mock_match.put_item.assert_not_called()
+        mock_ddb_client.transact_write_items.assert_not_called()
 
-    @patch('lambda_function.match_table')
+    @patch('lambda_function.events_client')
+    @patch('lambda_function.dynamodb_client')
     @patch('lambda_function.swipe_table')
-    def test_existing_match_not_duplicated(self, mock_swipe, mock_match):
+    def test_existing_match_not_duplicated(self, mock_swipe, mock_ddb_client, mock_events):
         mock_swipe.get_item.return_value = {
             'Item': {'userId': 'user-456', 'targetUserId': 'user-123', 'action': 'like'}
         }
-        mock_match.scan.return_value = {
-            'Items': [{'matchId': 'match-existing'}]
-        }
+        # Simulate TransactionCanceledException (pair key already exists)
+        exc_class = type('TransactionCanceledException', (Exception,), {})
+        mock_ddb_client.exceptions.TransactionCanceledException = exc_class
+        mock_ddb_client.transact_write_items.side_effect = exc_class()
 
         resp = handler(_swipe_event('user-123', 'user-456'), None)
 
         assert resp['statusCode'] == 200
-        mock_match.put_item.assert_not_called()
+        assert 'already exists' in resp['body'].lower()
+        mock_events.put_events.assert_not_called()
 
 
 class TestGetMatches:

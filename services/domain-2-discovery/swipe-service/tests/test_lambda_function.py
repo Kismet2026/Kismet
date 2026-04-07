@@ -29,8 +29,6 @@ class TestCreateSwipe:
     @patch('lambda_function.events_client')
     @patch('lambda_function.table')
     def test_like_creates_swipe_and_publishes_event(self, mock_table, mock_events):
-        mock_table.get_item.return_value = {}
-
         resp = handler(
             _api_event('POST', '/swipe', {'targetUserId': 'user-456', 'action': 'like'}),
             None,
@@ -48,8 +46,6 @@ class TestCreateSwipe:
     @patch('lambda_function.events_client')
     @patch('lambda_function.table')
     def test_pass_creates_swipe_no_event(self, mock_table, mock_events):
-        mock_table.get_item.return_value = {}
-
         resp = handler(
             _api_event('POST', '/swipe', {'targetUserId': 'user-456', 'action': 'pass'}),
             None,
@@ -61,9 +57,13 @@ class TestCreateSwipe:
         mock_table.put_item.assert_called_once()
         mock_events.put_events.assert_not_called()
 
+    @patch('lambda_function.dynamodb')
     @patch('lambda_function.table')
-    def test_duplicate_swipe_returns_409(self, mock_table):
-        mock_table.get_item.return_value = {'Item': {'userId': 'user-123', 'targetUserId': 'user-456'}}
+    def test_duplicate_swipe_returns_409(self, mock_table, mock_dynamodb):
+        # Simulate ConditionalCheckFailedException
+        exc_class = type('ConditionalCheckFailedException', (Exception,), {})
+        mock_dynamodb.meta.client.exceptions.ConditionalCheckFailedException = exc_class
+        mock_table.put_item.side_effect = exc_class()
 
         resp = handler(
             _api_event('POST', '/swipe', {'targetUserId': 'user-456', 'action': 'like'}),

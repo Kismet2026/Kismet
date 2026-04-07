@@ -5,6 +5,7 @@ import uuid
 from datetime import datetime
 
 dynamodb = boto3.resource('dynamodb')
+dynamodb_client = boto3.client('dynamodb')
 events_client = boto3.client('events')
 
 MATCH_TABLE = os.environ.get('TABLE_NAME', 'kismet-matches')
@@ -53,42 +54,78 @@ def handle_swipe_event(event):
     if not reverse_swipe or reverse_swipe.get('action') != 'like':
         return {'statusCode': 200, 'body': 'No mutual like'}
 
-    # Check if match already exists
-    from boto3.dynamodb.conditions import Key, Attr
-    existing = match_table.scan(
-        FilterExpression=(
-            (Attr('userAId').eq(swiper_id) & Attr('userBId').eq(target_id))
-            | (Attr('userAId').eq(target_id) & Attr('userBId').eq(swiper_id))
-        ) & Attr('status').eq('active'),
-        Limit=1,
-    )
-    if existing.get('Items'):
-        return {'statusCode': 200, 'body': 'Match already exists'}
-
-    # Create match
+    # Mutual like detected — create match atomically
     match_id = f'match-{uuid.uuid4().hex[:8]}'
     timestamp = datetime.utcnow().isoformat() + 'Z'
     user_ids = sorted([swiper_id, target_id])
+    pair_key = f'PAIR#{user_ids[0]}#{user_ids[1]}'
 
-    match_table.put_item(Item={
-        'PK': f'MATCH#{match_id}',
-        'SK': 'META',
-        'matchId': match_id,
-        'userAId': user_ids[0],
-        'userBId': user_ids[1],
-        'status': 'active',
-        'matchedAt': timestamp,
-    })
-
-    # Also write user-index entries for querying by user
-    for uid in user_ids:
-        match_table.put_item(Item={
-            'PK': f'USER#{uid}',
-            'SK': f'MATCH#{timestamp}#{match_id}',
-            'matchId': match_id,
-            'matchedAt': timestamp,
-            'status': 'active',
-        })
+    # Use transact_write to atomically:
+    # 1. Create pair record (with condition to prevent duplicate matches)
+    # 2. Create META record
+    # 3. Create two user-index records
+    try:
+        dynamodb_client.transact_write_items(
+            TransactItems=[
+                {
+                    'Put': {
+                        'TableName': MATCH_TABLE,
+                        'Item': {
+                            'PK': {'S': pair_key},
+                            'SK': {'S': 'META'},
+                            'matchId': {'S': match_id},
+                            'userAId': {'S': user_ids[0]},
+                            'userBId': {'S': user_ids[1]},
+                            'status': {'S': 'active'},
+                            'matchedAt': {'S': timestamp},
+                        },
+                        'ConditionExpression': 'attribute_not_exists(PK)',
+                    }
+                },
+                {
+                    'Put': {
+                        'TableName': MATCH_TABLE,
+                        'Item': {
+                            'PK': {'S': f'MATCH#{match_id}'},
+                            'SK': {'S': 'META'},
+                            'matchId': {'S': match_id},
+                            'userAId': {'S': user_ids[0]},
+                            'userBId': {'S': user_ids[1]},
+                            'status': {'S': 'active'},
+                            'matchedAt': {'S': timestamp},
+                            'pairKey': {'S': pair_key},
+                        },
+                    }
+                },
+                {
+                    'Put': {
+                        'TableName': MATCH_TABLE,
+                        'Item': {
+                            'PK': {'S': f'USER#{user_ids[0]}'},
+                            'SK': {'S': f'MATCH#{timestamp}#{match_id}'},
+                            'matchId': {'S': match_id},
+                            'matchedAt': {'S': timestamp},
+                            'status': {'S': 'active'},
+                        },
+                    }
+                },
+                {
+                    'Put': {
+                        'TableName': MATCH_TABLE,
+                        'Item': {
+                            'PK': {'S': f'USER#{user_ids[1]}'},
+                            'SK': {'S': f'MATCH#{timestamp}#{match_id}'},
+                            'matchId': {'S': match_id},
+                            'matchedAt': {'S': timestamp},
+                            'status': {'S': 'active'},
+                        },
+                    }
+                },
+            ]
+        )
+    except dynamodb_client.exceptions.TransactionCanceledException:
+        # ConditionExpression failed → match already exists for this pair
+        return {'statusCode': 200, 'body': 'Match already exists'}
 
     # Publish match.created event
     events_client.put_events(Entries=[{
