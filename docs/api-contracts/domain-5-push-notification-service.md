@@ -175,7 +175,7 @@ GET /notifications/unread-count
 | Attribute | Type | Key |
 |-----------|------|-----|
 | `PK` | String (`USER#{userId}`) | Partition Key |
-| `SK` | String (`NOTIF#{timestamp}#{notifId}`) | Sort Key |
+| `SK` | String (`NOTIF#{epoch_ms}-{uuid8}`) | Sort Key |
 | `notificationId` | String | — |
 | `type` | String | — |
 | `title` | String | — |

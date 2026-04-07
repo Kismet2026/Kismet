@@ -15,7 +15,7 @@ os.environ["AWS_SECRET_ACCESS_KEY"] = "testing"
 os.environ["AWS_SECURITY_TOKEN"] = "testing"
 os.environ["AWS_SESSION_TOKEN"] = "testing"
 
-import lambda_handler
+import lambda_function
 
 
 # ---------------------------------------------------------------------------
@@ -46,7 +46,7 @@ def aws_resources():
         ses.verify_email_identity(EmailAddress="admin@kismet.app")
 
         import importlib
-        importlib.reload(lambda_handler)
+        importlib.reload(lambda_function)
 
         yield dynamodb
 
@@ -97,7 +97,7 @@ class TestSendEmail:
             "recipientUserId": "user-456",
             "templateData": {},
         })
-        result = lambda_handler.handler(event, {})
+        result = lambda_function.handler(event, {})
         assert result["statusCode"] == 400
         assert json.loads(result["body"])["error"]["code"] == "VALIDATION_ERROR"
 
@@ -106,7 +106,7 @@ class TestSendEmail:
             "templateName": "welcome",
             "templateData": {},
         })
-        result = lambda_handler.handler(event, {})
+        result = lambda_function.handler(event, {})
         assert result["statusCode"] == 400
 
     def test_opted_out_returns_422(self, aws_resources):
@@ -116,7 +116,7 @@ class TestSendEmail:
             "recipientUserId": "user-456",
             "templateData": {},
         })
-        result = lambda_handler.handler(event, {})
+        result = lambda_function.handler(event, {})
         assert result["statusCode"] == 422
         assert json.loads(result["body"])["error"]["code"] == "EMAIL_OPTED_OUT"
 
@@ -128,7 +128,7 @@ class TestSendEmail:
             "recipientUserId": "user-456",
             "templateData": {},
         })
-        result = lambda_handler.handler(event, {})
+        result = lambda_function.handler(event, {})
         assert result["statusCode"] == 200
 
     def test_returns_email_id_and_status(self, aws_resources):
@@ -138,7 +138,7 @@ class TestSendEmail:
             "recipientUserId": "user-456",
             "templateData": {"matchName": "Alex"},
         })
-        result = lambda_handler.handler(event, {})
+        result = lambda_function.handler(event, {})
         body = json.loads(result["body"])
         assert body["status"] == "sent"
         assert body["templateName"] == "match_notification"
@@ -154,7 +154,7 @@ class TestSendEmail:
 class TestGetPreferences:
     def test_returns_defaults_when_no_record(self, aws_resources):
         event = api_event("GET", "/email/preferences", user_id="user-new")
-        result = lambda_handler.handler(event, {})
+        result = lambda_function.handler(event, {})
         assert result["statusCode"] == 200
         body = json.loads(result["body"])
         assert body["matchNotifications"] is True
@@ -166,7 +166,7 @@ class TestGetPreferences:
         seed_preferences(aws_resources, "user-123",
                          matchNotifications=False, weeklyDigest=False)
         event = api_event("GET", "/email/preferences", user_id="user-123")
-        result = lambda_handler.handler(event, {})
+        result = lambda_function.handler(event, {})
         body = json.loads(result["body"])
         assert body["matchNotifications"] is False
         assert body["weeklyDigest"] is False
@@ -183,7 +183,7 @@ class TestUpdatePreferences:
         event = api_event("PUT", "/email/preferences",
                           body={"weeklyDigest": False},
                           user_id="user-123")
-        result = lambda_handler.handler(event, {})
+        result = lambda_function.handler(event, {})
         assert result["statusCode"] == 200
         body = json.loads(result["body"])
         assert body["weeklyDigest"] is False
@@ -193,7 +193,7 @@ class TestUpdatePreferences:
         event = api_event("PUT", "/email/preferences",
                           body={"matchNotifications": "yes"},
                           user_id="user-123")
-        result = lambda_handler.handler(event, {})
+        result = lambda_function.handler(event, {})
         assert result["statusCode"] == 400
         assert json.loads(result["body"])["error"]["code"] == "VALIDATION_ERROR"
 
@@ -201,7 +201,7 @@ class TestUpdatePreferences:
         event = api_event("PUT", "/email/preferences",
                           body={},
                           user_id="user-123")
-        result = lambda_handler.handler(event, {})
+        result = lambda_function.handler(event, {})
         assert result["statusCode"] == 400
 
     def test_persisted_to_dynamodb(self, aws_resources):
@@ -209,7 +209,7 @@ class TestUpdatePreferences:
         event = api_event("PUT", "/email/preferences",
                           body={"matchNotifications": False},
                           user_id="user-123")
-        lambda_handler.handler(event, {})
+        lambda_function.handler(event, {})
 
         table = aws_resources.Table("kismet-email-preferences")
         item = table.get_item(Key={"PK": "USER#user-123", "SK": "PREFS"}).get("Item")
@@ -227,7 +227,7 @@ class TestOnUserCreated:
             "email": "new@example.com",
             "timestamp": datetime.now(timezone.utc).isoformat(),
         })
-        result = lambda_handler.handler(event, {})
+        result = lambda_function.handler(event, {})
         assert result["statusCode"] == 200
 
         table = aws_resources.Table("kismet-email-preferences")
@@ -246,7 +246,7 @@ class TestOnUserCreated:
             "email": "existing@example.com",
             "timestamp": datetime.now(timezone.utc).isoformat(),
         })
-        lambda_handler.handler(event, {})
+        lambda_function.handler(event, {})
 
         table = aws_resources.Table("kismet-email-preferences")
         item = table.get_item(Key={"PK": "USER#user-existing", "SK": "PREFS"}).get("Item")
@@ -267,7 +267,7 @@ class TestOnMatchCreated:
             "userIds": ["user-a", "user-b"],
             "timestamp": datetime.now(timezone.utc).isoformat(),
         })
-        result = lambda_handler.handler(event, {})
+        result = lambda_function.handler(event, {})
         assert result["statusCode"] == 200
 
     def test_skips_opted_out_users(self, aws_resources):
@@ -278,7 +278,7 @@ class TestOnMatchCreated:
             "userIds": ["user-optout"],
             "timestamp": datetime.now(timezone.utc).isoformat(),
         })
-        result = lambda_handler.handler(event, {})
+        result = lambda_function.handler(event, {})
         assert result["statusCode"] == 200  # no error, just skipped
 
 
@@ -295,7 +295,7 @@ class TestOnUserReported:
             "reason": "harassment",
             "timestamp": datetime.now(timezone.utc).isoformat(),
         })
-        result = lambda_handler.handler(event, {})
+        result = lambda_function.handler(event, {})
         assert result["statusCode"] == 200
 
     def test_all_report_reasons_handled(self, aws_resources):
@@ -308,7 +308,7 @@ class TestOnUserReported:
                 "reason": reason,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             })
-            result = lambda_handler.handler(event, {})
+            result = lambda_function.handler(event, {})
             assert result["statusCode"] == 200, f"Failed for reason: {reason}"
 
 
@@ -319,10 +319,10 @@ class TestOnUserReported:
 class TestRouting:
     def test_unknown_route_returns_404(self, aws_resources):
         event = api_event("GET", "/unknown/path")
-        result = lambda_handler.handler(event, {})
+        result = lambda_function.handler(event, {})
         assert result["statusCode"] == 404
 
     def test_unhandled_event_type_returns_200(self, aws_resources):
         event = eb_event("kismet.other", "other.event", {"foo": "bar"})
-        result = lambda_handler.handler(event, {})
+        result = lambda_function.handler(event, {})
         assert result["statusCode"] == 200
