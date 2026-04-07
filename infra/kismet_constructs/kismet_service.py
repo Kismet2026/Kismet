@@ -5,6 +5,7 @@ from aws_cdk import (
     aws_lambda as lambda_,
     aws_dynamodb as dynamodb,
     aws_apigateway as apigateway,
+    aws_ec2 as ec2,
     aws_events as events,
     aws_events_targets as targets,
     aws_iam as iam,
@@ -73,6 +74,8 @@ class KismetService(Construct):
         api: Optional[apigateway.RestApi] = None,
         authorizer: Optional[apigateway.IAuthorizer] = None,
         event_bus: Optional[events.EventBus] = None,
+        vpc: Optional[ec2.IVpc] = None,
+        security_groups: Optional[List[ec2.ISecurityGroup]] = None,
     ):
         super().__init__(scope, construct_id)
 
@@ -91,6 +94,9 @@ class KismetService(Construct):
             memory_size=256,
             environment=env_vars,
             log_retention=logs.RetentionDays.ONE_WEEK,
+            vpc=vpc,
+            security_groups=security_groups,
+            vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_ISOLATED) if vpc else None,
         )
 
         # ── DynamoDB tables ───────────────────────────────────────────────────
@@ -145,17 +151,32 @@ class KismetService(Construct):
 
         # ── API Gateway routes ────────────────────────────────────────────────
         if api and routes:
+            imported_api = apigateway.RestApi.from_rest_api_attributes(
+                self, "ImportedApi",
+                rest_api_id=api.rest_api_id,
+                root_resource_id=api.root.resource_id
+            )
             integration = apigateway.LambdaIntegration(self.function)
             for route in routes:
                 path_parts = [p for p in route["path"].split("/") if p]
-                resource = _get_or_create_resource(api.root, path_parts)
-                method_options = {}
+                resource = _get_or_create_resource(imported_api.root, path_parts)
+                method_id = f"Method{route['method']}{route['path'].replace('/', '').replace('{', '').replace('}', '')}"
+                
+                auth_options = None
                 if route.get("auth", True) and authorizer:
-                    method_options["authorizer"] = authorizer
-                    method_options["authorization_type"] = (
-                        apigateway.AuthorizationType.COGNITO
+                    auth_options = apigateway.MethodOptions(
+                        authorizer=authorizer,
+                        authorization_type=apigateway.AuthorizationType.COGNITO
                     )
-                resource.add_method(route["method"], integration, **method_options)
+                
+                apigateway.Method(
+                    self,
+                    method_id,
+                    http_method=route["method"],
+                    resource=resource,
+                    integration=integration,
+                    options=auth_options
+                )
 
         # ── EventBridge: publish permission ──────────────────────────────────
         if publish_events and event_bus:
