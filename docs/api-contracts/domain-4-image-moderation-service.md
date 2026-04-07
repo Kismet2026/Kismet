@@ -57,7 +57,7 @@
 - 调用 AWS Rekognition DetectModerationLabels API 进行图片审核
 - 写入 DynamoDB `kismet-image-moderation` 表
 - 如果检测到不当内容（flagged = true），发布 EventBridge 事件 `content.flagged`
-- 如果 flagged，更新照片记录将其标记为 blocked
+- 如果 flagged，更新照片记录（Photo Service DynamoDB）`status` 为 `rejected`（与 `domain-1-photo-service` 表中 `pending` / `approved` / `rejected` 一致）
 
 **Errors:**
 
@@ -192,5 +192,5 @@ GET /moderate/image/history?limit=20&cursor=xxx
 | **Called by** | EventBridge (photo.uploaded) | 自动触发审核 |
 | **Publishes to** | Admin Dashboard | EventBridge `content.flagged` |
 | **Depends on** | AWS Rekognition | DetectModerationLabels API |
-| **Depends on** | Photo Service | 更新照片记录为 blocked |
+| **Depends on** | Photo Service | 更新照片记录 `status=rejected` |
 | **Depends on** | Auth (Cognito) | JWT validation（GET 端点，管理员权限） |

@@ -1,6 +1,12 @@
+"""
+Image Moderation — single Lambda module (API + EventBridge).
+Contract: docs/api-contracts/domain-4-image-moderation-service.md
+"""
+
 import base64
 import json
 import os
+import re
 import time
 import traceback
 from datetime import datetime, timezone
@@ -15,17 +21,24 @@ os.environ.setdefault(
     os.environ.get("AWS_REGION", "us-east-1"),
 )
 
-
-# AWS clients & config
 dynamodb = boto3.resource("dynamodb")
-comprehend = boto3.client("comprehend")
+rekognition = boto3.client("rekognition")
 events = boto3.client("events")
 
-TABLE_NAME = os.environ.get("TEXT_MODERATION_TABLE_NAME", "kismet-text-moderation-dev")
+TABLE_NAME = os.environ.get(
+    "IMAGE_MODERATION_TABLE_NAME", "kismet-image-moderation-dev"
+)
+PHOTO_S3_BUCKET = os.environ.get("PHOTO_S3_BUCKET", "")
+PHOTOS_TABLE_NAME = os.environ.get("PHOTOS_TABLE_NAME", "")
 EVENT_BUS_NAME = os.environ.get("EVENT_BUS_NAME", "kismet-events")
-TOXICITY_THRESHOLD = float(os.environ.get("TOXICITY_THRESHOLD", "0.65"))
-CATEGORY_SCORE_FLOOR = float(os.environ.get("CATEGORY_SCORE_FLOOR", "0.35"))
-COMPREHEND_LANGUAGE = os.environ.get("COMPREHEND_LANGUAGE", "en")
+# Rekognition label confidence is 0–100; flag if max(label) >= this
+MODERATION_FLAG_CONFIDENCE = float(
+    os.environ.get("MODERATION_FLAG_CONFIDENCE", "60")
+)
+# Minimum confidence for labels returned by Rekognition (broader capture)
+REKOGNITION_MIN_CONFIDENCE = float(
+    os.environ.get("REKOGNITION_MIN_CONFIDENCE", "5")
+)
 ADMIN_GROUP_NAMES = frozenset(
     x.strip()
     for x in os.environ.get("ADMIN_GROUP_NAMES", "admin").split(",")
@@ -33,16 +46,15 @@ ADMIN_GROUP_NAMES = frozenset(
 )
 HISTORY_DEFAULT_LIMIT = int(os.environ.get("HISTORY_DEFAULT_LIMIT", "20"))
 HISTORY_MAX_LIMIT = int(os.environ.get("HISTORY_MAX_LIMIT", "50"))
-CONTENT_MAX_BYTES = 4500
 
-_mod_table = None
+_img_table = None
 
 
 def _table():
-    global _mod_table
-    if _mod_table is None:
-        _mod_table = dynamodb.Table(TABLE_NAME)
-    return _mod_table
+    global _img_table
+    if _img_table is None:
+        _img_table = dynamodb.Table(TABLE_NAME)
+    return _img_table
 
 
 def lambda_handler(event: Optional[Dict[str, Any]], context: Any) -> Dict[str, Any]:
@@ -58,11 +70,10 @@ def _is_eventbridge(event: Dict[str, Any]) -> bool:
     return "source" in event and "detail-type" in event
 
 
-# EventBridge — message.sent
 def handle_eventbridge(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
-    if event.get("source") != "kismet.message-service":
+    if event.get("source") != "kismet.photo-service":
         return _eb_ok({"skipped": True, "reason": "source"})
-    if event.get("detail-type") != "message.sent":
+    if event.get("detail-type") != "photo.uploaded":
         return _eb_ok({"skipped": True, "reason": "detail-type"})
 
     detail = event.get("detail") or {}
@@ -72,39 +83,45 @@ def handle_eventbridge(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         except json.JSONDecodeError:
             return _eb_ok({"skipped": True, "reason": "detail-json"})
 
-    mid = detail.get("messageId")
-    text = detail.get("content")
-    sender = detail.get("senderId")
-    if not mid or not isinstance(text, str) or not text.strip():
+    pid = detail.get("photoId")
+    uid = detail.get("userId")
+    s3_key = detail.get("s3Key")
+    if (
+        not pid
+        or not isinstance(s3_key, str)
+        or not s3_key.strip()
+        or not uid
+        or not isinstance(uid, str)
+        or not uid.strip()
+    ):
         return _eb_ok({"skipped": True, "reason": "missing-fields"})
 
     try:
-        run_moderation(
-            content=text.strip(),
-            content_id=str(mid),
-            content_type="message",
-            user_id=str(sender) if sender else None,
+        run_image_moderation(
+            s3_key=s3_key.strip(),
+            photo_id=str(pid),
+            user_id=uid.strip(),
         )
     except RuntimeError as e:
-        print(f"[text-moderation] {e}\n{traceback.format_exc()}")
+        print(f"[image-moderation] {e}\n{traceback.format_exc()}")
         raise
-    return _eb_ok({"ok": True, "contentId": mid})
+    return _eb_ok({"ok": True, "photoId": pid})
 
 
 def _eb_ok(payload: Dict[str, Any]) -> Dict[str, Any]:
     return {"statusCode": 200, "body": json.dumps(payload)}
 
-# HTTP — API Gateway
+
 def handle_http(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     method = _http_method(event)
     path = _normalize_path(_http_path(event))
 
-    if method == "POST" and path == "/moderate/text":
-        return post_moderate_text(event)
-    if method == "GET" and path == "/moderate/text/history":
+    if method == "POST" and path == "/moderate/image":
+        return post_moderate_image(event)
+    if method == "GET" and path == "/moderate/image/history":
         return get_moderation_history(event)
 
-    if path.startswith("/moderate/text"):
+    if path.startswith("/moderate/image"):
         return error_response(
             404, "NOT_FOUND", f"No route matches {method} {path}."
         )
@@ -113,7 +130,7 @@ def handle_http(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     )
 
 
-def post_moderate_text(event: Dict[str, Any]) -> Dict[str, Any]:
+def post_moderate_image(event: Dict[str, Any]) -> Dict[str, Any]:
     body, err = _parse_json_body(event)
     if err:
         return err
@@ -122,19 +139,31 @@ def post_moderate_text(event: Dict[str, Any]) -> Dict[str, Any]:
         return error_response(
             400,
             "VALIDATION_ERROR",
-            "content, contentId, and contentType (message|bio) are required.",
+            "s3Key, photoId, and userId are required.",
         )
     assert data is not None
     try:
-        result = run_moderation(
-            content=data["content"],
-            content_id=data["contentId"],
-            content_type=data["contentType"],
-            user_id=data.get("userId"),
+        result = run_image_moderation(
+            s3_key=data["s3Key"],
+            photo_id=data["photoId"],
+            user_id=data["userId"],
         )
     except RuntimeError as e:
-        if str(e).startswith("COMPREHEND:"):
-            return error_response(500, "COMPREHEND_ERROR", "AWS Comprehend call failed.")
+        msg = str(e)
+        if msg.startswith("IMAGE_NOT_FOUND"):
+            return error_response(
+                404, "IMAGE_NOT_FOUND", "S3 object not found for the given s3Key."
+            )
+        if msg.startswith("REKOGNITION:MISSING_BUCKET"):
+            return error_response(
+                500,
+                "REKOGNITION_ERROR",
+                "Server misconfiguration: PHOTO_S3_BUCKET is not set.",
+            )
+        if msg.startswith("REKOGNITION:"):
+            return error_response(
+                500, "REKOGNITION_ERROR", "AWS Rekognition call failed."
+            )
         raise
     return response(200, result)
 
@@ -164,133 +193,156 @@ def get_moderation_history(event: Dict[str, Any]) -> Dict[str, Any]:
     return response(200, {"items": items, "nextCursor": next_cursor, "count": len(items)})
 
 
-# Core moderation (Comprehend + DynamoDB + EventBridge)
 def validate_post_body(body: Dict[str, Any]) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
     if not isinstance(body, dict):
         return "VALIDATION_ERROR", None
-    content = body.get("content")
-    cid = body.get("contentId")
-    ctype = body.get("contentType")
-    if not content or not isinstance(content, str) or not content.strip():
-        return "VALIDATION_ERROR", None
-    if not cid or not isinstance(cid, str):
-        return "VALIDATION_ERROR", None
-    if ctype not in ("message", "bio"):
-        return "VALIDATION_ERROR", None
-    if len(content.strip().encode("utf-8")) > CONTENT_MAX_BYTES:
-        return "VALIDATION_ERROR", None
-
+    s3_key = body.get("s3Key")
+    pid = body.get("photoId")
     uid = body.get("userId")
-    user_id = uid.strip() if isinstance(uid, str) and uid.strip() else None
+    if not s3_key or not isinstance(s3_key, str) or not s3_key.strip():
+        return "VALIDATION_ERROR", None
+    if not pid or not isinstance(pid, str) or not str(pid).strip():
+        return "VALIDATION_ERROR", None
+    if not uid or not isinstance(uid, str) or not uid.strip():
+        return "VALIDATION_ERROR", None
     return None, {
-        "content": content.strip(),
-        "contentId": cid.strip(),
-        "contentType": ctype,
-        "userId": user_id,
+        "s3Key": s3_key.strip(),
+        "photoId": str(pid).strip(),
+        "userId": uid.strip(),
     }
 
 
-def run_moderation(
+def run_image_moderation(
     *,
-    content: str,
-    content_type: str,
-    content_id: str,
-    user_id: Optional[str] = None,
+    s3_key: str,
+    photo_id: str,
+    user_id: str,
 ) -> Dict[str, Any]:
-    toxicity_score, categories = detect_toxicity(content)
-    flagged = toxicity_score >= TOXICITY_THRESHOLD
+    if not PHOTO_S3_BUCKET:
+        raise RuntimeError("REKOGNITION:MISSING_BUCKET")
+    labels_out, max_conf, flagged, top_name = detect_moderation_labels(s3_key)
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     put_moderation_row(
-        content_id=content_id,
-        content_type=content_type,
-        flagged=flagged,
-        toxicity_score=toxicity_score,
-        categories=categories,
-        timestamp_iso=ts,
+        photo_id=photo_id,
         user_id=user_id,
+        s3_key=s3_key,
+        flagged=flagged,
+        labels=labels_out,
+        confidence=max_conf,
+        timestamp_iso=ts,
     )
 
     if flagged:
-        if content_type == "bio":
-            event_uid = user_id or content_id
-        else:
-            event_uid = user_id
-            if not event_uid:
-                print(
-                    f"[text-moderation] flagged message {content_id} has no userId, "
-                    "skipping content.flagged event — check message-service senderId"
-                )
-
-        if event_uid:
-            try:
-                publish_content_flagged(
-                    content_id=content_id,
-                    user_id=event_uid,
-                    score=toxicity_score,
-                )
-            except RuntimeError as e:
-                print(f"[text-moderation] content.flagged failed: {e}")
+        reason = _reason_slug(top_name) if top_name else "moderation_detected"
+        score = round(max_conf / 100.0, 4)
+        try:
+            publish_content_flagged(
+                content_id=photo_id,
+                user_id=user_id,
+                score=score,
+                reason=reason,
+            )
+        except RuntimeError as e:
+            print(f"[image-moderation] content.flagged failed: {e}")
+        try:
+            mark_photo_rejected(user_id=user_id, photo_id=photo_id)
+        except RuntimeError as e:
+            print(f"[image-moderation] photo status update failed: {e}")
 
     return {
-        "contentId": content_id,
-        "contentType": content_type,
+        "photoId": photo_id,
+        "userId": user_id,
         "flagged": flagged,
-        "toxicityScore": round(toxicity_score, 4),
-        "categories": categories,
+        "labels": labels_out,
+        "confidence": round(max_conf, 1) if flagged else 0.0,
         "timestamp": ts,
     }
 
 
-def detect_toxicity(text: str) -> Tuple[float, List[str]]:
+def detect_moderation_labels(
+    s3_key: str,
+) -> Tuple[List[Dict[str, Any]], float, bool, Optional[str]]:
     try:
-        resp = comprehend.detect_toxic_content(
-            TextSegments=[{"Text": text}],
-            LanguageCode=COMPREHEND_LANGUAGE,
+        resp = rekognition.detect_moderation_labels(
+            Image={
+                "S3Object": {
+                    "Bucket": PHOTO_S3_BUCKET,
+                    "Name": s3_key,
+                }
+            },
+            MinConfidence=REKOGNITION_MIN_CONFIDENCE,
         )
     except ClientError as e:
-        c = e.response.get("Error", {}).get("Code", "ComprehendError")
-        raise RuntimeError(f"COMPREHEND:{c}") from e
+        code = e.response.get("Error", {}).get("Code", "RekognitionError")
+        if code in ("InvalidS3ObjectException", "S3ObjectNotFoundException"):
+            raise RuntimeError(f"IMAGE_NOT_FOUND:{code}") from e
+        raise RuntimeError(f"REKOGNITION:{code}") from e
 
-    max_score = 0.0
-    names: List[str] = []
-    seen = set()
-    for seg in resp.get("ResultList") or []:
-        for lab in seg.get("Labels") or []:
-            name = lab.get("Name") or ""
-            score = float(lab.get("Score") or 0.0)
-            max_score = max(max_score, score)
-            if name and score >= CATEGORY_SCORE_FLOOR and name not in seen:
-                seen.add(name)
-                names.append(name)
-    return max_score, names
+    labels_out: List[Dict[str, Any]] = []
+    max_conf = 0.0
+    top_name: Optional[str] = None
+
+    for lab in resp.get("ModerationLabels") or []:
+        name = lab.get("Name") or ""
+        conf = float(lab.get("Confidence") or 0.0)
+        if conf > max_conf:
+            max_conf = conf
+            top_name = name if name else top_name
+        elif conf == max_conf and name and not top_name:
+            top_name = name
+        if name:
+            labels_out.append({"name": name, "confidence": round(conf, 1)})
+
+    flagged = max_conf >= MODERATION_FLAG_CONFIDENCE
+    if flagged and not top_name and labels_out:
+        top_name = labels_out[0]["name"]
+
+    return labels_out, max_conf, flagged, top_name
+
+
+def _reason_slug(name: str) -> str:
+    s = name.strip().lower()
+    s = re.sub(r"[^a-z0-9]+", "_", s)
+    return s.strip("_") or "moderation_detected"
+
+
+def _labels_for_dynamo(labels: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    for lb in labels:
+        if not isinstance(lb, dict):
+            continue
+        d = dict(lb)
+        if "confidence" in d:
+            d["confidence"] = Decimal(str(round(float(d["confidence"]), 2)))
+        out.append(d)
+    return out
 
 
 def put_moderation_row(
     *,
-    content_id: str,
-    content_type: str,
+    photo_id: str,
+    user_id: str,
+    s3_key: str,
     flagged: bool,
-    toxicity_score: float,
-    categories: List[str],
+    labels: List[Dict[str, Any]],
+    confidence: float,
     timestamp_iso: str,
-    user_id: Optional[str] = None,
 ) -> None:
     sort_ts = int(time.time() * 1000)
     item: Dict[str, Any] = {
-        "contentId": f"CONTENT#{content_id}",
+        "photoId": f"PHOTO#{photo_id}",
         "sk": "RESULT",
-        "rawContentId": content_id,
-        "contentType": content_type,
+        "rawPhotoId": photo_id,
+        "userId": user_id,
+        "s3Key": s3_key,
         "flagged": flagged,
-        "toxicityScore": Decimal(str(round(toxicity_score, 4))),
-        "categories": categories,
+        "labels": _labels_for_dynamo(labels),
+        "confidence": Decimal(str(round(confidence, 2))),
         "timestamp": timestamp_iso,
-        "gsi1pk": "TEXT_MODERATION_HISTORY",
+        "gsi1pk": "IMAGE_MODERATION_HISTORY",
         "gsi1sk": sort_ts,
     }
-    if user_id:
-        item["userId"] = user_id
     _table().put_item(Item=item)
 
 
@@ -301,7 +353,7 @@ def query_history_page(
     kwargs: Dict[str, Any] = {
         "IndexName": "gsi1",
         "KeyConditionExpression": "gsi1pk = :p",
-        "ExpressionAttributeValues": {":p": "TEXT_MODERATION_HISTORY"},
+        "ExpressionAttributeValues": {":p": "IMAGE_MODERATION_HISTORY"},
         "ScanIndexForward": False,
         "Limit": lim,
     }
@@ -319,14 +371,25 @@ def query_history_page(
 
     items: List[Dict[str, Any]] = []
     for row in resp.get("Items", []):
+        pid = row.get("rawPhotoId") or str(row.get("photoId", "")).replace(
+            "PHOTO#", "", 1
+        )
+        conf = float(row.get("confidence", 0))
+        flagged = bool(row.get("flagged", False))
+        labels = list(row.get("labels") or [])
+        for lb in labels:
+            if isinstance(lb, dict) and "confidence" in lb:
+                try:
+                    lb["confidence"] = float(lb["confidence"])
+                except (TypeError, ValueError):
+                    pass
         items.append(
             {
-                "contentId": row.get("rawContentId")
-                or str(row.get("contentId", "")).replace("CONTENT#", "", 1),
-                "contentType": row.get("contentType", ""),
-                "flagged": bool(row.get("flagged", False)),
-                "toxicityScore": float(row.get("toxicityScore", 0)),
-                "categories": list(row.get("categories") or []),
+                "photoId": pid,
+                "userId": row.get("userId", ""),
+                "flagged": flagged,
+                "labels": labels,
+                "confidence": round(conf, 1) if flagged else 0.0,
                 "timestamp": row.get("timestamp", ""),
             }
         )
@@ -351,14 +414,18 @@ def _dynamo_json(obj: Any) -> Any:
 
 
 def publish_content_flagged(
-    *, content_id: str, user_id: str, score: float, reason: str = "toxicity_detected"
+    *,
+    content_id: str,
+    user_id: str,
+    score: float,
+    reason: str,
 ) -> None:
     detail = {
         "contentId": content_id,
-        "contentType": "text",
+        "contentType": "image",
         "userId": user_id,
         "reason": reason,
-        "score": round(score, 4),
+        "score": score,
         "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
     try:
@@ -375,7 +442,22 @@ def publish_content_flagged(
     except ClientError as e:
         raise RuntimeError(str(e)) from e
 
-# Auth
+
+def mark_photo_rejected(*, user_id: str, photo_id: str) -> None:
+    if not PHOTOS_TABLE_NAME:
+        return
+    tbl = dynamodb.Table(PHOTOS_TABLE_NAME)
+    try:
+        tbl.update_item(
+            Key={"PK": f"USER#{user_id}", "SK": f"PHOTO#{photo_id}"},
+            UpdateExpression="SET #st = :rej",
+            ExpressionAttributeNames={"#st": "status"},
+            ExpressionAttributeValues={":rej": "rejected"},
+        )
+    except ClientError as e:
+        raise RuntimeError(str(e)) from e
+
+
 def extract_claims(event: Dict[str, Any]) -> Dict[str, Any]:
     rc = event.get("requestContext") or {}
     auth = rc.get("authorizer")
@@ -411,10 +493,12 @@ def _parse_groups(raw: Any) -> set:
 
 
 def is_admin(event: Dict[str, Any]) -> bool:
-    return bool(_parse_groups(extract_claims(event).get("cognito:groups")) & ADMIN_GROUP_NAMES)
+    return bool(
+        _parse_groups(extract_claims(event).get("cognito:groups"))
+        & ADMIN_GROUP_NAMES
+    )
 
 
-# HTTP helpers
 def _http_method(event: Dict[str, Any]) -> str:
     m = (
         event.get("requestContext", {}).get("http", {}).get("method")
@@ -444,7 +528,9 @@ def _normalize_path(path: Any) -> str:
     return p
 
 
-def _parse_json_body(event: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
+def _parse_json_body(
+    event: Dict[str, Any],
+) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
     body = event.get("body")
     if body in (None, ""):
         return None, error_response(400, "VALIDATION_ERROR", "Request body is required.")
