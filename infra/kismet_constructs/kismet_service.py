@@ -1,3 +1,4 @@
+from typing import Optional, List, Dict
 from constructs import Construct
 import aws_cdk as cdk
 from aws_cdk import (
@@ -18,7 +19,7 @@ def _get_attr_type(t: str) -> dynamodb.AttributeType:
 
 
 def _get_or_create_resource(
-    parent: apigateway.IResource, parts: list[str]
+    parent: apigateway.IResource, parts: List[str]
 ) -> apigateway.IResource:
     """Recursively get or create nested API Gateway resources."""
     if not parts:
@@ -63,15 +64,15 @@ class KismetService(Construct):
         service_name: str,
         code_path: str,
         handler: str = "lambda_function.handler",
-        tables: list[dict] | None = None,
-        routes: list[dict] | None = None,
-        consume_events: list[str] | None = None,
+        tables: Optional[List[Dict]] = None,
+        routes: Optional[List[Dict]] = None,
+        consume_events: Optional[List[str]] = None,
         publish_events: bool = False,
-        extra_policies: list[iam.PolicyStatement] | None = None,
-        environment: dict | None = None,
-        api: apigateway.RestApi | None = None,
-        authorizer: apigateway.IAuthorizer | None = None,
-        event_bus: events.EventBus | None = None,
+        extra_policies: Optional[List[iam.PolicyStatement]] = None,
+        environment: Optional[Dict] = None,
+        api: Optional[apigateway.RestApi] = None,
+        authorizer: Optional[apigateway.IAuthorizer] = None,
+        event_bus: Optional[events.EventBus] = None,
     ):
         super().__init__(scope, construct_id)
 
@@ -93,7 +94,7 @@ class KismetService(Construct):
         )
 
         # ── DynamoDB tables ───────────────────────────────────────────────────
-        self.tables: list[dynamodb.Table] = []
+        self.tables: List[dynamodb.Table] = []
         for i, table_cfg in enumerate(tables or []):
             table_name = table_cfg.get(
                 "table_name",
