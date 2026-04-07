@@ -67,7 +67,7 @@ class Domain4Stack(cdk.Stack):
             "ReportService",
             service_name="report",
             code_path="../services/domain-4-moderation/report-service",
-            handler="index.handler",
+            handler="lambda_function.handler",
             tables=[
                 {
                     "table_name": "kismet-reports",
@@ -162,7 +162,7 @@ class Domain4Stack(cdk.Stack):
             "RateLimiterService",
             service_name="rate-limiter",
             code_path="../services/domain-4-moderation/rate-limiter-service",
-            handler="index.handler",
+            handler="lambda_function.handler",
             tables=[],  # Uses ElastiCache
             routes=[
                 {"method": "GET", "path": "/ratelimit/status/{userId}", "auth": True},
