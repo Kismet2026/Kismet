@@ -1,0 +1,133 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Kismet Image Moderation — Lambda, DynamoDB, API, EventBridge, Rekognition, S3 read.
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: dev
+  SharedApiId:
+    Type: String
+    Default: ''
+  ImageModerationTableName:
+    Type: String
+    Default: kismet-image-moderation-dev
+  PhotoS3BucketName:
+    Type: String
+    Description: Bucket where profile photos are stored (Rekognition reads via this Lambda role).
+    Default: kismet-photos-dev
+  EventBusName:
+    Type: String
+    Default: kismet-events
+
+Conditions:
+  HasSharedApiId: !Not [!Equals [!Ref SharedApiId, '']]
+
+Globals:
+  Function:
+    Runtime: python3.12
+    Timeout: 29
+    MemorySize: 512
+    Tracing: Active
+
+Resources:
+  ImageModerationTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Ref ImageModerationTableName
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: photoId
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
+        - AttributeName: gsi1pk
+          AttributeType: S
+        - AttributeName: gsi1sk
+          AttributeType: N
+      KeySchema:
+        - AttributeName: photoId
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: gsi1
+          KeySchema:
+            - AttributeName: gsi1pk
+              KeyType: HASH
+            - AttributeName: gsi1sk
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  ImageModerationFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub kismet-image-moderation-service-${EnvironmentName}
+      Description: Image moderation — Rekognition, DynamoDB, content.flagged, photo.uploaded.
+      CodeUri: .
+      Handler: lambda_function.lambda_handler
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ImageModerationTableName
+        - Statement:
+            - Effect: Allow
+              Action:
+                - rekognition:DetectModerationLabels
+              Resource: '*'
+        - Statement:
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+                - s3:HeadObject
+              Resource: !Sub 'arn:aws:s3:::${PhotoS3BucketName}/*'
+        - Statement:
+            - Effect: Allow
+              Action:
+                - events:PutEvents
+              Resource: !Sub arn:aws:events:${AWS::Region}:${AWS::AccountId}:event-bus/${EventBusName}
+      Environment:
+        Variables:
+          IMAGE_MODERATION_TABLE_NAME: !Ref ImageModerationTableName
+          PHOTO_S3_BUCKET: !Ref PhotoS3BucketName
+          EVENT_BUS_NAME: !Ref EventBusName
+          MODERATION_FLAG_CONFIDENCE: '60'
+          REKOGNITION_MIN_CONFIDENCE: '5'
+          ADMIN_GROUP_NAMES: admin
+      Events:
+        PostModerateImage:
+          Type: Api
+          Properties:
+            Path: /moderate/image
+            Method: post
+            RestApiId: !If [HasSharedApiId, !Ref SharedApiId, !Ref AWS::NoValue]
+        GetModerateImageHistory:
+          Type: Api
+          Properties:
+            Path: /moderate/image/history
+            Method: get
+            RestApiId: !If [HasSharedApiId, !Ref SharedApiId, !Ref AWS::NoValue]
+        PhotoUploadedRule:
+          Type: EventBridgeRule
+          Properties:
+            EventBusName: !Ref EventBusName
+            Pattern:
+              source:
+                - kismet.photo-service
+              detail-type:
+                - photo.uploaded
+
+Outputs:
+  ImageModerationFunctionName:
+    Description: Lambda function name.
+    Value: !Ref ImageModerationFunction
+  ImageModerationFunctionArn:
+    Description: Lambda function ARN.
+    Value: !GetAtt ImageModerationFunction.Arn
+  ImageModerationTableName:
+    Description: DynamoDB table name.
+    Value: !Ref ImageModerationTableName
+  ImageModerationTableArn:
+    Description: DynamoDB table ARN.
+    Value: !GetAtt ImageModerationTable.Arn
