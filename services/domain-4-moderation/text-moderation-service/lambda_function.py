@@ -15,7 +15,6 @@ os.environ.setdefault(
     os.environ.get("AWS_REGION", "us-east-1"),
 )
 
-
 # AWS clients & config
 dynamodb = boto3.resource("dynamodb")
 comprehend = boto3.client("comprehend")

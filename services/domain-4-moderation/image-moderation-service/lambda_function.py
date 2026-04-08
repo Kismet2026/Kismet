@@ -50,6 +50,19 @@ HISTORY_MAX_LIMIT = int(os.environ.get("HISTORY_MAX_LIMIT", "50"))
 _img_table = None
 
 
+def _resolve_rekognition_bucket(*, s3_bucket_override: Optional[str]) -> str:
+    """
+    Rekognition S3Object bucket: EventBridge photo.uploaded should pass
+    detail.s3Bucket (event-schema.json). HTTP POST uses env PHOTO_S3_BUCKET only.
+    """
+    if isinstance(s3_bucket_override, str):
+        o = s3_bucket_override.strip()
+        if o:
+            return o
+    base = (PHOTO_S3_BUCKET or "").strip()
+    return base
+
+
 def _table():
     global _img_table
     if _img_table is None:
@@ -86,6 +99,7 @@ def handle_eventbridge(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     pid = detail.get("photoId")
     uid = detail.get("userId")
     s3_key = detail.get("s3Key")
+    s3_bucket = detail.get("s3Bucket")
     if (
         not pid
         or not isinstance(s3_key, str)
@@ -95,12 +109,23 @@ def handle_eventbridge(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         or not uid.strip()
     ):
         return _eb_ok({"skipped": True, "reason": "missing-fields"})
+    if not isinstance(s3_bucket, str) or not s3_bucket.strip():
+        return _eb_ok({"skipped": True, "reason": "missing-s3-bucket"})
+
+    bucket = s3_bucket.strip()
+    if PHOTO_S3_BUCKET and bucket != PHOTO_S3_BUCKET.strip():
+        print(
+            "[image-moderation] detail.s3Bucket "
+            f"({bucket!r}) != PHOTO_S3_BUCKET ({PHOTO_S3_BUCKET!r}); "
+            "using detail.s3Bucket per event-schema."
+        )
 
     try:
         run_image_moderation(
             s3_key=s3_key.strip(),
             photo_id=str(pid),
             user_id=uid.strip(),
+            s3_bucket=bucket,
         )
     except RuntimeError as e:
         print(f"[image-moderation] {e}\n{traceback.format_exc()}")
@@ -217,10 +242,14 @@ def run_image_moderation(
     s3_key: str,
     photo_id: str,
     user_id: str,
+    s3_bucket: Optional[str] = None,
 ) -> Dict[str, Any]:
-    if not PHOTO_S3_BUCKET:
+    bucket = _resolve_rekognition_bucket(s3_bucket_override=s3_bucket)
+    if not bucket:
         raise RuntimeError("REKOGNITION:MISSING_BUCKET")
-    labels_out, max_conf, flagged, top_name = detect_moderation_labels(s3_key)
+    labels_out, max_conf, flagged, top_name = detect_moderation_labels(
+        s3_key, bucket=bucket
+    )
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     put_moderation_row(
@@ -262,12 +291,14 @@ def run_image_moderation(
 
 def detect_moderation_labels(
     s3_key: str,
+    *,
+    bucket: str,
 ) -> Tuple[List[Dict[str, Any]], float, bool, Optional[str]]:
     try:
         resp = rekognition.detect_moderation_labels(
             Image={
                 "S3Object": {
-                    "Bucket": PHOTO_S3_BUCKET,
+                    "Bucket": bucket,
                     "Name": s3_key,
                 }
             },

@@ -20,6 +20,20 @@ os.environ["AWS_SESSION_TOKEN"] = "testing"
 
 import lambda_function
 
+TEST_PHOTO_BUCKET = os.environ["PHOTO_S3_BUCKET"]
+
+
+def _eb_photo_detail(**extra):
+    """Minimal photo.uploaded detail aligned with docs/system-design/event-schema.json."""
+    base = {
+        "photoId": "p1",
+        "userId": "u1",
+        "s3Key": "u1/p1.jpg",
+        "s3Bucket": TEST_PHOTO_BUCKET,
+    }
+    base.update(extra)
+    return base
+
 
 # Fixtures
 @pytest.fixture
@@ -386,9 +400,8 @@ class TestEventBridge:
         mock_rekognition_clean(monkeypatch)
 
         result = lambda_function.lambda_handler(
-            eb_event("kismet.photo-service", "photo.uploaded", {
-                "photoId": "p1", "userId": "u1", "s3Key": "u1/p1.jpg",
-            }), {}
+            eb_event("kismet.photo-service", "photo.uploaded", _eb_photo_detail()),
+            {},
         )
         assert result["statusCode"] == 200
 
@@ -404,24 +417,81 @@ class TestEventBridge:
             eb_event(
                 "kismet.photo-service",
                 "photo.uploaded",
-                json.dumps({"photoId": "p2", "userId": "u2", "s3Key": "u2/p2.png"}),
-            ), {}
+                json.dumps(
+                    {
+                        "photoId": "p2",
+                        "userId": "u2",
+                        "s3Key": "u2/p2.png",
+                        "s3Bucket": TEST_PHOTO_BUCKET,
+                    }
+                ),
+            ),
+            {},
         )
         assert result["statusCode"] == 200
 
+    def test_missing_s3_bucket_skipped(self, aws_resources, monkeypatch):
+        upload_photo(aws_resources, "u1/p1.jpg")
+        mock_rekognition_clean(monkeypatch)
+        result = lambda_function.lambda_handler(
+            eb_event(
+                "kismet.photo-service",
+                "photo.uploaded",
+                {"photoId": "p1", "userId": "u1", "s3Key": "u1/p1.jpg"},
+            ),
+            {},
+        )
+        assert result["statusCode"] == 200
+        assert json.loads(result["body"]).get("reason") == "missing-s3-bucket"
+
+    def test_detail_s3_bucket_used_for_rekognition(self, aws_resources, monkeypatch):
+        alt = "kismet-photos-alt"
+        aws_resources["s3"].create_bucket(Bucket=alt)
+        aws_resources["s3"].put_object(Bucket=alt, Key="path/img.jpg", Body=b"x")
+        captured: dict = {}
+
+        def capture(**kw):
+            captured.update(kw)
+            return {"ModerationLabels": []}
+
+        monkeypatch.setattr(
+            lambda_function.rekognition, "detect_moderation_labels", capture
+        )
+        lambda_function.lambda_handler(
+            eb_event(
+                "kismet.photo-service",
+                "photo.uploaded",
+                {
+                    "photoId": "px",
+                    "userId": "ux",
+                    "s3Key": "path/img.jpg",
+                    "s3Bucket": alt,
+                },
+            ),
+            {},
+        )
+        assert captured["Image"]["S3Object"]["Bucket"] == alt
+        assert captured["Image"]["S3Object"]["Name"] == "path/img.jpg"
+
     def test_wrong_source_is_skipped(self, aws_resources):
         result = lambda_function.lambda_handler(
-            eb_event("other.service", "photo.uploaded", {
-                "photoId": "p", "userId": "u", "s3Key": "k",
-            }), {}
+            eb_event(
+                "other.service",
+                "photo.uploaded",
+                _eb_photo_detail(photoId="p", userId="u", s3Key="k"),
+            ),
+            {},
         )
         assert json.loads(result["body"]).get("skipped") is True
 
     def test_wrong_detail_type_is_skipped(self, aws_resources):
         result = lambda_function.lambda_handler(
-            eb_event("kismet.photo-service", "photo.deleted", {
-                "photoId": "p", "userId": "u", "s3Key": "k",
-            }), {}
+            eb_event(
+                "kismet.photo-service",
+                "photo.deleted",
+                _eb_photo_detail(photoId="p", userId="u", s3Key="k"),
+            ),
+            {},
         )
         assert json.loads(result["body"]).get("skipped") is True
 
@@ -440,9 +510,12 @@ class TestEventBridge:
         monkeypatch.setattr(lambda_function.events, "put_events", capture)
 
         lambda_function.lambda_handler(
-            eb_event("kismet.photo-service", "photo.uploaded", {
-                "photoId": "p1", "userId": "u1", "s3Key": "u1/p1.jpg",
-            }), {}
+            eb_event(
+                "kismet.photo-service",
+                "photo.uploaded",
+                _eb_photo_detail(),
+            ),
+            {},
         )
 
         assert len(published) == 1
