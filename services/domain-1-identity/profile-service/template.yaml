@@ -54,6 +54,8 @@ Resources:
         - AWSLambdaBasicExecutionRole
         - DynamoDBCrudPolicy:
             TableName: !Ref ProfilesTableName
+        - EventBridgePutEventsPolicy:
+            EventBusName: !Ref EventBusName
       Environment:
         Variables:
           PROFILES_TABLE_NAME: !Ref ProfilesTableName

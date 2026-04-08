@@ -1,65 +1,233 @@
 import json
 import unittest
 from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
+
+from botocore.exceptions import ClientError
 
 from lambda_function import lambda_handler
 
 
-class PhotoServiceHandlerTests(unittest.TestCase):
+ENV = {
+    "PHOTOS_TABLE_NAME": "kismet-photos-dev",
+    "PHOTOS_BUCKET_NAME": "kismet-photos-dev",
+    "PHOTOS_CDN_BASE_URL": "https://photos.kismet.dev",
+    "EVENT_BUS_NAME": "kismet-events",
+}
+
+AUTHED_EVENT_CONTEXT = {
+    "requestContext": {"authorizer": {"claims": {"sub": "user-123"}}}
+}
+
+
+class UploadPhotoTests(unittest.TestCase):
     def setUp(self):
         self.context = SimpleNamespace(aws_request_id="req-photo-456")
 
-    def test_upload_route_returns_not_implemented(self):
-        event = make_event(
-            path="/photos/upload",
-            method="POST",
-            body={"contentType": "image/jpeg", "filename": "profile.jpg"},
-        )
+    def test_upload_success(self):
+        with patch.dict("os.environ", ENV), \
+             patch("lambda_function.dynamodb") as mock_dynamodb, \
+             patch("lambda_function.s3") as mock_s3, \
+             patch("lambda_function.events") as mock_events:
 
-        response = lambda_handler(event, self.context)
-        payload = json.loads(response["body"])
+            mock_table = mock_dynamodb.Table.return_value
+            mock_table.query.return_value = {"Count": 0, "Items": []}
+            mock_table.put_item.return_value = {}
+            mock_s3.generate_presigned_url.return_value = "https://s3.example.com/presigned"
+            mock_events.put_events.return_value = {"FailedEntryCount": 0, "Entries": [{"EventId": "e1"}]}
 
-        self.assertEqual(response["statusCode"], 501)
-        self.assertEqual(payload["operation"], "uploadPhoto")
-        self.assertEqual(payload["requestId"], "req-photo-456")
+            event = {**make_event("/photos/upload", "POST", body={"contentType": "image/jpeg", "filename": "profile.jpg"}), **AUTHED_EVENT_CONTEXT}
+            response = lambda_handler(event, self.context)
+            payload = json.loads(response["body"])
+
+            self.assertEqual(response["statusCode"], 200)
+            self.assertIn("photoId", payload)
+            self.assertEqual(payload["uploadUrl"], "https://s3.example.com/presigned")
+            self.assertEqual(payload["expiresIn"], 300)
+
+    def test_upload_unauthenticated_returns_401(self):
+        with patch.dict("os.environ", ENV):
+            response = lambda_handler(make_event("/photos/upload", "POST", body={"contentType": "image/jpeg"}), self.context)
+            self.assertEqual(response["statusCode"], 401)
+
+    def test_upload_missing_content_type_returns_400(self):
+        with patch.dict("os.environ", ENV):
+            event = {**make_event("/photos/upload", "POST", body={}), **AUTHED_EVENT_CONTEXT}
+            response = lambda_handler(event, self.context)
+            self.assertEqual(response["statusCode"], 400)
+
+    def test_upload_invalid_content_type_returns_400(self):
+        with patch.dict("os.environ", ENV):
+            event = {**make_event("/photos/upload", "POST", body={"contentType": "image/gif"}), **AUTHED_EVENT_CONTEXT}
+            response = lambda_handler(event, self.context)
+            payload = json.loads(response["body"])
+            self.assertEqual(response["statusCode"], 400)
+            self.assertEqual(payload["code"], "VALIDATION_ERROR")
+
+    def test_upload_exceeds_limit_returns_422(self):
+        with patch.dict("os.environ", ENV), \
+             patch("lambda_function.dynamodb") as mock_dynamodb:
+
+            mock_dynamodb.Table.return_value.query.return_value = {"Count": 6, "Items": []}
+
+            event = {**make_event("/photos/upload", "POST", body={"contentType": "image/jpeg"}), **AUTHED_EVENT_CONTEXT}
+            response = lambda_handler(event, self.context)
+            payload = json.loads(response["body"])
+
+            self.assertEqual(response["statusCode"], 422)
+            self.assertEqual(payload["code"], "LIMIT_EXCEEDED")
+
+
+class ListPhotosTests(unittest.TestCase):
+    def setUp(self):
+        self.context = SimpleNamespace(aws_request_id="req-photo-456")
+
+    def test_list_returns_photos_with_cdn_urls(self):
+        with patch.dict("os.environ", ENV), \
+             patch("lambda_function.dynamodb") as mock_dynamodb:
+
+            mock_dynamodb.Table.return_value.query.return_value = {"Items": [
+                {"photoId": "photo-001", "s3Key": "user-123/photo-001.jpg", "isPrimary": True, "uploadedAt": "2026-04-01T12:00:00+00:00"},
+                {"photoId": "photo-002", "s3Key": "user-123/photo-002.jpg", "isPrimary": False, "uploadedAt": "2026-04-01T11:00:00+00:00"},
+            ]}
+
+            response = lambda_handler(make_event("/photos/user-123", "GET"), self.context)
+            payload = json.loads(response["body"])
+
+            self.assertEqual(response["statusCode"], 200)
+            self.assertEqual(payload["count"], 2)
+            self.assertEqual(payload["photos"][0]["url"], "https://photos.kismet.dev/user-123/photo-001.jpg")
+            self.assertTrue(payload["photos"][0]["isPrimary"])
+
+    def test_list_empty_returns_empty_array(self):
+        with patch.dict("os.environ", ENV), \
+             patch("lambda_function.dynamodb") as mock_dynamodb:
+
+            mock_dynamodb.Table.return_value.query.return_value = {"Items": []}
+
+            response = lambda_handler(make_event("/photos/user-999", "GET"), self.context)
+            payload = json.loads(response["body"])
+
+            self.assertEqual(response["statusCode"], 200)
+            self.assertEqual(payload["count"], 0)
+            self.assertEqual(payload["photos"], [])
 
     def test_get_route_extracts_user_id(self):
-        event = make_event(path="/photos/user-123", method="GET")
+        with patch.dict("os.environ", ENV), \
+             patch("lambda_function.dynamodb") as mock_dynamodb:
 
-        response = lambda_handler(event, self.context)
-        payload = json.loads(response["body"])
+            mock_dynamodb.Table.return_value.query.return_value = {"Items": []}
 
-        self.assertEqual(response["statusCode"], 501)
-        self.assertEqual(payload["operation"], "listPhotos")
-        self.assertEqual(payload["pathParameters"]["userId"], "user-123")
+            response = lambda_handler(make_event("/photos/user-123", "GET"), self.context)
+            self.assertEqual(response["statusCode"], 200)
+            mock_dynamodb.Table.return_value.query.assert_called_once()
 
-    def test_delete_route_extracts_photo_id(self):
-        event = make_event(path="/photos/photo-001", method="DELETE")
 
-        response = lambda_handler(event, self.context)
-        payload = json.loads(response["body"])
+class DeletePhotoTests(unittest.TestCase):
+    def setUp(self):
+        self.context = SimpleNamespace(aws_request_id="req-photo-456")
 
-        self.assertEqual(response["statusCode"], 501)
-        self.assertEqual(payload["operation"], "deletePhoto")
-        self.assertEqual(payload["pathParameters"]["photoId"], "photo-001")
+    def test_delete_success(self):
+        with patch.dict("os.environ", ENV), \
+             patch("lambda_function.dynamodb") as mock_dynamodb, \
+             patch("lambda_function.s3") as mock_s3:
+
+            mock_table = mock_dynamodb.Table.return_value
+            mock_table.get_item.return_value = {"Item": {
+                "photoId": "photo-001",
+                "s3Key": "user-123/photo-001.jpg",
+                "isPrimary": False,
+            }}
+            mock_table.delete_item.return_value = {}
+            mock_s3.delete_object.return_value = {}
+
+            event = {**make_event("/photos/photo-001", "DELETE"), **AUTHED_EVENT_CONTEXT}
+            response = lambda_handler(event, self.context)
+            payload = json.loads(response["body"])
+
+            self.assertEqual(response["statusCode"], 200)
+            self.assertEqual(payload["message"], "Photo deleted successfully")
+            mock_s3.delete_object.assert_called_once_with(Bucket=ENV["PHOTOS_BUCKET_NAME"], Key="user-123/photo-001.jpg")
+
+    def test_delete_not_found_returns_404(self):
+        with patch.dict("os.environ", ENV), \
+             patch("lambda_function.dynamodb") as mock_dynamodb:
+
+            mock_dynamodb.Table.return_value.get_item.return_value = {}
+
+            event = {**make_event("/photos/nonexistent", "DELETE"), **AUTHED_EVENT_CONTEXT}
+            response = lambda_handler(event, self.context)
+            payload = json.loads(response["body"])
+
+            self.assertEqual(response["statusCode"], 404)
+
+    def test_delete_unauthenticated_returns_401(self):
+        with patch.dict("os.environ", ENV):
+            response = lambda_handler(make_event("/photos/photo-001", "DELETE"), self.context)
+            self.assertEqual(response["statusCode"], 401)
+
+
+class SetPrimaryPhotoTests(unittest.TestCase):
+    def setUp(self):
+        self.context = SimpleNamespace(aws_request_id="req-photo-456")
+
+    def test_set_primary_success(self):
+        with patch.dict("os.environ", ENV), \
+             patch("lambda_function.dynamodb") as mock_dynamodb:
+
+            mock_table = mock_dynamodb.Table.return_value
+            mock_table.get_item.return_value = {"Item": {"photoId": "photo-002", "isPrimary": False}}
+            mock_table.query.return_value = {"Items": [
+                {"photoId": "photo-001", "isPrimary": True},
+            ]}
+            mock_table.update_item.return_value = {}
+
+            event = {**make_event("/photos/photo-002/primary", "PUT"), **AUTHED_EVENT_CONTEXT}
+            response = lambda_handler(event, self.context)
+            payload = json.loads(response["body"])
+
+            self.assertEqual(response["statusCode"], 200)
+            self.assertEqual(payload["photoId"], "photo-002")
+            self.assertTrue(payload["isPrimary"])
+
+    def test_set_primary_not_found_returns_404(self):
+        with patch.dict("os.environ", ENV), \
+             patch("lambda_function.dynamodb") as mock_dynamodb:
+
+            mock_dynamodb.Table.return_value.get_item.return_value = {}
+
+            event = {**make_event("/photos/nonexistent/primary", "PUT"), **AUTHED_EVENT_CONTEXT}
+            response = lambda_handler(event, self.context)
+
+            self.assertEqual(response["statusCode"], 404)
+
+    def test_set_primary_unauthenticated_returns_401(self):
+        with patch.dict("os.environ", ENV):
+            response = lambda_handler(make_event("/photos/photo-002/primary", "PUT"), self.context)
+            self.assertEqual(response["statusCode"], 401)
 
     def test_set_primary_route_extracts_photo_id(self):
-        event = make_event(path="/photos/photo-002/primary", method="PUT")
+        with patch.dict("os.environ", ENV), \
+             patch("lambda_function.dynamodb") as mock_dynamodb:
 
-        response = lambda_handler(event, self.context)
-        payload = json.loads(response["body"])
+            mock_table = mock_dynamodb.Table.return_value
+            mock_table.get_item.return_value = {"Item": {"photoId": "photo-002"}}
+            mock_table.query.return_value = {"Items": []}
+            mock_table.update_item.return_value = {}
 
-        self.assertEqual(response["statusCode"], 501)
-        self.assertEqual(payload["operation"], "setPrimaryPhoto")
-        self.assertEqual(payload["pathParameters"]["photoId"], "photo-002")
+            event = {**make_event("/photos/photo-002/primary", "PUT"), **AUTHED_EVENT_CONTEXT}
+            response = lambda_handler(event, self.context)
+            payload = json.loads(response["body"])
+
+            self.assertEqual(payload["photoId"], "photo-002")
+
+
+class RoutingTests(unittest.TestCase):
+    def setUp(self):
+        self.context = SimpleNamespace(aws_request_id="req-photo-456")
 
     def test_invalid_json_body_returns_validation_error(self):
-        event = make_event(
-            path="/photos/upload",
-            method="POST",
-            raw_body='{"contentType": "image/jpeg"',
-        )
-
+        event = {**make_event("/photos/upload", "POST", raw_body='{"broken"'), **AUTHED_EVENT_CONTEXT}
         response = lambda_handler(event, self.context)
         payload = json.loads(response["body"])
 
@@ -67,25 +235,27 @@ class PhotoServiceHandlerTests(unittest.TestCase):
         self.assertEqual(payload["code"], "VALIDATION_ERROR")
 
     def test_unknown_route_returns_not_found(self):
-        event = make_event(path="/photos/photo-001/archive", method="PUT")
-
-        response = lambda_handler(event, self.context)
+        response = lambda_handler(make_event("/photos/photo-001/archive", "PUT"), self.context)
         payload = json.loads(response["body"])
 
         self.assertEqual(response["statusCode"], 404)
         self.assertEqual(payload["code"], "NOT_FOUND")
+
+    def test_get_upload_path_returns_not_found(self):
+        # GET /photos/upload should not match uploadPhoto — it should match listPhotos with userId="upload"
+        with patch.dict("os.environ", ENV), \
+             patch("lambda_function.dynamodb") as mock_dynamodb:
+            mock_dynamodb.Table.return_value.query.return_value = {"Items": []}
+            response = lambda_handler(make_event("/photos/upload", "GET"), self.context)
+            # This resolves to listPhotos with userId="upload", not a 404
+            self.assertEqual(response["statusCode"], 200)
 
 
 def make_event(path, method, body=None, raw_body=None):
     payload = raw_body
     if payload is None and body is not None:
         payload = json.dumps(body)
-
-    return {
-        "path": path,
-        "httpMethod": method,
-        "body": payload,
-    }
+    return {"path": path, "httpMethod": method, "body": payload}
 
 
 if __name__ == "__main__":
