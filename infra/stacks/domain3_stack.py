@@ -91,3 +91,43 @@ class Domain3Stack(cdk.Stack):
         message_service.function.add_environment(
             "TABLE_NAME", message_service.tables[0].table_name
         )
+
+        # ── Icebreaker Service (Jiaxin) ───────────────────────────────────────
+        # Generates AI conversation starters via Bedrock when a match is created.
+        # Caches results in DynamoDB so suggestions are ready before users open chat.
+        # Routes:
+        #   POST /icebreaker/generate   — generate (or return cached) icebreakers
+        #   GET  /icebreaker/{matchId}  — retrieve previously generated icebreakers
+        icebreaker_service = KismetService(
+            self,
+            "IcebreakerService",
+            service_name="icebreaker",
+            code_path="../services/domain-3-messaging/icebreaker-service",
+            tables=[
+                {
+                    "table_name": "kismet-icebreakers",
+                    "pk": {"name": "PK", "type": "S"},
+                    "sk": {"name": "SK", "type": "S"},
+                }
+            ],
+            routes=[
+                {"method": "POST", "path": "/icebreaker/generate", "auth": True},
+                {"method": "GET", "path": "/icebreaker/{matchId}", "auth": True},
+            ],
+            consume_events=["match.created"],  # auto-generate when a match is created
+            publish_events=False,
+            extra_policies=[
+                iam.PolicyStatement(
+                    actions=["bedrock:InvokeModel"],
+                    resources=[
+                        f"arn:aws:bedrock:{self.region}::foundation-model/anthropic.claude-3-haiku-20240307-v1:0"
+                    ],
+                )
+            ],
+            environment={
+                "TABLE_NAME": "kismet-icebreakers",
+            },
+            api=shared.api,
+            authorizer=shared.authorizer,
+            event_bus=shared.event_bus,
+        )
