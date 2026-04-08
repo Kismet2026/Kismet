@@ -115,21 +115,18 @@ Rules are managed per-service (each service creates its own EventBridge rule to 
 | Frontend | `kismet-frontend` S3 bucket | Serve React app |
 | Photos | `kismet-photos` S3 bucket | Serve user photos with caching |
 
-### ~~2.6 ElastiCache (Redis)~~ → Replaced by DynamoDB TTL
+### 2.6 ElastiCache (Redis)
 
-> **Decision (2026-04-01):** ElastiCache 已从架构中移除。
-> 原因：需要 VPC + NAT Gateway，配置复杂度高、有额外费用（~$32/月），投入产出比差。
-> Presence Service 和 Rate Limiter 改用 DynamoDB + TTL 实现。
+| Resource | Purpose |
+|----------|---------|
+| **ElastiCache Cluster** | `kismet-redis` — Rate Limiter per-user sliding window counters |
 
-**Presence — DynamoDB with TTL:**
-- Table: `kismet-presence` (PK: `USER#{userId}`, SK: `STATUS`)
-- TTL 字段：60 秒后自动过期 → 用户自动标记为 offline
-- 前端每 30 秒发一次 `POST /presence/heartbeat`
+**Rate Limiting — ElastiCache (Redis) + API Gateway Throttling:**
+- Key format: `ratelimit:{userId}:{action}:{windowTimestamp}`
+- Redis `INCR` + `EX`/`PX` 实现滑动窗口自动过期
+- 结合 API Gateway Usage Plans（基础防护）
 
-**Rate Limiting — DynamoDB with TTL + API Gateway Throttling:**
-- Table: `kismet-rate-limits` (PK: `USER#{userId}#ACTION#{action}`, SK: `WINDOW#{timestamp}`)
-- TTL 字段：滑动窗口过期
-- 结合 API Gateway 自带的 throttle 设置（基础防护）
+> **Note:** ElastiCache 需要 VPC + NAT Gateway。Presence Service 仍使用 DynamoDB TTL。
 
 ### 2.7 Kinesis (Analytics Pipeline)
 
@@ -307,9 +304,9 @@ This way:
 
 If the team hits blockers, here are drop-in simplifications:
 
-### ~~ElastiCache → DynamoDB TTL~~ (已执行)
+### ElastiCache (Redis) for Rate Limiter
 
-已在 §2.6 中正式移除 ElastiCache，改用 DynamoDB TTL。不再是备选方案，而是默认方案。
+Rate Limiter 使用 ElastiCache (Redis) 实现用户级精细限流。需要配置 VPC + NAT Gateway。
 
 ### Kinesis → Direct S3 Write
 
@@ -412,7 +409,7 @@ All resources should stay within AWS free tier or Academy credits:
 | SES | 62K emails/month (from EC2) |
 
 **Watch out for:**
-- **ElastiCache** — NOT free tier. Use DynamoDB TTL alternative if cost-constrained.
+- **ElastiCache** — NOT free tier (~$32/month). Required for Rate Limiter.
 - **Bedrock** — Pay per token. Use sparingly or mock for development.
 - **Kinesis** — $0.015/shard/hour. Consider the direct-S3 alternative.
 - **NAT Gateway** — $0.045/hour if using VPC. Avoid if possible.
@@ -423,14 +420,19 @@ All resources should stay within AWS free tier or Academy credits:
 
 ```
 infra/
-├── shared/
-│   ├── template.yaml              # SAM template: Cognito, EventBridge, API GW, S3, CloudFront
-│   ├── parameters-dev.json        # Environment-specific config
-│   └── README.md                  # How to deploy shared infra
+├── app.py                         # CDK entry point
+├── kismet_constructs/
+│   └── kismet_service.py          # Reusable KismetService construct
+├── stacks/
+│   ├── shared_stack.py            # Cognito, API GW, EventBridge, S3, Kinesis, SNS
+│   ├── domain1_stack.py           # Identity & Profiles services
+│   ├── domain2_stack.py           # Discovery & Matching services
+│   ├── domain3_stack.py           # Messaging services
+│   ├── domain4_stack.py           # Safety & Moderation services
+│   ├── domain5_stack.py           # Notifications & Engagement services
+│   └── domain6_stack.py           # Analytics & Admin services
 │
 services/domain-X/service-name/
-│   ├── template.yaml              # SAM template: Lambda + DynamoDB + IAM
-│   ├── samconfig.toml             # SAM deploy config (auto-generated)
 │   ├── lambda_function.py
 │   ├── requirements.txt
 │   ├── tests/
@@ -443,10 +445,10 @@ services/domain-X/service-name/
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
-| IaC Tool | **SAM** | Simplest for Lambda-centric apps; 3-week timeline |
+| IaC Tool | **AWS CDK (Python)** | Migrated from SAM; reusable KismetService construct |
 | API Gateway | **One REST + optional WebSocket** | Single entry point; shared auth |
 | Messaging | **HTTP polling → upgrade to WebSocket if time** | De-risks Week 2; same backend |
-| Caching | **DynamoDB TTL** (ElastiCache removed) | Avoid VPC + NAT Gateway complexity and cost |
+| Rate Limiting | **ElastiCache (Redis)** + API Gateway Usage Plans | Redis for per-user sliding window; API GW for global throttle |
 | Analytics | **Kinesis** (default) / Direct S3 (fallback) | Kinesis is a course requirement |
 | Icebreakers | **Bedrock** (default) / Hardcoded (fallback) | Depends on Bedrock access timing |
 | Environments | **Single `dev` env** | 3-week project, no prod needed |

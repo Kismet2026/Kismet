@@ -42,13 +42,13 @@ A microservice dating app built on AWS — with BaZi (八字) compatibility matc
 
 | Domain | Members | Services |
 |--------|---------|----------|
-| **Identity & Profiles** | Quinn Gao, Zhiping | Auth, Profile, Photo, Email Verification |
-| **Discovery & Matching** | Qinyuan, Hao | Discovery, Swipe, Match, Recommendation, BaZi |
+| **Identity & Profiles** | Quinn Gao, KS | Auth, Profile, Photo, Email Verification |
+| **Discovery & Matching** | Qinyuan | Discovery, Swipe, Match, Recommendation, BaZi |
 | **Messaging** | Parker, QX, Jiaxin | Chat Gateway, Message, Presence, Icebreaker |
-| **Safety & Moderation** | Yue, KS, Amber | Text Moderation, Image Moderation, Report, Rate Limiter |
+| **Safety & Moderation** | Yue, Amber | Text Moderation, Image Moderation, Report, Rate Limiter |
 | **Notifications** | Nili, Xiaoyuan | Push Notification, Email, Event Bus, Scheduler |
 | **Analytics & Admin** | Jessica, Lingyun | Activity Logger, Analytics Pipeline, Admin Dashboard, Health Monitor |
-| **Integration** | Zhiping, QX, KS | Cross-domain service orchestration |
+| **Integration** | QX, KS | Cross-domain service orchestration |
 | **PM / Frontend** | Qinyuan | Architecture, frontend (AI-generated), coordination |
 
 ---
@@ -61,16 +61,16 @@ A microservice dating app built on AWS — with BaZi (八字) compatibility matc
 |---------|-------|-------------|-------------|
 | Auth Service | Quinn Gao | Cognito, Lambda | Sign up, login, JWT tokens |
 | Profile Service | Quinn Gao | Lambda, DynamoDB | CRUD for user profiles |
-| Photo Service | Zhiping | S3, Lambda, CloudFront | Upload, resize, serve photos |
-| Email Verification | Zhiping | SES, Lambda, Cognito | .edu email verification |
+| Photo Service | KS | S3, Lambda, CloudFront | Upload, resize, serve photos |
+| Email Verification | KS | SES, Lambda, Cognito | .edu email verification |
 
 ### Domain 2 — Discovery & Matching
 
 | Service | Owner | AWS Services | Description |
 |---------|-------|-------------|-------------|
-| Discovery Service | Hao | Lambda, DynamoDB | Filter and browse candidates |
-| Swipe Service | Hao | Lambda, DynamoDB | Record like/pass actions |
-| Match Service | Hao | Lambda, DynamoDB Streams, SNS | Detect mutual likes |
+| Discovery Service | Qinyuan | Lambda, DynamoDB | Filter and browse candidates |
+| Swipe Service | Qinyuan | Lambda, DynamoDB | Record like/pass actions |
+| Match Service | Qinyuan | Lambda, DynamoDB Streams, SNS | Detect mutual likes |
 | Recommendation Service | Qinyuan | Lambda, DynamoDB | Score and rank candidates |
 | BaZi Service | Qinyuan | Lambda | 八字 compatibility via external API |
 
@@ -88,9 +88,9 @@ A microservice dating app built on AWS — with BaZi (八字) compatibility matc
 | Service | Owner | AWS Services | Description |
 |---------|-------|-------------|-------------|
 | Text Moderation | Yue | Comprehend, Lambda | Flag toxic content |
-| Image Moderation | KS | Rekognition, Lambda | Block inappropriate photos |
+| Image Moderation | Yue | Rekognition, Lambda | Block inappropriate photos |
 | Report Service | Amber | Lambda, DynamoDB, SES | User reports → admin alerts |
-| Rate Limiter | Amber | API Gateway, DynamoDB | Anti-spam protection |
+| Rate Limiter | Amber | API Gateway, ElastiCache (Redis) | Anti-spam protection |
 
 ### Domain 5 — Notifications & Engagement
 
@@ -122,7 +122,7 @@ A microservice dating app built on AWS — with BaZi (八字) compatibility matc
 | Database | DynamoDB, DynamoDB Streams |
 | Storage | S3 |
 | CDN | CloudFront |
-| Caching | DynamoDB TTL (ElastiCache removed) |
+| Caching / Rate Limiting | ElastiCache (Redis) |
 | AI/ML | Rekognition, Comprehend, Bedrock |
 | Messaging | SNS, SES |
 | Event-Driven | EventBridge, EventBridge Scheduler |
@@ -138,12 +138,35 @@ A microservice dating app built on AWS — with BaZi (八字) compatibility matc
 ```
 kismet/
 ├── README.md
+├── PRD.md
+│
 ├── docs/
-│   ├── PRD.md
-│   ├── api-contracts/          ← one file per service
-│   ├── system-design/          ← architecture & infra design docs
-│   └── guides/                 ← setup guide, communication guide, templates
-├── frontend/
+│   ├── api-contracts/                ← one API contract per service (25 files)
+│   ├── system-design/
+│   │   ├── Design_Doc.md             ← high-level architecture & decisions
+│   │   ├── Infrastructure_Design.md  ← AWS resource details
+│   │   ├── CDK_Migration_Plan.md     ← CDK migration guide
+│   │   └── event-schema.json         ← canonical EventBridge event schemas
+│   └── guides/
+│       ├── Kismet_Setup_Guide.md     ← dev environment setup
+│       ├── Service_Communication_Guide.md
+│       └── SERVICE_README_TEMPLATE.md
+│
+├── infra/                            ← AWS CDK (Python)
+│   ├── app.py                        ← CDK entry point
+│   ├── cdk.json
+│   ├── requirements.txt
+│   ├── kismet_constructs/
+│   │   └── kismet_service.py         ← reusable KismetService construct
+│   └── stacks/
+│       ├── shared_stack.py           ← Cognito, API GW, EventBridge, S3, Kinesis, SNS
+│       ├── domain1_stack.py          ← Identity & Profiles
+│       ├── domain2_stack.py          ← Discovery & Matching
+│       ├── domain3_stack.py          ← Messaging
+│       ├── domain4_stack.py          ← Safety & Moderation
+│       ├── domain5_stack.py          ← Notifications & Engagement
+│       └── domain6_stack.py          ← Analytics & Admin
+│
 ├── services/
 │   ├── domain-1-identity/
 │   │   ├── auth-service/
@@ -176,18 +199,31 @@ kismet/
 │       ├── analytics-pipeline-service/
 │       ├── admin-dashboard-service/
 │       └── health-monitor-service/
-└── infra/
+│
+└── frontend/                         ← React app (AI-generated)
 ```
+
+Each service follows the same structure:
+```
+service-name/
+├── lambda_function.py      ← handler function: handler(event, context)
+├── requirements.txt
+├── tests/
+│   └── test_lambda_function.py
+└── README.md
+```
+
 
 ---
 
 ## Git Workflow
 
-- `main` — stable, deployable
-- `dev` — integration branch
+- `main` — stable, deployable (branch protection enabled)
 - `domain-N/service-name` — feature branches
 
-**PR flow:** your branch → `dev` (1 review from domain partner) → `main` (PM merges)
+**PR flow:** feature branch → PR to `main` → 1 review required → merge
+
+> `main` has branch protection: direct push disabled, at least 1 approving review required.
 
 ---
 

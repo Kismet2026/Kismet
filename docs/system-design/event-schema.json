@@ -39,7 +39,7 @@
       "detail-type": "message.sent",
       "description": "用户发送消息后发布。",
       "publisher": "Message Service",
-      "consumers": ["Text Moderation", "Activity Logger"],
+      "consumers": ["Text Moderation", "Push Notification", "Activity Logger"],
       "detail": {
         "messageId": { "type": "string", "example": "msg-001" },
         "matchId": { "type": "string", "example": "match-789" },

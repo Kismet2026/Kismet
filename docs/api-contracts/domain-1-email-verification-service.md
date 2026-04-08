@@ -1,6 +1,6 @@
 # Email Verification Service — API Contract
 
-**Owner:** Zhiping
+**Owner:** KS
 **Domain:** Identity & Profiles
 **Base Path:** `/verify`
 **AWS Services:** SES, Lambda, Cognito

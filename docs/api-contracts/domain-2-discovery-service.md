@@ -1,6 +1,6 @@
 # Discovery Service — API Contract
 
-**Owner:** Hao
+**Owner:** Qinyuan
 **Domain:** Discovery & Matching
 **Base Path:** `/discovery`
 **AWS Services:** Lambda, DynamoDB

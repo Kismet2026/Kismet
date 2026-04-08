@@ -1,6 +1,6 @@
 # Photo Service — API Contract
 
-**Owner:** Zhiping
+**Owner:** KS
 **Domain:** Identity & Profiles
 **Base Path:** `/photos`
 **AWS Services:** S3, Lambda, CloudFront
