@@ -131,13 +131,21 @@ class Domain2Stack(cdk.Stack):
             consume_events=["profile.completed", "swipe.created"],
             environment={
                 "DISCOVERY_TABLE_NAME": "kismet-discovery",
+                "SWIPE_TABLE_NAME": "kismet-swipes",
             },
             extra_policies=[
-                # Recommendation needs to read discovery table for candidate profiles
+                # Recommendation needs to read discovery table for candidate profiles + BaZi cache
                 iam.PolicyStatement(
                     actions=["dynamodb:Scan", "dynamodb:Query", "dynamodb:GetItem"],
                     resources=[
                         f"arn:aws:dynamodb:{self.region}:{self.account}:table/kismet-discovery",
+                    ],
+                ),
+                # Recommendation needs to read swipe table to exclude already-swiped candidates
+                iam.PolicyStatement(
+                    actions=["dynamodb:Query"],
+                    resources=[
+                        f"arn:aws:dynamodb:{self.region}:{self.account}:table/kismet-swipes",
                     ],
                 ),
             ],

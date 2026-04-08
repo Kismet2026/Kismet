@@ -106,7 +106,7 @@ Computes and caches personalized candidate recommendations.
 
 **Table:** `kismet-recommendations` — PK: `USER#{userId}`, SK: `SCORE#{score}#{candidateId}`
 
-**Score breakdown:** `locationProximity`, `sharedInterests`, `baziCompatibility`, `activityRecency`
+**Score breakdown:** `baziCompatibility` (0-40, from BaZi cache), `profileCompleteness` (0-20, avatar/bio/city), `activityRecency` (10, placeholder)
 
 ---
 
@@ -137,7 +137,8 @@ Proxies to external BaZi API for compatibility scoring. Stateless — no table, 
 | Match           | `kismet-swipes` table   | Check reverse like for mutual match    |
 | Discovery       | `kismet-swipes` table   | Filter out already-swiped candidates   |
 | Discovery       | External BaZi API       | Fetch compatibility scores (cached)    |
-| Recommendation  | `kismet-discovery` table| Fetch candidate profiles for scoring   |
+| Recommendation  | `kismet-discovery` table| Fetch candidate profiles + BaZi cache  |
+| Recommendation  | `kismet-swipes` table   | Exclude already-swiped candidates      |
 
 ## Environment Variables
 
@@ -145,7 +146,7 @@ Proxies to external BaZi API for compatibility scoring. Stateless — no table, 
 |------------------------|---------------------|--------------------------|
 | `TABLE_NAME`           | All (except BaZi)   | Service-specific         |
 | `EVENT_BUS_NAME`       | All (except BaZi)   | `kismet-events`          |
-| `SWIPE_TABLE_NAME`     | Match, Discovery    | `kismet-swipes`          |
+| `SWIPE_TABLE_NAME`     | Match, Discovery, Recommendation | `kismet-swipes` |
 | `DISCOVERY_TABLE_NAME` | Recommendation      | `kismet-discovery`       |
 | `BAZI_API_URL`         | Discovery, BaZi     | `https://match-date-nu.vercel.app/api/match` |
 | `BAZI_API_KEY`         | Discovery, BaZi     | `ABC`                    |

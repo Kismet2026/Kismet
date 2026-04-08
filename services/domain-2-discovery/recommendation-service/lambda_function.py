@@ -8,10 +8,12 @@ dynamodb = boto3.resource('dynamodb')
 
 TABLE_NAME = os.environ.get('TABLE_NAME', 'kismet-recommendations')
 DISCOVERY_TABLE = os.environ.get('DISCOVERY_TABLE_NAME', 'kismet-discovery')
+SWIPE_TABLE_NAME = os.environ.get('SWIPE_TABLE_NAME', 'kismet-swipes')
 EVENT_BUS_NAME = os.environ.get('EVENT_BUS_NAME', 'kismet-events')
 
 table = dynamodb.Table(TABLE_NAME)
 discovery_table = dynamodb.Table(DISCOVERY_TABLE)
+swipe_table = dynamodb.Table(SWIPE_TABLE_NAME)
 
 
 class DecimalEncoder(json.JSONEncoder):
@@ -42,15 +44,23 @@ def handler(event, context):
 
 
 def handle_profile_completed(event):
-    """When a new user completes profile, compute scores for existing users."""
+    """When a new user completes profile, invalidate cached recommendations for all users.
+    New candidate in the pool means existing caches may be stale.
+    For MVP, we just note it — caches are lazy-recomputed on next GET /recommend."""
     detail = event.get('detail', {})
     new_user_id = detail.get('userId')
     if not new_user_id:
         return {'statusCode': 400, 'body': 'Missing userId'}
 
-    # In production, iterate existing users and compute pairwise scores.
-    # For MVP, scores are computed on-demand in get_recommendations.
-    return {'statusCode': 200, 'body': 'Profile noted for recommendation'}
+    # Store a marker so get_recommendations knows the pool changed
+    table.put_item(Item={
+        'PK': 'SYSTEM',
+        'SK': 'LAST_PROFILE_UPDATE',
+        'userId': new_user_id,
+        'updatedAt': datetime.utcnow().isoformat() + 'Z',
+    })
+
+    return {'statusCode': 200, 'body': 'Profile noted, caches will refresh on next request'}
 
 
 def handle_swipe_created(event):
@@ -142,6 +152,24 @@ def _compute_recommendations(user_id, limit):
     """Compute recommendation scores for a user from the discovery pool."""
     from boto3.dynamodb.conditions import Key, Attr
 
+    # Get user's own profile for BaZi lookup
+    user_profile = discovery_table.get_item(
+        Key={'PK': f'PROFILE#{user_id}', 'SK': 'META'}
+    ).get('Item', {})
+    user_birth = user_profile.get('birthDate', '')
+
+    # Get BaZi scores from discovery table cache
+    bazi_scores = {}
+    if user_birth:
+        bazi_result = discovery_table.get_item(
+            Key={'PK': f'BAZI#{user_birth}', 'SK': 'SCORES'}
+        ).get('Item', {})
+        raw_scores = bazi_result.get('scores', {})
+        bazi_scores = {k: int(v) for k, v in raw_scores.items()}
+
+    # Get already-swiped users to exclude
+    swiped_ids = _get_swiped_user_ids(user_id)
+
     # Get all candidate profiles from discovery table
     result = discovery_table.scan(
         FilterExpression=Key('SK').eq('META') & Attr('userId').ne(user_id),
@@ -153,7 +181,12 @@ def _compute_recommendations(user_id, limit):
 
     for profile in result.get('Items', []):
         candidate_id = profile.get('userId', '')
-        score_breakdown = _calculate_score(profile)
+
+        # Skip already-swiped
+        if candidate_id in swiped_ids:
+            continue
+
+        score_breakdown = _calculate_score(profile, bazi_scores)
         total_score = sum(score_breakdown.values())
 
         candidate = {
@@ -164,6 +197,7 @@ def _compute_recommendations(user_id, limit):
             'age': profile.get('age', 0),
             'gender': profile.get('gender', ''),
             'location': profile.get('location', ''),
+            'city': profile.get('city', ''),
             'avatarUrl': profile.get('avatarUrl', ''),
             'score': total_score,
             'scoreBreakdown': score_breakdown,
@@ -179,17 +213,52 @@ def _compute_recommendations(user_id, limit):
     return candidates[:limit]
 
 
-def _calculate_score(profile):
-    """Simple scoring — in production, would call BaZi service and use richer signals."""
-    import random
-    random.seed(hash(profile.get('userId', '')))
+def _calculate_score(profile, bazi_scores):
+    """Score a candidate using BaZi compatibility + profile completeness signals."""
+    candidate_birth = profile.get('birthDate', '')
+
+    # BaZi compatibility (0-99 from external API, scaled to 0-40 weight)
+    raw_bazi = bazi_scores.get(candidate_birth)
+    bazi_score = int(raw_bazi * 40 / 100) if raw_bazi is not None else 20  # default 20 if unknown
+
+    # Profile completeness (has avatar, bio, etc.)
+    completeness = 0
+    if profile.get('avatarUrl'):
+        completeness += 8
+    if profile.get('bio'):
+        completeness += 7
+    if profile.get('city'):
+        completeness += 5
+
+    # Activity recency — placeholder until we have real login data
+    recency = 10
 
     return {
-        'locationProximity': random.randint(10, 30),
-        'sharedInterests': random.randint(5, 25),
-        'baziCompatibility': random.randint(15, 40),
-        'activityRecency': random.randint(5, 15),
+        'baziCompatibility': bazi_score,
+        'profileCompleteness': completeness,
+        'activityRecency': recency,
     }
+
+
+def _get_swiped_user_ids(user_id):
+    """Get set of user IDs that this user has already swiped on."""
+    from boto3.dynamodb.conditions import Key
+    swiped = set()
+    result = swipe_table.query(
+        KeyConditionExpression=Key('userId').eq(user_id),
+        ProjectionExpression='targetUserId',
+    )
+    for item in result.get('Items', []):
+        swiped.add(item['targetUserId'])
+    while 'LastEvaluatedKey' in result:
+        result = swipe_table.query(
+            KeyConditionExpression=Key('userId').eq(user_id),
+            ProjectionExpression='targetUserId',
+            ExclusiveStartKey=result['LastEvaluatedKey'],
+        )
+        for item in result.get('Items', []):
+            swiped.add(item['targetUserId'])
+    return swiped
 
 
 # --- Helpers ---
