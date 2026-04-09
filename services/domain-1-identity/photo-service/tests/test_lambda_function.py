@@ -84,6 +84,7 @@ class ListPhotosTests(unittest.TestCase):
 
     def test_list_returns_photos_with_cdn_urls(self):
         with patch.dict("os.environ", ENV), \
+             patch("lambda_function.PHOTOS_CDN_BASE_URL", ENV["PHOTOS_CDN_BASE_URL"]), \
              patch("lambda_function.dynamodb") as mock_dynamodb:
 
             mock_dynamodb.Table.return_value.query.return_value = {"Items": [
@@ -129,6 +130,7 @@ class DeletePhotoTests(unittest.TestCase):
 
     def test_delete_success(self):
         with patch.dict("os.environ", ENV), \
+             patch("lambda_function.PHOTOS_BUCKET_NAME", ENV["PHOTOS_BUCKET_NAME"]), \
              patch("lambda_function.dynamodb") as mock_dynamodb, \
              patch("lambda_function.s3") as mock_s3:
 
@@ -222,6 +224,46 @@ class SetPrimaryPhotoTests(unittest.TestCase):
             self.assertEqual(payload["photoId"], "photo-002")
 
 
+class CorsTests(unittest.TestCase):
+    def setUp(self):
+        self.context = SimpleNamespace(aws_request_id="req-photo-456")
+
+    def test_response_includes_cors_headers(self):
+        with patch.dict("os.environ", ENV), \
+             patch("lambda_function.dynamodb") as mock_dynamodb:
+            mock_dynamodb.Table.return_value.query.return_value = {"Items": []}
+            response = lambda_handler(make_event("/photos/user-123", "GET"), self.context)
+            self.assertEqual(response["headers"]["Access-Control-Allow-Origin"], "*")
+            self.assertIn("Authorization", response["headers"]["Access-Control-Allow-Headers"])
+
+
+class PhotoEventTests(unittest.TestCase):
+    def setUp(self):
+        self.context = SimpleNamespace(aws_request_id="req-photo-456")
+
+    def test_upload_event_includes_cdn_url(self):
+        with patch.dict("os.environ", ENV), \
+             patch("lambda_function.PHOTOS_CDN_BASE_URL", "https://photos.kismet.dev"), \
+             patch("lambda_function.dynamodb") as mock_dynamodb, \
+             patch("lambda_function.s3") as mock_s3, \
+             patch("lambda_function.events") as mock_events:
+
+            mock_table = mock_dynamodb.Table.return_value
+            mock_table.query.return_value = {"Count": 0, "Items": []}
+            mock_table.put_item.return_value = {}
+            mock_s3.generate_presigned_url.return_value = "https://s3.example.com/presigned"
+            mock_events.put_events.return_value = {"FailedEntryCount": 0, "Entries": [{"EventId": "e1"}]}
+
+            event = {**make_event("/photos/upload", "POST", body={"contentType": "image/jpeg"}), **AUTHED_EVENT_CONTEXT}
+            lambda_handler(event, self.context)
+
+            call_args = mock_events.put_events.call_args
+            detail = json.loads(call_args[1]["Entries"][0]["Detail"])
+            self.assertIn("cdnUrl", detail)
+            self.assertTrue(detail["cdnUrl"].startswith("https://photos.kismet.dev/"))
+            self.assertIn("isPrimary", detail)
+
+
 class RoutingTests(unittest.TestCase):
     def setUp(self):
         self.context = SimpleNamespace(aws_request_id="req-photo-456")
@@ -242,13 +284,10 @@ class RoutingTests(unittest.TestCase):
         self.assertEqual(payload["code"], "NOT_FOUND")
 
     def test_get_upload_path_returns_not_found(self):
-        # GET /photos/upload should not match uploadPhoto — it should match listPhotos with userId="upload"
-        with patch.dict("os.environ", ENV), \
-             patch("lambda_function.dynamodb") as mock_dynamodb:
-            mock_dynamodb.Table.return_value.query.return_value = {"Items": []}
-            response = lambda_handler(make_event("/photos/upload", "GET"), self.context)
-            # This resolves to listPhotos with userId="upload", not a 404
-            self.assertEqual(response["statusCode"], 200)
+        # GET /photos/upload matches the /photos/upload branch first, which only
+        # allows POST — so non-POST methods correctly return 404
+        response = lambda_handler(make_event("/photos/upload", "GET"), self.context)
+        self.assertEqual(response["statusCode"], 404)
 
 
 def make_event(path, method, body=None, raw_body=None):

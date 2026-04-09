@@ -159,6 +159,7 @@ class AuthServiceLogoutTests(unittest.TestCase):
 
     def test_logout_success(self):
         with patch.dict("os.environ", ENV), \
+             patch("lambda_function.COGNITO_APP_CLIENT_ID", ENV["COGNITO_APP_CLIENT_ID"]), \
              patch("lambda_function.cognito") as mock_cognito:
 
             mock_cognito.revoke_token.return_value = {}
@@ -174,6 +175,17 @@ class AuthServiceLogoutTests(unittest.TestCase):
         with patch.dict("os.environ", ENV):
             response = lambda_handler(make_event("/auth/logout", "POST", body={}), self.context)
             self.assertEqual(response["statusCode"], 400)
+
+
+class AuthServiceCorsTests(unittest.TestCase):
+    def setUp(self):
+        self.context = SimpleNamespace(aws_request_id="req-123")
+
+    def test_response_includes_cors_headers(self):
+        with patch.dict("os.environ", ENV):
+            response = lambda_handler(make_event("/auth/login", "POST", body={"email": "a@b.com"}), self.context)
+            self.assertEqual(response["headers"]["Access-Control-Allow-Origin"], "*")
+            self.assertIn("Authorization", response["headers"]["Access-Control-Allow-Headers"])
 
 
 class AuthServiceRoutingTests(unittest.TestCase):

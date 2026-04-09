@@ -47,6 +47,39 @@ class CreateProfileTests(unittest.TestCase):
             self.assertIn("createdAt", payload)
             mock_events.put_events.assert_called_once()
 
+    def test_create_event_contains_full_payload(self):
+        with patch.dict("os.environ", ENV), \
+             patch("lambda_function.dynamodb") as mock_dynamodb, \
+             patch("lambda_function.events") as mock_events:
+
+            mock_table = mock_dynamodb.Table.return_value
+            mock_table.get_item.return_value = {}
+            mock_table.put_item.return_value = {}
+            mock_events.put_events.return_value = {"FailedEntryCount": 0, "Entries": [{"EventId": "e1"}]}
+
+            event = {**make_event("/profiles", "POST", body={
+                "name": "Alice",
+                "bio": "Astronomy major",
+                "gender": "female",
+                "interestedIn": "male",
+                "birthDate": "1999-05-15",
+                "city": "Boston",
+                "location": [42.36, -71.06],
+            }), **AUTHED_CONTEXT}
+            lambda_handler(event, self.context)
+
+            call_args = mock_events.put_events.call_args
+            detail = json.loads(call_args[1]["Entries"][0]["Detail"])
+            self.assertEqual(call_args[1]["Entries"][0]["DetailType"], "profile.completed")
+            self.assertEqual(detail["userId"], "user-123")
+            self.assertEqual(detail["name"], "Alice")
+            self.assertEqual(detail["birthDate"], "1999-05-15")
+            self.assertEqual(detail["gender"], "female")
+            self.assertEqual(detail["preferred_gender"], "male")
+            self.assertEqual(detail["location_coordinates"], [42.36, -71.06])
+            self.assertEqual(detail["city"], "Boston")
+            self.assertEqual(detail["bio"], "Astronomy major")
+
     def test_create_duplicate_profile_returns_409(self):
         with patch.dict("os.environ", ENV), \
              patch("lambda_function.dynamodb") as mock_dynamodb:
@@ -131,11 +164,17 @@ class UpdateProfileTests(unittest.TestCase):
 
     def test_update_success(self):
         with patch.dict("os.environ", ENV), \
-             patch("lambda_function.dynamodb") as mock_dynamodb:
+             patch("lambda_function.dynamodb") as mock_dynamodb, \
+             patch("lambda_function.events") as mock_events:
 
             mock_table = mock_dynamodb.Table.return_value
-            mock_table.get_item.return_value = {"Item": {"userId": "user-123"}}
+            # First get_item for existence check, second for event payload
+            mock_table.get_item.side_effect = [
+                {"Item": {"userId": "user-123"}},
+                {"Item": {"userId": "user-123", "name": "Alice", "bio": "Updated bio", "gender": "female", "interestedIn": "male"}},
+            ]
             mock_table.update_item.return_value = {}
+            mock_events.put_events.return_value = {"FailedEntryCount": 0, "Entries": [{"EventId": "e1"}]}
 
             event = {**make_event("/profiles/user-123", "PUT", body={"bio": "Updated bio", "interests": ["yoga"]}), **AUTHED_CONTEXT}
             response = lambda_handler(event, self.context)
@@ -145,6 +184,51 @@ class UpdateProfileTests(unittest.TestCase):
             self.assertEqual(payload["userId"], "user-123")
             self.assertEqual(payload["bio"], "Updated bio")
             self.assertIn("updatedAt", payload)
+
+    def test_update_publishes_event(self):
+        with patch.dict("os.environ", ENV), \
+             patch("lambda_function.dynamodb") as mock_dynamodb, \
+             patch("lambda_function.events") as mock_events:
+
+            mock_table = mock_dynamodb.Table.return_value
+            mock_table.get_item.side_effect = [
+                {"Item": {"userId": "user-123"}},
+                {"Item": {"userId": "user-123", "name": "Alice", "bio": "New bio", "gender": "female", "interestedIn": "male", "birthDate": "1999-05-15", "city": "Boston"}},
+            ]
+            mock_table.update_item.return_value = {}
+            mock_events.put_events.return_value = {"FailedEntryCount": 0, "Entries": [{"EventId": "e1"}]}
+
+            event = {**make_event("/profiles/user-123", "PUT", body={"bio": "New bio"}), **AUTHED_CONTEXT}
+            lambda_handler(event, self.context)
+
+            mock_events.put_events.assert_called_once()
+            call_args = mock_events.put_events.call_args
+            self.assertEqual(call_args[1]["Entries"][0]["DetailType"], "profile.updated")
+            detail = json.loads(call_args[1]["Entries"][0]["Detail"])
+            self.assertEqual(detail["userId"], "user-123")
+            self.assertEqual(detail["preferred_gender"], "male")
+            self.assertEqual(detail["city"], "Boston")
+
+    def test_update_city_and_avatar_url(self):
+        with patch.dict("os.environ", ENV), \
+             patch("lambda_function.dynamodb") as mock_dynamodb, \
+             patch("lambda_function.events") as mock_events:
+
+            mock_table = mock_dynamodb.Table.return_value
+            mock_table.get_item.side_effect = [
+                {"Item": {"userId": "user-123"}},
+                {"Item": {"userId": "user-123", "name": "Alice", "city": "NYC", "avatarUrl": "https://cdn/photo.jpg"}},
+            ]
+            mock_table.update_item.return_value = {}
+            mock_events.put_events.return_value = {"FailedEntryCount": 0, "Entries": [{"EventId": "e1"}]}
+
+            event = {**make_event("/profiles/user-123", "PUT", body={"city": "NYC", "avatarUrl": "https://cdn/photo.jpg"}), **AUTHED_CONTEXT}
+            response = lambda_handler(event, self.context)
+            payload = json.loads(response["body"])
+
+            self.assertEqual(response["statusCode"], 200)
+            self.assertEqual(payload["city"], "NYC")
+            self.assertEqual(payload["avatarUrl"], "https://cdn/photo.jpg")
 
     def test_update_another_users_profile_returns_403(self):
         with patch.dict("os.environ", ENV):
@@ -209,6 +293,21 @@ class DeleteProfileTests(unittest.TestCase):
             event = {**make_event("/profiles/user-123", "DELETE"), **AUTHED_CONTEXT}
             response = lambda_handler(event, self.context)
             self.assertEqual(response["statusCode"], 404)
+
+
+class CorsTests(unittest.TestCase):
+    def setUp(self):
+        self.context = SimpleNamespace(aws_request_id="req-456")
+
+    def test_response_includes_cors_headers(self):
+        with patch.dict("os.environ", ENV), \
+             patch("lambda_function.dynamodb") as mock_dynamodb:
+            mock_dynamodb.Table.return_value.get_item.return_value = {"Item": {
+                "PK": "USER#u1", "SK": "PROFILE", "userId": "u1", "name": "A",
+            }}
+            response = lambda_handler(make_event("/profiles/u1", "GET"), self.context)
+            self.assertEqual(response["headers"]["Access-Control-Allow-Origin"], "*")
+            self.assertIn("Authorization", response["headers"]["Access-Control-Allow-Headers"])
 
 
 class RoutingTests(unittest.TestCase):
