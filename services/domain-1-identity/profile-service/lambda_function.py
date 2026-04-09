@@ -21,6 +21,8 @@ dynamodb = boto3.resource("dynamodb")
 events = boto3.client("events")
 
 UPDATABLE_FIELDS = frozenset({"name", "bio", "gender", "interestedIn", "birthDate", "birthTime", "location", "interests", "city", "avatarUrl"})
+VALID_GENDERS = {"male", "female", "non-binary"}
+VALID_INTERESTED_IN = {"male", "female", "non-binary", "everyone"}
 
 
 def lambda_handler(event: Optional[Dict[str, Any]], context: Any) -> Dict[str, Any]:
@@ -66,8 +68,21 @@ def lambda_handler(event: Optional[Dict[str, Any]], context: Any) -> Dict[str, A
 
 def handle_create(user_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
     name = (body.get("name") or "").strip()
+    gender = (body.get("gender") or "").strip()
+    interested_in = (body.get("interestedIn") or "").strip()
+    birth_date = (body.get("birthDate") or "").strip()
+    location = body.get("location")
+
     if not name:
         return json_response(400, {"code": "VALIDATION_ERROR", "message": "name is required."})
+    if not gender or gender not in VALID_GENDERS:
+        return json_response(400, {"code": "VALIDATION_ERROR", "message": f"gender is required and must be one of: {', '.join(sorted(VALID_GENDERS))}."})
+    if not interested_in or interested_in not in VALID_INTERESTED_IN:
+        return json_response(400, {"code": "VALIDATION_ERROR", "message": f"interestedIn is required and must be one of: {', '.join(sorted(VALID_INTERESTED_IN))}."})
+    if not birth_date:
+        return json_response(400, {"code": "VALIDATION_ERROR", "message": "birthDate is required."})
+    if not location:
+        return json_response(400, {"code": "VALIDATION_ERROR", "message": "location is required."})
 
     table = dynamodb.Table(PROFILES_TABLE_NAME)
     existing = table.get_item(Key={"PK": f"USER#{user_id}", "SK": "PROFILE"})
@@ -80,10 +95,14 @@ def handle_create(user_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
         "SK": "PROFILE",
         "userId": user_id,
         "name": name,
+        "gender": gender,
+        "interestedIn": interested_in,
+        "birthDate": birth_date,
+        "location": location,
         "createdAt": now,
         "updatedAt": now,
     }
-    for field in UPDATABLE_FIELDS - {"name"}:
+    for field in UPDATABLE_FIELDS - {"name", "gender", "interestedIn", "birthDate", "location"}:
         if body.get(field) is not None:
             item[field] = body[field]
 
@@ -96,7 +115,8 @@ def handle_create(user_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
         "EventBusName": EVENT_BUS_NAME,
     }])
 
-    return json_response(201, {"userId": user_id, "name": name, "createdAt": now})
+    profile = {k: v for k, v in item.items() if k not in ("PK", "SK")}
+    return json_response(201, profile)
 
 
 def handle_get(user_id: str) -> Dict[str, Any]:
@@ -122,6 +142,12 @@ def handle_update(caller_id: str, user_id: str, body: Dict[str, Any]) -> Dict[st
     updates = {k: v for k, v in body.items() if k in UPDATABLE_FIELDS}
     if not updates:
         return json_response(400, {"code": "VALIDATION_ERROR", "message": "No valid fields to update."})
+
+    if "gender" in updates and updates["gender"] not in VALID_GENDERS:
+        return json_response(400, {"code": "VALIDATION_ERROR", "message": f"gender must be one of: {', '.join(sorted(VALID_GENDERS))}."})
+    if "interestedIn" in updates and updates["interestedIn"] not in VALID_INTERESTED_IN:
+        return json_response(400, {"code": "VALIDATION_ERROR", "message": f"interestedIn must be one of: {', '.join(sorted(VALID_INTERESTED_IN))}."})
+
 
     now = datetime.now(timezone.utc).isoformat()
     updates["updatedAt"] = now
@@ -152,7 +178,8 @@ def handle_update(caller_id: str, user_id: str, body: Dict[str, Any]) -> Dict[st
         "EventBusName": EVENT_BUS_NAME,
     }])
 
-    return json_response(200, {"userId": user_id, **updates})
+    profile = {k: v for k, v in updated_item.items() if k not in ("PK", "SK")}
+    return json_response(200, profile)
 
 
 def handle_delete(caller_id: str, user_id: str) -> Dict[str, Any]:
@@ -181,8 +208,7 @@ def _build_event_detail(item: Dict[str, Any]) -> Dict[str, Any]:
         "avatarUrl": item.get("avatarUrl", ""),
         "bio": item.get("bio", ""),
         "interests": item.get("interests", []),
-        "createdAt": item.get("createdAt", ""),
-        "updatedAt": item.get("updatedAt", ""),
+        "timestamp": item.get("updatedAt", "") or item.get("createdAt", ""),
     }
 
 

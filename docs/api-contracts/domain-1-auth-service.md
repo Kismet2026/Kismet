@@ -178,7 +178,7 @@ Invalidate the current session by revoking the refresh token.
 | Attribute | Type | Key |
 |-----------|------|-----|
 | `PK` | String | Partition Key (`USER#{userId}`) |
-| `SK` | String | Sort Key (`AUTH`) |
+| `SK` | String | Sort Key (`METADATA`) |
 | `email` | String | — |
 | `birthDate` | String (ISO 8601) | — |
 | `birthTime` | String | — |
@@ -201,14 +201,12 @@ Published when a new user successfully signs up.
   "detail": {
     "userId": "user-123",
     "email": "student@university.edu",
-    "birthDate": "1999-05-15",
-    "birthTime": "14:30",
-    "createdAt": "2026-04-01T12:00:00Z"
+    "timestamp": "2026-04-01T12:00:00Z"
   }
 }
 ```
 
-**Consumed by:** Profile Service, Email Verification Service
+**Consumed by:** Email Service, Activity Logger
 
 ---
 
@@ -217,5 +215,5 @@ Published when a new user successfully signs up.
 | Direction | Service | How |
 |-----------|---------|-----|
 | **Called by** | Frontend (React) | HTTP via API Gateway |
-| **Publishes to** | Profile Service, Email Verification Service | EventBridge `user.created` |
+| **Publishes to** | Email Service, Activity Logger | EventBridge `user.created` |
 | **Depends on** | Cognito | User pool for authentication |

@@ -117,9 +117,11 @@ def handle_upload(user_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
             "photoId": photo_id,
             "userId": user_id,
             "s3Key": s3_key,
+            "s3Bucket": PHOTOS_BUCKET_NAME,
+            "contentType": content_type,
             "cdnUrl": f"{PHOTOS_CDN_BASE_URL}/{s3_key}" if PHOTOS_CDN_BASE_URL else "",
             "isPrimary": is_primary,
-            "uploadedAt": uploaded_at,
+            "timestamp": uploaded_at,
         }),
         "EventBusName": EVENT_BUS_NAME,
     }])

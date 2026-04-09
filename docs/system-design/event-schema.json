@@ -62,6 +62,9 @@
         "userId": { "type": "string", "example": "user-123" },
         "s3Key": { "type": "string", "example": "photos/user-123/photo-001.jpg" },
         "s3Bucket": { "type": "string", "example": "kismet-photos-dev" },
+        "contentType": { "type": "string", "enum": ["image/jpeg", "image/png", "image/webp"], "example": "image/jpeg" },
+        "cdnUrl": { "type": "string", "example": "https://cdn.kismet.dev/user-123/photo-001.jpg", "description": "CDN URL for the photo (if configured)" },
+        "isPrimary": { "type": "boolean", "example": true, "description": "Whether this is the user's primary/avatar photo" },
         "timestamp": { "type": "string", "format": "date-time", "example": "2026-04-01T11:00:00Z" }
       }
     },
@@ -84,12 +87,42 @@
       "detail-type": "profile.completed",
       "description": "用户首次完成个人资料后发布。用于将用户加入发现池。",
       "publisher": "Profile Service",
-      "consumers": ["Recommendation Service", "Activity Logger"],
+      "consumers": ["Discovery Service", "Recommendation Service", "Activity Logger"],
       "detail": {
         "userId": { "type": "string", "example": "user-123" },
         "name": { "type": "string", "example": "Alice" },
+        "birthDate": { "type": "string", "format": "date", "example": "1999-05-15", "description": "出生日期，用于八字评分" },
+        "birthTime": { "type": "string", "example": "14:30", "description": "出生时间（可选）" },
         "gender": { "type": "string", "enum": ["male", "female", "non-binary"] },
+        "preferred_gender": { "type": "string", "enum": ["male", "female", "non-binary", "everyone"], "description": "偏好匹配性别（映射自 interestedIn）" },
+        "location_coordinates": { "type": "array", "items": { "type": "number" }, "example": [42.36, -71.06], "description": "[lat, lng] 坐标" },
+        "city": { "type": "string", "example": "Boston" },
+        "avatarUrl": { "type": "string", "example": "https://photos.kismet.dev/user-123/photo.jpg" },
+        "bio": { "type": "string", "example": "Astronomy major who loves stargazing" },
+        "interests": { "type": "array", "items": { "type": "string" }, "example": ["astronomy", "hiking"] },
         "timestamp": { "type": "string", "format": "date-time", "example": "2026-04-01T10:30:00Z" }
+      }
+    },
+
+    "profile.updated": {
+      "source": "kismet.profile-service",
+      "detail-type": "profile.updated",
+      "description": "用户更新个人资料后发布。Discovery 用于同步候选人数据。",
+      "publisher": "Profile Service",
+      "consumers": ["Discovery Service", "Activity Logger"],
+      "detail": {
+        "userId": { "type": "string", "example": "user-123" },
+        "name": { "type": "string", "example": "Alice" },
+        "birthDate": { "type": "string", "format": "date", "example": "1999-05-15" },
+        "birthTime": { "type": "string", "example": "14:30" },
+        "gender": { "type": "string", "enum": ["male", "female", "non-binary"] },
+        "preferred_gender": { "type": "string", "enum": ["male", "female", "non-binary", "everyone"] },
+        "location_coordinates": { "type": "array", "items": { "type": "number" }, "example": [42.36, -71.06] },
+        "city": { "type": "string", "example": "Boston" },
+        "avatarUrl": { "type": "string", "example": "https://photos.kismet.dev/user-123/photo.jpg" },
+        "bio": { "type": "string", "example": "Updated bio" },
+        "interests": { "type": "array", "items": { "type": "string" }, "example": ["astronomy", "yoga"] },
+        "timestamp": { "type": "string", "format": "date-time", "example": "2026-04-01T13:00:00Z" }
       }
     },
 
@@ -126,12 +159,40 @@
   },
 
   "_usage_example": {
-    "description": "Python 代码示例：发布事件到 EventBridge",
-    "code": "import boto3\nimport json\nfrom datetime import datetime\n\nclient = boto3.client('events')\n\nclient.put_events(\n    Entries=[\n        {\n            'Source': 'kismet.swipe-service',\n            'DetailType': 'swipe.created',\n            'Detail': json.dumps({\n                'swipeId': 'swipe-001',\n                'userId': 'user-123',\n                'targetUserId': 'user-456',\n                'action': 'like',\n                'timestamp': datetime.utcnow().isoformat() + 'Z'\n            }),\n            'EventBusName': 'kismet-events'\n        }\n    ]\n)"
+    "description": "Python: publish an event to EventBridge",
+    "code": [
+      "import boto3, json",
+      "from datetime import datetime, timezone",
+      "",
+      "client = boto3.client('events')",
+      "",
+      "client.put_events(Entries=[{",
+      "    'Source': 'kismet.swipe-service',",
+      "    'DetailType': 'swipe.created',",
+      "    'Detail': json.dumps({",
+      "        'swipeId': 'swipe-001',",
+      "        'userId': 'user-123',",
+      "        'targetUserId': 'user-456',",
+      "        'action': 'like',",
+      "        'timestamp': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')",
+      "    }),",
+      "    'EventBusName': 'kismet-events'",
+      "}])"
+    ]
   },
 
   "_consumer_example": {
-    "description": "Lambda handler 示例：消费 match.created 事件",
-    "code": "def handler(event, context):\n    detail = event['detail']\n    match_id = detail['matchId']\n    user_ids = detail['userIds']\n    \n    # 发推送通知给两个用户\n    for user_id in user_ids:\n        send_push(user_id, f'You have a new match!')\n    \n    return {'statusCode': 200}"
+    "description": "Lambda handler: consume a match.created event",
+    "code": [
+      "def handler(event, context):",
+      "    detail = event['detail']",
+      "    match_id = detail['matchId']",
+      "    user_ids = detail['userIds']",
+      "",
+      "    for user_id in user_ids:",
+      "        send_push(user_id, 'You have a new match!')",
+      "",
+      "    return {'statusCode': 200}"
+    ]
   }
 }

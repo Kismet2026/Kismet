@@ -132,7 +132,7 @@ GET /verify/status
 | Attribute | Type | Key |
 |-----------|------|-----|
 | `PK` | String | Partition Key (`EMAIL#{email}`) |
-| `SK` | String | Sort Key (`CODE`) |
+| `SK` | String | Sort Key (`LATEST`) |
 | `code` | String | — |
 | `createdAt` | String (ISO 8601) | — |
 | `ttl` | Number | — (TTL attribute, auto-expires records) |

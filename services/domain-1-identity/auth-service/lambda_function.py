@@ -92,7 +92,7 @@ def handle_signup(body: Dict[str, Any]) -> Dict[str, Any]:
     events.put_events(Entries=[{
         "Source": "kismet.auth-service",
         "DetailType": "user.created",
-        "Detail": json.dumps({"userId": user_id, "email": email, "createdAt": created_at}),
+        "Detail": json.dumps({"userId": user_id, "email": email, "timestamp": created_at}),
         "EventBusName": EVENT_BUS_NAME,
     }])
 

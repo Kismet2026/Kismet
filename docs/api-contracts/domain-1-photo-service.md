@@ -213,8 +213,11 @@ Published when a photo is successfully uploaded to S3 (triggered by S3 event not
     "photoId": "photo-001",
     "userId": "user-123",
     "s3Key": "user-123/photo-001.jpg",
+    "s3Bucket": "kismet-photos-dev",
     "contentType": "image/jpeg",
-    "uploadedAt": "2026-04-01T12:00:00Z"
+    "cdnUrl": "https://d1234abcd.cloudfront.net/user-123/photo-001.jpg",
+    "isPrimary": true,
+    "timestamp": "2026-04-01T12:00:00Z"
   }
 }
 ```

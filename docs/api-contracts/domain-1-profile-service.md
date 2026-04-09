@@ -244,16 +244,48 @@ Published when a user creates their profile for the first time.
   "detail": {
     "userId": "user-123",
     "name": "Alice",
-    "gender": "female",
-    "interestedIn": "male",
     "birthDate": "1999-05-15",
     "birthTime": "14:30",
-    "createdAt": "2026-04-01T12:00:00Z"
+    "gender": "female",
+    "preferred_gender": "male",
+    "location_coordinates": [42.36, -71.06],
+    "city": "Boston",
+    "avatarUrl": "https://photos.kismet.dev/user-123/photo.jpg",
+    "bio": "Astronomy major who loves stargazing",
+    "interests": ["astronomy", "hiking"],
+    "timestamp": "2026-04-01T12:00:00Z"
   }
 }
 ```
 
-**Consumed by:** Discovery Service, Astrology Service
+**Consumed by:** Discovery Service, Recommendation Service, Activity Logger
+
+### Published: `profile.updated`
+
+Published when a user updates their profile.
+
+```json
+{
+  "source": "kismet.profile-service",
+  "detail-type": "profile.updated",
+  "detail": {
+    "userId": "user-123",
+    "name": "Alice",
+    "birthDate": "1999-05-15",
+    "birthTime": "14:30",
+    "gender": "female",
+    "preferred_gender": "male",
+    "location_coordinates": [42.36, -71.06],
+    "city": "Boston",
+    "avatarUrl": "https://photos.kismet.dev/user-123/photo.jpg",
+    "bio": "Updated bio",
+    "interests": ["astronomy", "yoga"],
+    "timestamp": "2026-04-01T13:00:00Z"
+  }
+}
+```
+
+**Consumed by:** Discovery Service, Activity Logger
 
 ---
 
@@ -262,5 +294,5 @@ Published when a user creates their profile for the first time.
 | Direction | Service | How |
 |-----------|---------|-----|
 | **Called by** | Frontend (React) | HTTP via API Gateway |
-| **Publishes to** | Discovery Service, Astrology Service | EventBridge `profile.completed` |
+| **Publishes to** | Discovery Service, Recommendation Service, Activity Logger | EventBridge `profile.completed`, `profile.updated` |
 | **Depends on** | Auth (Cognito) | JWT validation via API Gateway Authorizer |

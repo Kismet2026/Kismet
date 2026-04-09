@@ -86,7 +86,10 @@ class CreateProfileTests(unittest.TestCase):
 
             mock_dynamodb.Table.return_value.get_item.return_value = {"Item": {"userId": "user-123"}}
 
-            event = {**make_event("/profiles", "POST", body={"name": "Alice"}), **AUTHED_CONTEXT}
+            event = {**make_event("/profiles", "POST", body={
+                "name": "Alice", "gender": "female", "interestedIn": "male",
+                "birthDate": "1999-05-15", "location": {"latitude": 42.36, "longitude": -71.06},
+            }), **AUTHED_CONTEXT}
             response = lambda_handler(event, self.context)
             payload = json.loads(response["body"])
 
@@ -171,7 +174,7 @@ class UpdateProfileTests(unittest.TestCase):
             # First get_item for existence check, second for event payload
             mock_table.get_item.side_effect = [
                 {"Item": {"userId": "user-123"}},
-                {"Item": {"userId": "user-123", "name": "Alice", "bio": "Updated bio", "gender": "female", "interestedIn": "male"}},
+                {"Item": {"userId": "user-123", "name": "Alice", "bio": "Updated bio", "gender": "female", "interestedIn": "male", "updatedAt": "2026-04-01T13:00:00+00:00"}},
             ]
             mock_table.update_item.return_value = {}
             mock_events.put_events.return_value = {"FailedEntryCount": 0, "Entries": [{"EventId": "e1"}]}

@@ -96,7 +96,7 @@ def create_report(event, reporter_id):
                 "reporterId": reporter_id,
                 "reportedUserId": reported_user_id,
                 "reason": reason,
-                "createdAt": now
+                "timestamp": now
             }),
             "EventBusName": "kismet-events"
         }]
