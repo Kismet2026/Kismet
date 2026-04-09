@@ -73,6 +73,8 @@ class KismetService(Construct):
         api: Optional[apigateway.RestApi] = None,
         authorizer: Optional[apigateway.IAuthorizer] = None,
         event_bus: Optional[events.EventBus] = None,
+        vpc: Optional[cdk.aws_ec2.IVpc] = None,
+        security_groups: Optional[List[cdk.aws_ec2.ISecurityGroup]] = None,
     ):
         super().__init__(scope, construct_id)
 
@@ -91,6 +93,8 @@ class KismetService(Construct):
             memory_size=256,
             environment=env_vars,
             log_retention=logs.RetentionDays.ONE_WEEK,
+            vpc=vpc,
+            security_groups=security_groups,
         )
 
         # ── DynamoDB tables ───────────────────────────────────────────────────

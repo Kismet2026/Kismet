@@ -9,7 +9,6 @@ from aws_cdk import (
     aws_sns as sns,
 )
 
-
 class SharedStack(cdk.Stack):
     """
     Shared infrastructure deployed once by PM.
