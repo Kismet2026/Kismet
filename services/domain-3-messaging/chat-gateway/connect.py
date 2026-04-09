@@ -16,6 +16,9 @@ def handler(event, context):
     user_id = params.get("userId", "anonymous")
     match_id = params.get("matchId", "")
 
+    if not user_id or user_id == "anonymous" or not match_id:
+        return {"statusCode": 400, "body": "userId and matchId are required"}
+
     db.put_item(Item={
         "PK": f"CONN#{connection_id}",
         "SK": "META",

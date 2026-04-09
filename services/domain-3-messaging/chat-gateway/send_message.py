@@ -1,19 +1,19 @@
 import json
 import os
-import uuid
-from datetime import datetime, timezone
+from io import BytesIO
 
 import boto3
 from boto3.dynamodb.conditions import Key
 
 CONNECTIONS_TABLE = os.environ["CONNECTIONS_TABLE"]
-MESSAGES_TABLE = os.environ["MESSAGES_TABLE"]
-EVENT_BUS_NAME = os.environ.get("EVENT_BUS_NAME", "kismet-events")
+MATCHES_TABLE = os.environ["MATCHES_TABLE"]
+MESSAGE_SERVICE_FUNCTION_NAME = os.environ["MESSAGE_SERVICE_FUNCTION_NAME"]
+ALLOWED_MESSAGE_TYPES = {"text"}
 
 dynamodb = boto3.resource("dynamodb")
 connections = dynamodb.Table(CONNECTIONS_TABLE)
-messages = dynamodb.Table(MESSAGES_TABLE)
-events_client = boto3.client("events")
+matches = dynamodb.Table(MATCHES_TABLE)
+lambda_client = boto3.client("lambda")
 
 
 def handler(event, context):
@@ -22,76 +22,140 @@ def handler(event, context):
     stage = event["requestContext"]["stage"]
 
     body = json.loads(event.get("body") or "{}")
-    match_id = body.get("matchId")
     content = body.get("content")
-    sender_id = body.get("senderId", "")
-    receiver_id = body.get("receiverId", "")
+    message_type = body.get("messageType", "text")
 
+    connection = get_connection(connection_id)
+    if not connection:
+        return json_response(401, {"code": "UNAUTHORIZED", "message": "Connection not registered"})
+
+    sender_id = connection.get("userId", "")
+    match_id = connection.get("matchId", "")
+
+    if not sender_id:
+        return json_response(401, {"code": "UNAUTHORIZED", "message": "Authentication required"})
     if not match_id or not content:
-        return {"statusCode": 400, "body": "Missing matchId or content"}
+        return json_response(
+            400,
+            {"code": "VALIDATION_ERROR", "message": "matchId and content are required"},
+        )
+    if message_type not in ALLOWED_MESSAGE_TYPES:
+        return json_response(
+            400,
+            {"code": "VALIDATION_ERROR", "message": "messageType must be 'text'"},
+        )
 
-    # 1. Persist message to DynamoDB
-    now = datetime.now(timezone.utc).isoformat()
-    message_id = str(uuid.uuid4())
-    item = {
-        "PK": f"CONV#{match_id}",
-        "SK": f"MSG#{now}#{message_id}",
-        "messageId": message_id,
-        "matchId": match_id,
-        "senderId": sender_id,
-        "recipientId": receiver_id,
-        "content": content,
-        "messageType": "text",
-        "timestamp": now,
-        "deleted": False,
-    }
-    messages.put_item(Item=item)
+    match_item, match_error = get_match_for_user(match_id, sender_id)
+    if match_error:
+        return match_error
 
-    # 2. Publish message.sent to EventBridge
-    try:
-        events_client.put_events(Entries=[{
-            "Source": "kismet.message-service",
-            "DetailType": "message.sent",
-            "Detail": json.dumps({
-                "messageId": message_id,
-                "matchId": match_id,
-                "senderId": sender_id,
-                "recipientId": receiver_id,
-                "content": content,
-                "messageType": "text",
-                "timestamp": now,
-            }),
-            "EventBusName": EVENT_BUS_NAME,
-        }])
-    except Exception as exc:
-        print(f"[WARN] Failed to publish message.sent: {exc}")
+    message_response = invoke_message_service(match_id, content, message_type, sender_id)
+    if message_response["statusCode"] != 200:
+        return message_response
 
-    # 3. Find receiver's active connections via matchId GSI
-    result = connections.query(
+    message = json.loads(message_response["body"])
+    recipient_id = get_other_participant(match_item, sender_id)
+
+    # Push message to other active connections in the same match.
+    connection_query = connections.query(
         IndexName="matchId-index",
         KeyConditionExpression=Key("matchId").eq(match_id),
     )
     receiver_conns = [
-        c for c in result.get("Items", [])
-        if c["connectionId"] != connection_id  # don't echo back to sender
+        c for c in connection_query.get("Items", [])
+        if c["connectionId"] != connection_id and c.get("userId") == recipient_id
     ]
 
-    # 4. Push message to receiver(s) via WebSocket
     apigw = boto3.client(
         "apigatewaymanagementapi",
         endpoint_url=f"https://{domain}/{stage}",
     )
-    payload = json.dumps({"type": "newMessage", **{k: item[k] for k in
-                          ["messageId", "matchId", "senderId", "content", "timestamp"]}})
+    payload = json.dumps({"type": "newMessage", **message})
 
     for conn in receiver_conns:
-        try:
-            apigw.post_to_connection(
-                ConnectionId=conn["connectionId"],
-                Data=payload.encode(),
-            )
-        except apigw.exceptions.GoneException:
-            # Stale connection — clean up
-            connections.delete_item(Key={"PK": f"CONN#{conn['connectionId']}", "SK": "META"})
+        post_to_connection(apigw, conn["connectionId"], payload)
 
-    return {"statusCode": 200, "body": "Message delivered"}
+    return message_response
+
+
+def invoke_message_service(match_id, content, message_type, sender_id):
+    invocation_event = {
+        "httpMethod": "POST",
+        "path": "/messages",
+        "body": json.dumps(
+            {
+                "matchId": match_id,
+                "content": content,
+                "messageType": message_type,
+            }
+        ),
+        "requestContext": {"authorizer": {"claims": {"sub": sender_id}}},
+    }
+
+    try:
+        response = lambda_client.invoke(
+            FunctionName=MESSAGE_SERVICE_FUNCTION_NAME,
+            InvocationType="RequestResponse",
+            Payload=json.dumps(invocation_event).encode(),
+        )
+        payload = response.get("Payload", BytesIO(b"{}")).read()
+        result = json.loads(payload or b"{}")
+    except Exception as exc:
+        print(f"[ERROR] Failed to invoke Message Service: {exc}")
+        return json_response(
+            502,
+            {"code": "UPSTREAM_ERROR", "message": "Message Service invocation failed"},
+        )
+
+    if not isinstance(result, dict) or "statusCode" not in result or "body" not in result:
+        return json_response(
+            502,
+            {"code": "UPSTREAM_ERROR", "message": "Message Service returned an invalid response"},
+        )
+
+    return {
+        "statusCode": result["statusCode"],
+        "body": result["body"],
+    }
+
+
+def get_connection(connection_id):
+    result = connections.get_item(Key={"PK": f"CONN#{connection_id}", "SK": "META"})
+    return result.get("Item")
+
+
+def get_match_for_user(match_id, user_id):
+    result = matches.get_item(Key={"PK": f"MATCH#{match_id}", "SK": "META"})
+    item = result.get("Item")
+
+    if not item:
+        return None, json_response(404, {"code": "NOT_FOUND", "message": "Match not found"})
+
+    participants = {item.get("userAId"), item.get("userBId")}
+    if user_id not in participants:
+        return None, json_response(
+            403,
+            {"code": "FORBIDDEN", "message": "User is not a participant of this match"},
+        )
+
+    return item, None
+
+
+def get_other_participant(match_item, user_id):
+    if match_item.get("userAId") == user_id:
+        return match_item.get("userBId", "")
+    return match_item.get("userAId", "")
+
+
+def post_to_connection(apigw, connection_id, payload):
+    try:
+        apigw.post_to_connection(
+            ConnectionId=connection_id,
+            Data=payload.encode(),
+        )
+    except apigw.exceptions.GoneException:
+        connections.delete_item(Key={"PK": f"CONN#{connection_id}", "SK": "META"})
+
+
+def json_response(status_code, payload):
+    return {"statusCode": status_code, "body": json.dumps(payload)}

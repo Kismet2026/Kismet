@@ -5,6 +5,7 @@ from aws_cdk import (
     aws_lambda as lambda_,
     aws_dynamodb as dynamodb,
     aws_logs as logs,
+    aws_events as events,
     aws_apigatewayv2 as apigwv2,
     aws_apigatewayv2_integrations as integrations,
 )
@@ -23,6 +24,17 @@ class Domain3Stack(cdk.Stack):
 
     def __init__(self, scope: Construct, construct_id: str, *, shared: SharedStack, **kwargs):
         super().__init__(scope, construct_id, **kwargs)
+
+        matches_table = dynamodb.Table.from_table_name(
+            self,
+            "MatchesTable",
+            "kismet-matches",
+        )
+        event_bus = events.EventBus.from_event_bus_name(
+            self,
+            "ImportedEventBus",
+            "kismet-events",
+        )
 
         # ── Message Service (Parker) ──────────────────────────────────────────
         # Persists messages in DynamoDB and publishes message.sent to EventBridge.
@@ -55,17 +67,19 @@ class Domain3Stack(cdk.Stack):
             consume_events=[],   # no incoming events; other services call via HTTP
             publish_events=True, # publishes message.sent
             environment={
-                "EVENT_BUS_NAME": shared.event_bus.event_bus_name,
+                "EVENT_BUS_NAME": event_bus.event_bus_name,
+                "MATCHES_TABLE": matches_table.table_name,
             },
             api=shared.api,
             authorizer=shared.authorizer,
-            event_bus=shared.event_bus,
+            event_bus=event_bus,
         )
 
         # ── Message Service env: inject TABLE_NAME after table is created ─────
         message_service.function.add_environment(
             "TABLE_NAME", message_service.tables[0].table_name
         )
+        matches_table.grant_read_data(message_service.function)
 
         # ── Chat Gateway — WebSocket (Parker) ─────────────────────────────────
         # Real-time chat via API Gateway WebSocket.
@@ -124,14 +138,14 @@ class Domain3Stack(cdk.Stack):
             memory_size=256,
             environment={
                 "CONNECTIONS_TABLE": connections_table.table_name,
-                "MESSAGES_TABLE": message_service.tables[0].table_name,
-                "EVENT_BUS_NAME": shared.event_bus.event_bus_name,
+                "MATCHES_TABLE": matches_table.table_name,
+                "MESSAGE_SERVICE_FUNCTION_NAME": message_service.function.function_name,
             },
             log_retention=logs.RetentionDays.ONE_WEEK,
         )
         connections_table.grant_read_write_data(send_message_fn)
-        message_service.tables[0].grant_read_write_data(send_message_fn)
-        shared.event_bus.grant_put_events_to(send_message_fn)
+        matches_table.grant_read_data(send_message_fn)
+        message_service.function.grant_invoke(send_message_fn)
 
         # WebSocket API
         ws_api = apigwv2.WebSocketApi(
@@ -200,5 +214,5 @@ class Domain3Stack(cdk.Stack):
             },
             api=shared.api,
             authorizer=shared.authorizer,
-            event_bus=shared.event_bus,
+            event_bus=event_bus,
         )

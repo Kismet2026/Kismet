@@ -1,6 +1,6 @@
 import aws_cdk as cdk
 from constructs import Construct
-from aws_cdk import aws_iam as iam
+from aws_cdk import aws_events as events, aws_iam as iam
 
 from stacks.shared_stack import SharedStack
 from kismet_constructs.kismet_service import KismetService
@@ -14,6 +14,12 @@ class Domain4Stack(cdk.Stack):
 
     def __init__(self, scope: Construct, construct_id: str, *, shared: SharedStack, **kwargs):
         super().__init__(scope, construct_id, **kwargs)
+
+        event_bus = events.EventBus.from_event_bus_name(
+            self,
+            "ImportedEventBus",
+            "kismet-events",
+        )
 
         # ── Text Moderation (Yue) ──────────────────────────────────────────────
         KismetService(
@@ -33,7 +39,7 @@ class Domain4Stack(cdk.Stack):
             ],
             api=shared.api,
             authorizer=shared.authorizer,
-            event_bus=shared.event_bus,
+            event_bus=event_bus,
         )
 
         # ── Image Moderation (KS) ──────────────────────────────────────────────
@@ -54,7 +60,7 @@ class Domain4Stack(cdk.Stack):
             ],
             api=shared.api,
             authorizer=shared.authorizer,
-            event_bus=shared.event_bus,
+            event_bus=event_bus,
         )
 
         # ── Report Service (Amber) ─────────────────────────────────────────────
@@ -99,7 +105,7 @@ class Domain4Stack(cdk.Stack):
             ],
             api=shared.api,
             authorizer=shared.authorizer,
-            event_bus=shared.event_bus,
+            event_bus=event_bus,
         )
 
         # ── Rate Limiter Service (Amber) ───────────────────────────────────────
@@ -121,5 +127,5 @@ class Domain4Stack(cdk.Stack):
             publish_events=False,
             api=shared.api,
             authorizer=shared.authorizer,
-            event_bus=shared.event_bus,
+            event_bus=event_bus,
         )

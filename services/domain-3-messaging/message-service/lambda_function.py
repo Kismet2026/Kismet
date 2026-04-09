@@ -10,10 +10,13 @@ from boto3.dynamodb.conditions import Key
 
 SERVICE_NAME = "message-service"
 TABLE_NAME = os.environ["TABLE_NAME"]
+MATCHES_TABLE = os.environ["MATCHES_TABLE"]
 EVENT_BUS_NAME = os.environ.get("EVENT_BUS_NAME", "kismet-events")
+ALLOWED_MESSAGE_TYPES = {"text"}
 
 dynamodb = boto3.resource("dynamodb")
 table = dynamodb.Table(TABLE_NAME)
+matches_table = dynamodb.Table(MATCHES_TABLE)
 events_client = boto3.client("events")
 
 
@@ -23,9 +26,9 @@ def lambda_handler(event: Optional[Dict[str, Any]], context: Any) -> Dict[str, A
     path_params = event.get("pathParameters") or {}
     query_params = event.get("queryStringParameters") or {}
 
-    # Extract authenticated user from Cognito JWT claims
-    claims = event.get("requestContext", {}).get("authorizer", {}).get("claims", {})
-    user_id = claims.get("sub") or claims.get("cognito:username", "")
+    user_id = get_authenticated_user_id(event)
+    if not user_id:
+        return unauthorized_response()
 
     # ── Route dispatch ────────────────────────────────────────────────────────
     if method == "POST":
@@ -50,13 +53,23 @@ def handle_send_message(body: dict, sender_id: str) -> Dict[str, Any]:
     match_id = (body or {}).get("matchId")
     content = (body or {}).get("content")
     message_type = (body or {}).get("messageType", "text")
-    recipient_id = (body or {}).get("recipientId", "")
 
     if not match_id or not content:
         return json_response(
             400,
             {"code": "VALIDATION_ERROR", "message": "matchId and content are required"},
         )
+    if message_type not in ALLOWED_MESSAGE_TYPES:
+        return json_response(
+            400,
+            {"code": "VALIDATION_ERROR", "message": "messageType must be 'text'"},
+        )
+
+    match_item, match_error = get_match_for_user(match_id, sender_id)
+    if match_error:
+        return match_error
+
+    recipient_id = get_other_participant(match_item, sender_id)
 
     now = datetime.now(timezone.utc).isoformat()
     message_id = str(uuid.uuid4())
@@ -117,6 +130,10 @@ def handle_send_message(body: dict, sender_id: str) -> Dict[str, Any]:
 
 def handle_get_messages(match_id: str, user_id: str, query_params: dict) -> Dict[str, Any]:
     """GET /messages/{matchId} — Paginated conversation history, newest first."""
+    _, match_error = get_match_for_user(match_id, user_id)
+    if match_error:
+        return match_error
+
     limit = min(int(query_params.get("limit", 50)), 50)
     cursor = query_params.get("cursor")
 
@@ -195,6 +212,37 @@ def handle_delete_message(message_id: str, user_id: str) -> Dict[str, Any]:
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
+def get_authenticated_user_id(event: Dict[str, Any]) -> str:
+    claims = event.get("requestContext", {}).get("authorizer", {}).get("claims", {})
+    return claims.get("sub") or claims.get("cognito:username", "")
+
+
+def get_match_for_user(match_id: str, user_id: str):
+    result = matches_table.get_item(Key={"PK": f"MATCH#{match_id}", "SK": "META"})
+    item = result.get("Item")
+
+    if not item:
+        return None, json_response(404, {"code": "NOT_FOUND", "message": "Match not found"})
+
+    participants = {item.get("userAId"), item.get("userBId")}
+    if user_id not in participants:
+        return None, json_response(
+            403,
+            {"code": "FORBIDDEN", "message": "User is not a participant of this match"},
+        )
+
+    return item, None
+
+
+def get_other_participant(match_item: Dict[str, Any], user_id: str) -> str:
+    if match_item.get("userAId") == user_id:
+        return match_item.get("userBId", "")
+    return match_item.get("userAId", "")
+
+
+def unauthorized_response() -> Dict[str, Any]:
+    return json_response(401, {"code": "UNAUTHORIZED", "message": "Authentication required"})
 
 def get_http_method(event: Dict[str, Any]) -> str:
     method = (
