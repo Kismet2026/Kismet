@@ -1,202 +1,185 @@
-import importlib.util
 import json
 import os
-from io import BytesIO
-from pathlib import Path
 import sys
+from unittest.mock import MagicMock, patch, call
 
-import boto3
 import pytest
-from moto import mock_aws
 
 os.environ["CONNECTIONS_TABLE"] = "kismet-connections"
-os.environ["MATCHES_TABLE"] = "kismet-matches"
-os.environ["MESSAGE_SERVICE_FUNCTION_NAME"] = "kismet-message-service"
-os.environ["AWS_DEFAULT_REGION"] = "us-east-1"
-os.environ["AWS_ACCESS_KEY_ID"] = "testing"
-os.environ["AWS_SECRET_ACCESS_KEY"] = "testing"
-os.environ["AWS_SECURITY_TOKEN"] = "testing"
-os.environ["AWS_SESSION_TOKEN"] = "testing"
+os.environ["MESSAGES_TABLE"] = "kismet-messages"
+os.environ["EVENT_BUS_NAME"] = "kismet-events"
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 
-def load_module():
-    module_name = "chat_gateway_send_message"
-    module_path = Path(__file__).resolve().parents[1] / "send_message.py"
-    spec = importlib.util.spec_from_file_location(module_name, module_path)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-send_message = load_module()
-
-
-class FakeLambdaClient:
-    def __init__(self, response=None):
-        self.calls = []
-        self.response = response or {
-            "statusCode": 200,
-            "body": json.dumps(
-                {
-                    "messageId": "msg-123",
-                    "matchId": "match-123",
-                    "senderId": "user-123",
-                    "content": "Hi",
-                    "messageType": "text",
-                    "timestamp": "2026-04-08T12:00:00+00:00",
-                }
-            ),
-        }
-
-    def invoke(self, **kwargs):
-        self.calls.append(kwargs)
-        return {"Payload": BytesIO(json.dumps(self.response).encode())}
-
-
-class FakeApiGatewayClient:
-    class Exceptions:
-        class GoneException(Exception):
-            pass
-
-    def __init__(self):
-        self.sent = []
-        self.exceptions = self.Exceptions()
-
-    def post_to_connection(self, ConnectionId, Data):
-        self.sent.append({"ConnectionId": ConnectionId, "Data": Data})
-
-
-@pytest.fixture
-def aws_resources():
-    with mock_aws():
-        dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
-
-        dynamodb.create_table(
-            TableName="kismet-connections",
-            KeySchema=[
-                {"AttributeName": "PK", "KeyType": "HASH"},
-                {"AttributeName": "SK", "KeyType": "RANGE"},
-            ],
-            AttributeDefinitions=[
-                {"AttributeName": "PK", "AttributeType": "S"},
-                {"AttributeName": "SK", "AttributeType": "S"},
-                {"AttributeName": "matchId", "AttributeType": "S"},
-            ],
-            GlobalSecondaryIndexes=[
-                {
-                    "IndexName": "matchId-index",
-                    "KeySchema": [{"AttributeName": "matchId", "KeyType": "HASH"}],
-                    "Projection": {"ProjectionType": "ALL"},
-                    "ProvisionedThroughput": {"ReadCapacityUnits": 1, "WriteCapacityUnits": 1},
-                }
-            ],
-            BillingMode="PAY_PER_REQUEST",
-        )
-
-        dynamodb.create_table(
-            TableName="kismet-matches",
-            KeySchema=[
-                {"AttributeName": "PK", "KeyType": "HASH"},
-                {"AttributeName": "SK", "KeyType": "RANGE"},
-            ],
-            AttributeDefinitions=[
-                {"AttributeName": "PK", "AttributeType": "S"},
-                {"AttributeName": "SK", "AttributeType": "S"},
-            ],
-            BillingMode="PAY_PER_REQUEST",
-        )
-
-        global send_message
-        send_message = load_module()
-        send_message.lambda_client = FakeLambdaClient()
-        fake_apigw = FakeApiGatewayClient()
-        original_boto3_client = send_message.boto3.client
-
-        def fake_client(name, *args, **kwargs):
-            if name == "apigatewaymanagementapi":
-                return fake_apigw
-            return original_boto3_client(name, *args, **kwargs)
-
-        send_message.boto3.client = fake_client
-
-        yield dynamodb, send_message.lambda_client, fake_apigw
-
-
-def seed_connection(dynamodb, connection_id="conn-123", user_id="user-123", match_id="match-123"):
-    dynamodb.Table("kismet-connections").put_item(
-        Item={
-            "PK": f"CONN#{connection_id}",
-            "SK": "META",
-            "connectionId": connection_id,
-            "userId": user_id,
-            "matchId": match_id,
-        }
-    )
-
-
-def seed_match(dynamodb, match_id="match-123", user_a="user-123", user_b="user-456"):
-    dynamodb.Table("kismet-matches").put_item(
-        Item={
-            "PK": f"MATCH#{match_id}",
-            "SK": "META",
-            "matchId": match_id,
-            "userAId": user_a,
-            "userBId": user_b,
-        }
-    )
-
-
-def ws_event(connection_id="conn-123", body=None):
+def make_event(body=None, connection_id="conn-sender"):
     return {
         "requestContext": {
             "connectionId": connection_id,
-            "domainName": "example.com",
+            "domainName": "abc123.execute-api.us-east-1.amazonaws.com",
             "stage": "dev",
         },
-        "body": json.dumps(body or {"content": "Hi"}),
+        "body": json.dumps(body or {}),
     }
 
 
-def test_send_message_requires_registered_connection(aws_resources):
-    result = send_message.handler(ws_event(), {})
-    assert result["statusCode"] == 401
-
-
-def test_send_message_validates_membership_and_type(aws_resources):
-    dynamodb, _, _ = aws_resources
-    seed_connection(dynamodb)
-    seed_match(dynamodb)
-
-    invalid_type = send_message.handler(ws_event(body={"content": "Hi", "messageType": "image"}), {})
-
-    dynamodb.Table("kismet-connections").put_item(
-        Item={
-            "PK": "CONN#conn-999",
-            "SK": "META",
-            "connectionId": "conn-999",
-            "userId": "user-999",
-            "matchId": "match-123",
-        }
+@patch("boto3.client")
+@patch("boto3.resource")
+def test_send_message_success(mock_resource, mock_client):
+    mock_messages = MagicMock()
+    mock_connections = MagicMock()
+    mock_resource.return_value.Table.side_effect = lambda name: (
+        mock_connections if name == "kismet-connections" else mock_messages
     )
-    forbidden = send_message.handler(ws_event(connection_id="conn-999"), {})
 
-    assert invalid_type["statusCode"] == 400
-    assert forbidden["statusCode"] == 403
+    mock_events = MagicMock()
+    mock_apigw = MagicMock()
+    mock_client.side_effect = lambda service, **kwargs: (
+        mock_apigw if service == "apigatewaymanagementapi" else mock_events
+    )
 
+    # Receiver has one active connection
+    mock_connections.query.return_value = {
+        "Items": [{"connectionId": "conn-receiver", "matchId": "match-1"}]
+    }
 
-def test_send_message_invokes_message_service_and_broadcasts(aws_resources):
-    dynamodb, fake_lambda, fake_apigw = aws_resources
-    seed_connection(dynamodb, connection_id="conn-sender", user_id="user-123")
-    seed_connection(dynamodb, connection_id="conn-recipient", user_id="user-456")
-    seed_match(dynamodb)
+    import send_message
+    send_message.messages = mock_messages
+    send_message.connections = mock_connections
+    send_message.events_client = mock_events
 
-    result = send_message.handler(ws_event(connection_id="conn-sender"), {})
+    event = make_event({
+        "matchId": "match-1",
+        "content": "Hello!",
+        "senderId": "user-1",
+        "receiverId": "user-2",
+    })
+
+    result = send_message.handler(event, None)
 
     assert result["statusCode"] == 200
-    assert len(fake_lambda.calls) == 1
-    invocation_event = json.loads(fake_lambda.calls[0]["Payload"].decode())
-    assert invocation_event["path"] == "/messages"
-    assert json.loads(invocation_event["body"])["matchId"] == "match-123"
-    assert len(fake_apigw.sent) == 1
-    assert fake_apigw.sent[0]["ConnectionId"] == "conn-recipient"
+    assert result["body"] == "Message delivered"
+
+    # Message persisted to DynamoDB
+    mock_messages.put_item.assert_called_once()
+    item = mock_messages.put_item.call_args[1]["Item"]
+    assert item["matchId"] == "match-1"
+    assert item["content"] == "Hello!"
+    assert item["senderId"] == "user-1"
+    assert item["PK"] == "CONV#match-1"
+    assert item["deleted"] is False
+
+    # EventBridge event published
+    mock_events.put_events.assert_called_once()
+    entry = mock_events.put_events.call_args[1]["Entries"][0]
+    assert entry["DetailType"] == "message.sent"
+    assert entry["Source"] == "kismet.message-service"
+
+
+@patch("boto3.client")
+@patch("boto3.resource")
+def test_send_message_missing_match_id(mock_resource, mock_client):
+    mock_messages = MagicMock()
+    mock_connections = MagicMock()
+    mock_resource.return_value.Table.side_effect = lambda name: (
+        mock_connections if name == "kismet-connections" else mock_messages
+    )
+
+    import send_message
+    send_message.messages = mock_messages
+    send_message.connections = mock_connections
+
+    event = make_event({"content": "Hello!"})  # missing matchId
+    result = send_message.handler(event, None)
+
+    assert result["statusCode"] == 400
+    mock_messages.put_item.assert_not_called()
+
+
+@patch("boto3.client")
+@patch("boto3.resource")
+def test_send_message_missing_content(mock_resource, mock_client):
+    mock_messages = MagicMock()
+    mock_connections = MagicMock()
+    mock_resource.return_value.Table.side_effect = lambda name: (
+        mock_connections if name == "kismet-connections" else mock_messages
+    )
+
+    import send_message
+    send_message.messages = mock_messages
+    send_message.connections = mock_connections
+
+    event = make_event({"matchId": "match-1"})  # missing content
+    result = send_message.handler(event, None)
+
+    assert result["statusCode"] == 400
+    mock_messages.put_item.assert_not_called()
+
+
+@patch("boto3.client")
+@patch("boto3.resource")
+def test_send_message_does_not_echo_to_sender(mock_resource, mock_client):
+    mock_messages = MagicMock()
+    mock_connections = MagicMock()
+    mock_resource.return_value.Table.side_effect = lambda name: (
+        mock_connections if name == "kismet-connections" else mock_messages
+    )
+
+    mock_apigw = MagicMock()
+    mock_client.return_value = mock_apigw
+
+    # Both sender and receiver connections returned
+    mock_connections.query.return_value = {
+        "Items": [
+            {"connectionId": "conn-sender", "matchId": "match-1"},
+            {"connectionId": "conn-receiver", "matchId": "match-1"},
+        ]
+    }
+
+    import send_message
+    send_message.messages = mock_messages
+    send_message.connections = mock_connections
+    send_message.events_client = MagicMock()
+
+    event = make_event(
+        {"matchId": "match-1", "content": "Hi!", "senderId": "user-1", "receiverId": "user-2"},
+        connection_id="conn-sender",
+    )
+    send_message.handler(event, None)
+
+    # Only pushed to receiver, not sender
+    pushed_ids = [
+        c[1]["ConnectionId"] for c in mock_apigw.post_to_connection.call_args_list
+    ]
+    assert "conn-receiver" in pushed_ids
+    assert "conn-sender" not in pushed_ids
+
+
+@patch("boto3.client")
+@patch("boto3.resource")
+def test_send_message_eventbridge_failure_does_not_fail_request(mock_resource, mock_client):
+    mock_messages = MagicMock()
+    mock_connections = MagicMock()
+    mock_resource.return_value.Table.side_effect = lambda name: (
+        mock_connections if name == "kismet-connections" else mock_messages
+    )
+
+    mock_events = MagicMock()
+    mock_events.put_events.side_effect = Exception("EventBridge unavailable")
+    mock_apigw = MagicMock()
+    mock_client.side_effect = lambda service, **kwargs: (
+        mock_apigw if service == "apigatewaymanagementapi" else mock_events
+    )
+
+    mock_connections.query.return_value = {"Items": []}
+
+    import send_message
+    send_message.messages = mock_messages
+    send_message.connections = mock_connections
+    send_message.events_client = mock_events
+
+    event = make_event({"matchId": "match-1", "content": "Hi!", "senderId": "user-1"})
+    result = send_message.handler(event, None)
+
+    # Should still succeed even if EventBridge fails
+    assert result["statusCode"] == 200
