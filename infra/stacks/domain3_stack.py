@@ -1,6 +1,13 @@
 import aws_cdk as cdk
 from constructs import Construct
-from aws_cdk import aws_iam as iam
+from aws_cdk import (
+    aws_iam as iam,
+    aws_lambda as lambda_,
+    aws_dynamodb as dynamodb,
+    aws_logs as logs,
+    aws_apigatewayv2 as apigwv2,
+    aws_apigatewayv2_integrations as integrations,
+)
 
 from stacks.shared_stack import SharedStack
 from kismet_constructs.kismet_service import KismetService
@@ -55,42 +62,106 @@ class Domain3Stack(cdk.Stack):
             event_bus=shared.event_bus,
         )
 
-        # ── Chat Gateway (Parker) ─────────────────────────────────────────────
-        # HTTP-polling frontend interface for messaging.
-        # Shares the kismet-messages DynamoDB table with Message Service.
-        # Routes:
-        #   POST /chat/{matchId}/send      — send a message
-        #   GET  /chat/{matchId}/messages  — poll for new messages (supports ?since=<ISO>)
-        #   GET  /chat/{matchId}/status    — last message + unread count
-        chat_gateway = KismetService(
-            self,
-            "ChatGateway",
-            service_name="chat-gateway",
-            code_path="../services/domain-3-messaging/chat-gateway",
-            tables=[],  # no table of its own; reads/writes kismet-messages directly
-            routes=[
-                {"method": "POST", "path": "/chat/{matchId}/send", "auth": True},
-                {"method": "GET", "path": "/chat/{matchId}/messages", "auth": True},
-                {"method": "GET", "path": "/chat/{matchId}/status", "auth": True},
-            ],
-            consume_events=[],
-            publish_events=True,  # also publishes message.sent on send
-            environment={
-                "MESSAGES_TABLE": "kismet-messages",
-                "EVENT_BUS_NAME": shared.event_bus.event_bus_name,
-            },
-            api=shared.api,
-            authorizer=shared.authorizer,
-            event_bus=shared.event_bus,
-        )
-
-        # Grant Chat Gateway read/write access to the Message Service's DynamoDB table
-        message_service.tables[0].grant_read_write_data(chat_gateway.function)
-
         # ── Message Service env: inject TABLE_NAME after table is created ─────
         message_service.function.add_environment(
             "TABLE_NAME", message_service.tables[0].table_name
         )
+
+        # ── Chat Gateway — WebSocket (Parker) ─────────────────────────────────
+        # Real-time chat via API Gateway WebSocket.
+        # connections table: PK=CONN#{connectionId} SK=META
+        #   GSI matchId-index: find all connections for a conversation
+        connections_table = dynamodb.Table(
+            self,
+            "ConnectionsTable",
+            table_name="kismet-connections",
+            partition_key=dynamodb.Attribute(name="PK", type=dynamodb.AttributeType.STRING),
+            sort_key=dynamodb.Attribute(name="SK", type=dynamodb.AttributeType.STRING),
+            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
+            time_to_live_attribute="ttl",
+            removal_policy=cdk.RemovalPolicy.DESTROY,
+        )
+        connections_table.add_global_secondary_index(
+            index_name="matchId-index",
+            partition_key=dynamodb.Attribute(name="matchId", type=dynamodb.AttributeType.STRING),
+        )
+
+        code_path = "../services/domain-3-messaging/chat-gateway"
+
+        connect_fn = lambda_.Function(
+            self, "WsConnectFn",
+            function_name="kismet-ws-connect",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="connect.handler",
+            code=lambda_.Code.from_asset(code_path),
+            timeout=cdk.Duration.seconds(30),
+            memory_size=256,
+            environment={"CONNECTIONS_TABLE": connections_table.table_name},
+            log_retention=logs.RetentionDays.ONE_WEEK,
+        )
+        connections_table.grant_read_write_data(connect_fn)
+
+        disconnect_fn = lambda_.Function(
+            self, "WsDisconnectFn",
+            function_name="kismet-ws-disconnect",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="disconnect.handler",
+            code=lambda_.Code.from_asset(code_path),
+            timeout=cdk.Duration.seconds(30),
+            memory_size=256,
+            environment={"CONNECTIONS_TABLE": connections_table.table_name},
+            log_retention=logs.RetentionDays.ONE_WEEK,
+        )
+        connections_table.grant_read_write_data(disconnect_fn)
+
+        send_message_fn = lambda_.Function(
+            self, "WsSendMessageFn",
+            function_name="kismet-ws-send-message",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="send_message.handler",
+            code=lambda_.Code.from_asset(code_path),
+            timeout=cdk.Duration.seconds(30),
+            memory_size=256,
+            environment={
+                "CONNECTIONS_TABLE": connections_table.table_name,
+                "MESSAGES_TABLE": message_service.tables[0].table_name,
+                "EVENT_BUS_NAME": shared.event_bus.event_bus_name,
+            },
+            log_retention=logs.RetentionDays.ONE_WEEK,
+        )
+        connections_table.grant_read_write_data(send_message_fn)
+        message_service.tables[0].grant_read_write_data(send_message_fn)
+        shared.event_bus.grant_put_events_to(send_message_fn)
+
+        # WebSocket API
+        ws_api = apigwv2.WebSocketApi(
+            self, "ChatWebSocketApi",
+            api_name="kismet-chat-ws",
+            connect_route_options=apigwv2.WebSocketRouteOptions(
+                integration=integrations.WebSocketLambdaIntegration("ConnectInt", connect_fn),
+            ),
+            disconnect_route_options=apigwv2.WebSocketRouteOptions(
+                integration=integrations.WebSocketLambdaIntegration("DisconnectInt", disconnect_fn),
+            ),
+            default_route_options=apigwv2.WebSocketRouteOptions(
+                integration=integrations.WebSocketLambdaIntegration("SendMessageInt", send_message_fn),
+            ),
+        )
+
+        ws_stage = apigwv2.WebSocketStage(
+            self, "ChatWsStage",
+            web_socket_api=ws_api,
+            stage_name="dev",
+            auto_deploy=True,
+        )
+
+        # Allow send_message Lambda to push messages back to WebSocket clients
+        send_message_fn.add_to_role_policy(iam.PolicyStatement(
+            actions=["execute-api:ManageConnections"],
+            resources=[f"arn:aws:execute-api:{self.region}:{self.account}:{ws_api.api_id}/*"],
+        ))
+
+        cdk.CfnOutput(self, "ChatWebSocketUrl", value=ws_stage.url, description="WebSocket chat URL")
 
         # ── Icebreaker Service (Jiaxin) ───────────────────────────────────────
         # Generates AI conversation starters via Bedrock when a match is created.
