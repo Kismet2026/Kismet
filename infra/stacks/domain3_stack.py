@@ -177,6 +177,57 @@ class Domain3Stack(cdk.Stack):
 
         cdk.CfnOutput(self, "ChatWebSocketUrl", value=ws_stage.url, description="WebSocket chat URL")
 
+        # ── Presence Service (QX) ────────────────────────────────────────────
+        # Tracks online/offline status (heartbeat TTL=60s) and typing indicators (TTL=5s).
+        # Tables created manually to support DynamoDB TTL — KismetService doesn't expose that.
+        presence_table = dynamodb.Table(
+            self,
+            "PresenceTable",
+            table_name="kismet-presence",
+            partition_key=dynamodb.Attribute(name="PK", type=dynamodb.AttributeType.STRING),
+            sort_key=dynamodb.Attribute(name="SK", type=dynamodb.AttributeType.STRING),
+            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
+            time_to_live_attribute="ttl",
+            removal_policy=cdk.RemovalPolicy.DESTROY,
+        )
+
+        typing_table = dynamodb.Table(
+            self,
+            "TypingTable",
+            table_name="kismet-typing",
+            partition_key=dynamodb.Attribute(name="PK", type=dynamodb.AttributeType.STRING),
+            sort_key=dynamodb.Attribute(name="SK", type=dynamodb.AttributeType.STRING),
+            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
+            time_to_live_attribute="ttl",
+            removal_policy=cdk.RemovalPolicy.DESTROY,
+        )
+
+        presence_service = KismetService(
+            self,
+            "PresenceService",
+            service_name="presence-service",
+            code_path="../services/domain-3-messaging/presence-service",
+            tables=[],  # created manually above to support TTL
+            routes=[
+                {"method": "POST", "path": "/presence/heartbeat", "auth": True},
+                {"method": "GET",  "path": "/presence/{userId}",          "auth": True},
+                {"method": "POST", "path": "/presence/{matchId}/typing",  "auth": True},
+                {"method": "GET",  "path": "/presence/{matchId}/typing",  "auth": True},
+            ],
+            environment={
+                "PRESENCE_TABLE": presence_table.table_name,
+                "TYPING_TABLE":   typing_table.table_name,
+                "MATCHES_TABLE":  matches_table.table_name,
+            },
+            api=shared.api,
+            authorizer=shared.authorizer,
+            event_bus=event_bus,
+        )
+
+        presence_table.grant_read_write_data(presence_service.function)
+        typing_table.grant_read_write_data(presence_service.function)
+        matches_table.grant_read_data(presence_service.function)
+
         # ── Icebreaker Service (Jiaxin) ───────────────────────────────────────
         # Generates AI conversation starters via Bedrock when a match is created.
         # Caches results in DynamoDB so suggestions are ready before users open chat.
