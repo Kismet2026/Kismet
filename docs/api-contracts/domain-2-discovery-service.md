@@ -137,7 +137,7 @@ GET /discovery?age_min=20&age_max=30&gender=female&limit=20&cursor=xxx
     "location_coordinates": [42.36, -71.06],
     "city": "Boston",
     "avatarUrl": "https://photos.example.com/alice.jpg",
-    "createdAt": "2026-04-01T12:00:00Z"
+    "timestamp": "2026-04-01T12:00:00Z"
   }
 }
 ```

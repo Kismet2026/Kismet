@@ -37,12 +37,11 @@ GET /recommend?limit=20
       "gender": "female",
       "location": "Boston",
       "avatarUrl": "https://cdn.kismet.com/avatars/user-456.jpg",
-      "score": 92,
+      "score": 70,
       "scoreBreakdown": {
-        "locationProximity": 25,
-        "sharedInterests": 20,
-        "baziCompatibility": 35,
-        "activityRecency": 12
+        "baziCompatibility": 40,
+        "profileCompleteness": 20,
+        "activityRecency": 10
       }
     },
     {
@@ -52,12 +51,11 @@ GET /recommend?limit=20
       "gender": "male",
       "location": "Cambridge",
       "avatarUrl": "https://cdn.kismet.com/avatars/user-789.jpg",
-      "score": 78,
+      "score": 50,
       "scoreBreakdown": {
-        "locationProximity": 22,
-        "sharedInterests": 15,
-        "baziCompatibility": 28,
-        "activityRecency": 13
+        "baziCompatibility": 32,
+        "profileCompleteness": 8,
+        "activityRecency": 10
       }
     }
   ],
@@ -66,10 +64,9 @@ GET /recommend?limit=20
 ```
 
 **Scoring Factors:**
-- `locationProximity` — 地理位置接近程度
-- `sharedInterests` — 共同兴趣匹配度
-- `baziCompatibility` — 八字合婚评分
-- `activityRecency` — 用户活跃度
+- `baziCompatibility` (0–40) — 八字合婚评分（来自外部 BaZi API，按比例缩放）
+- `profileCompleteness` (0–20) — 资料完整度（头像 +8，简介 +7，城市 +5）
+- `activityRecency` (0–10) — 用户活跃度（占位值，待接入真实登录数据）
 
 **Errors:**
 
@@ -143,10 +140,13 @@ POST /recommend/refresh
   "detail-type": "profile.completed",
   "detail": {
     "userId": "user-456",
-    "displayName": "Alice",
-    "age": 25,
+    "name": "Alice",
+    "birthDate": "1999-05-15",
     "gender": "female",
-    "location": "Boston"
+    "preferred_gender": "male",
+    "location_coordinates": [42.36, -71.06],
+    "city": "Boston",
+    "timestamp": "2026-04-01T10:30:00Z"
   }
 }
 ```

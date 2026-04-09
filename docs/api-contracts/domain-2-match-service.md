@@ -33,24 +33,21 @@ GET /matches?limit=20&cursor=xxx
   "items": [
     {
       "matchId": "match-001",
-      "userId": "user-456",
-      "displayName": "Alice",
-      "avatarUrl": "https://cdn.kismet.com/avatars/user-456.jpg",
-      "baziScore": 85,
-      "matchedAt": "2026-04-01T12:00:00Z"
+      "matchedAt": "2026-04-01T12:00:00Z",
+      "status": "active"
     },
     {
       "matchId": "match-002",
-      "userId": "user-789",
-      "displayName": "Bob",
-      "avatarUrl": "https://cdn.kismet.com/avatars/user-789.jpg",
-      "baziScore": 72,
-      "matchedAt": "2026-03-30T08:30:00Z"
+      "matchedAt": "2026-03-30T08:30:00Z",
+      "status": "active"
     }
   ],
   "nextCursor": "eyJ0aW1lc3Rhb...",
   "count": 2
 }
+```
+
+> **Note:** Response returns match metadata only. To display user profiles (name, avatar, etc.), the frontend should call `GET /matches/{matchId}` to get user IDs, then `GET /profiles/{userId}` to fetch profile data.
 ```
 
 **Errors:**
@@ -78,25 +75,14 @@ GET /matches/match-001
 ```json
 {
   "matchId": "match-001",
-  "userA": {
-    "userId": "user-123",
-    "displayName": "CurrentUser",
-    "avatarUrl": "https://cdn.kismet.com/avatars/user-123.jpg",
-    "age": 26,
-    "bio": "Music lover"
-  },
-  "userB": {
-    "userId": "user-456",
-    "displayName": "Alice",
-    "avatarUrl": "https://cdn.kismet.com/avatars/user-456.jpg",
-    "age": 25,
-    "bio": "Love hiking and coffee"
-  },
-  "baziScore": 85,
-  "baziAnalysis": "天作之合，五行互补，感情运势极佳。",
+  "userAId": "user-123",
+  "userBId": "user-456",
+  "status": "active",
   "matchedAt": "2026-04-01T12:00:00Z"
 }
 ```
+
+> **Note:** Returns user IDs only. Frontend should call `GET /profiles/{userId}` to fetch display names, avatars, and other profile data for each user.
 
 **Errors:**
 
