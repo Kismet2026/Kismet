@@ -34,7 +34,7 @@ class Domain6Stack(cdk.Stack):
                     "method": "POST",
                     "path": "/analytics/log",
                     "auth": False,
-                },  # EventBridge trigger
+                },
                 {"method": "GET", "path": "/analytics/log/recent", "auth": True},
             ],
             consume_events=[
@@ -54,6 +54,10 @@ class Domain6Stack(cdk.Stack):
                     resources=[shared.activity_stream.stream_arn],
                 )
             ],
+            environment={
+                "ACTIVITY_LOG_TABLE": "kismet-activity-log",
+                "KINESIS_STREAM_NAME": shared.activity_stream.stream_name,
+            },
             api=shared.api,
             authorizer=shared.authorizer,
             event_bus=shared.event_bus,
@@ -69,7 +73,7 @@ class Domain6Stack(cdk.Stack):
             "AnalyticsPipelineService",
             service_name="analytics-pipeline",
             code_path="../services/domain-6-analytics/analytics-pipeline-service",
-            tables=[],  # Uses S3 + Athena, no DynamoDB
+            tables=[],
             routes=[
                 {"method": "POST", "path": "/analytics/query", "auth": True},
                 {"method": "GET", "path": "/analytics/query/{queryId}", "auth": True},
@@ -87,17 +91,32 @@ class Domain6Stack(cdk.Stack):
                     resources=["*"],
                 ),
                 iam.PolicyStatement(
-                    actions=["s3:GetObject", "s3:PutObject", "s3:ListBucket"],
+                    actions=[
+                        "s3:GetObject",
+                        "s3:PutObject",
+                        "s3:ListBucket",
+                        "s3:GetBucketLocation",
+                    ],
                     resources=[
                         shared.analytics_bucket.bucket_arn,
                         f"{shared.analytics_bucket.bucket_arn}/*",
                     ],
                 ),
                 iam.PolicyStatement(
-                    actions=["glue:GetDatabase", "glue:GetTable"],
+                    actions=[
+                        "glue:GetDatabase",
+                        "glue:GetTable",
+                        "glue:CreateDatabase",
+                        "glue:CreateTable",
+                    ],
                     resources=["*"],
                 ),
             ],
+            environment={
+                "ANALYTICS_BUCKET": shared.analytics_bucket.bucket_name,
+                "ATHENA_DATABASE": "kismet_analytics",
+                "S3_DATA_PREFIX": "events",
+            },
             api=shared.api,
             authorizer=shared.authorizer,
             event_bus=shared.event_bus,
