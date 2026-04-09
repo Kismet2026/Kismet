@@ -30,7 +30,10 @@ UNHEALTHY_ERROR_RATE = 0.05  # errorRate above this → unhealthy
 def _response(status_code, body):
     return {
         "statusCode": status_code,
-        "headers": {"Content-Type": "application/json"},
+        "headers": {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+        },
         "body": json.dumps(body, default=_json_default),
     }
 
