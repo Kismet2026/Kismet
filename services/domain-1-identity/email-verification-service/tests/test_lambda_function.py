@@ -217,6 +217,17 @@ class GetVerificationStatusTests(unittest.TestCase):
             self.assertEqual(response["statusCode"], 401)
 
 
+class CorsTests(unittest.TestCase):
+    def setUp(self):
+        self.context = SimpleNamespace(aws_request_id="req-email-123")
+
+    def test_response_includes_cors_headers(self):
+        with patch.dict("os.environ", ENV):
+            response = lambda_handler(make_event("/verify/send", "POST", body={}), self.context)
+            self.assertEqual(response["headers"]["Access-Control-Allow-Origin"], "*")
+            self.assertIn("Authorization", response["headers"]["Access-Control-Allow-Headers"])
+
+
 class RoutingTests(unittest.TestCase):
     def setUp(self):
         self.context = SimpleNamespace(aws_request_id="req-email-123")

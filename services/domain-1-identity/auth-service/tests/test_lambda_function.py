@@ -176,6 +176,17 @@ class AuthServiceLogoutTests(unittest.TestCase):
             self.assertEqual(response["statusCode"], 400)
 
 
+class AuthServiceCorsTests(unittest.TestCase):
+    def setUp(self):
+        self.context = SimpleNamespace(aws_request_id="req-123")
+
+    def test_response_includes_cors_headers(self):
+        with patch.dict("os.environ", ENV):
+            response = lambda_handler(make_event("/auth/login", "POST", body={"email": "a@b.com"}), self.context)
+            self.assertEqual(response["headers"]["Access-Control-Allow-Origin"], "*")
+            self.assertIn("Authorization", response["headers"]["Access-Control-Allow-Headers"])
+
+
 class AuthServiceRoutingTests(unittest.TestCase):
     def setUp(self):
         self.context = SimpleNamespace(aws_request_id="req-123")

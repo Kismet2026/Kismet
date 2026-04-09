@@ -113,7 +113,14 @@ def handle_upload(user_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
     events.put_events(Entries=[{
         "Source": "kismet.photo-service",
         "DetailType": "photo.uploaded",
-        "Detail": json.dumps({"photoId": photo_id, "userId": user_id, "s3Key": s3_key, "uploadedAt": uploaded_at}),
+        "Detail": json.dumps({
+            "photoId": photo_id,
+            "userId": user_id,
+            "s3Key": s3_key,
+            "cdnUrl": f"{PHOTOS_CDN_BASE_URL}/{s3_key}" if PHOTOS_CDN_BASE_URL else "",
+            "isPrimary": is_primary,
+            "uploadedAt": uploaded_at,
+        }),
         "EventBusName": EVENT_BUS_NAME,
     }])
 
@@ -262,9 +269,17 @@ def parse_json_body(event: Dict[str, Any]):
         return None, json_response(400, {"code": "VALIDATION_ERROR", "message": "Request body must be valid JSON."})
 
 
+CORS_HEADERS = {
+    "Content-Type": "application/json",
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Headers": "Content-Type,Authorization",
+    "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS",
+}
+
+
 def json_response(status_code: int, payload: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "statusCode": status_code,
-        "headers": {"Content-Type": "application/json"},
+        "headers": CORS_HEADERS,
         "body": json.dumps(payload),
     }

@@ -20,7 +20,7 @@ EVENT_BUS_NAME = os.environ.get("EVENT_BUS_NAME", "")
 dynamodb = boto3.resource("dynamodb")
 events = boto3.client("events")
 
-UPDATABLE_FIELDS = frozenset({"name", "bio", "gender", "interestedIn", "birthDate", "birthTime", "location", "interests"})
+UPDATABLE_FIELDS = frozenset({"name", "bio", "gender", "interestedIn", "birthDate", "birthTime", "location", "interests", "city", "avatarUrl"})
 
 
 def lambda_handler(event: Optional[Dict[str, Any]], context: Any) -> Dict[str, Any]:
@@ -92,7 +92,7 @@ def handle_create(user_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
     events.put_events(Entries=[{
         "Source": "kismet.profile-service",
         "DetailType": "profile.completed",
-        "Detail": json.dumps({"userId": user_id, "name": name, "createdAt": now}),
+        "Detail": json.dumps(_build_event_detail(item)),
         "EventBusName": EVENT_BUS_NAME,
     }])
 
@@ -143,6 +143,15 @@ def handle_update(caller_id: str, user_id: str, body: Dict[str, Any]) -> Dict[st
         ExpressionAttributeValues=expr_values,
     )
 
+    # Publish profile.updated event with full current profile
+    updated_item = table.get_item(Key={"PK": f"USER#{user_id}", "SK": "PROFILE"}).get("Item", {})
+    events.put_events(Entries=[{
+        "Source": "kismet.profile-service",
+        "DetailType": "profile.updated",
+        "Detail": json.dumps(_build_event_detail(updated_item)),
+        "EventBusName": EVENT_BUS_NAME,
+    }])
+
     return json_response(200, {"userId": user_id, **updates})
 
 
@@ -156,6 +165,25 @@ def handle_delete(caller_id: str, user_id: str) -> Dict[str, Any]:
 
     table.delete_item(Key={"PK": f"USER#{user_id}", "SK": "PROFILE"})
     return json_response(200, {"message": "Profile deleted successfully"})
+
+
+def _build_event_detail(item: Dict[str, Any]) -> Dict[str, Any]:
+    """Build event payload with all fields D2 discovery-service needs."""
+    return {
+        "userId": item.get("userId", ""),
+        "name": item.get("name", ""),
+        "birthDate": item.get("birthDate", ""),
+        "birthTime": item.get("birthTime", ""),
+        "gender": item.get("gender", ""),
+        "preferred_gender": item.get("interestedIn", ""),
+        "location_coordinates": item.get("location", []),
+        "city": item.get("city", ""),
+        "avatarUrl": item.get("avatarUrl", ""),
+        "bio": item.get("bio", ""),
+        "interests": item.get("interests", []),
+        "createdAt": item.get("createdAt", ""),
+        "updatedAt": item.get("updatedAt", ""),
+    }
 
 
 def resolve_route(method: str, path: str) -> Tuple[Optional[str], Dict[str, str]]:
@@ -223,9 +251,17 @@ def parse_json_body(event: Dict[str, Any]):
         return None, json_response(400, {"code": "VALIDATION_ERROR", "message": "Request body must be valid JSON."})
 
 
+CORS_HEADERS = {
+    "Content-Type": "application/json",
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Headers": "Content-Type,Authorization",
+    "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS",
+}
+
+
 def json_response(status_code: int, payload: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "statusCode": status_code,
-        "headers": {"Content-Type": "application/json"},
+        "headers": CORS_HEADERS,
         "body": json.dumps(payload),
     }
