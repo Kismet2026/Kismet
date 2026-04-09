@@ -124,6 +124,7 @@ class Domain6Stack(cdk.Stack):
 
         # ── Admin Dashboard (Lingyun) ──────────────────────────────────────────
         # Two DynamoDB tables: kismet-admin-stats and kismet-flagged-content
+        # Also reads/writes kismet-profiles (domain-1) for user ban/unban/list
         KismetService(
             self,
             "AdminDashboardService",
@@ -155,6 +156,18 @@ class Domain6Stack(cdk.Stack):
             ],
             consume_events=["content.flagged", "user.reported"],
             publish_events=False,
+            extra_policies=[
+                iam.PolicyStatement(
+                    actions=[
+                        "dynamodb:GetItem",
+                        "dynamodb:UpdateItem",
+                        "dynamodb:Scan",
+                    ],
+                    resources=[
+                        f"arn:aws:dynamodb:{self.region}:{self.account}:table/kismet-profiles",
+                    ],
+                )
+            ],
             api=shared.api,
             authorizer=shared.authorizer,
             event_bus=shared.event_bus,
