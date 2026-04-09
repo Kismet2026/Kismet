@@ -159,6 +159,7 @@ class AuthServiceLogoutTests(unittest.TestCase):
 
     def test_logout_success(self):
         with patch.dict("os.environ", ENV), \
+             patch("lambda_function.COGNITO_APP_CLIENT_ID", ENV["COGNITO_APP_CLIENT_ID"]), \
              patch("lambda_function.cognito") as mock_cognito:
 
             mock_cognito.revoke_token.return_value = {}
