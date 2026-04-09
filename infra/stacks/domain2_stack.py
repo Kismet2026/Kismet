@@ -59,15 +59,13 @@ class Domain2Stack(cdk.Stack):
             consume_events=["swipe.created"],
             publish_events=True,
             environment={
-                "SWIPE_TABLE_NAME": "kismet-swipes",
+                "SWIPE_TABLE_NAME": swipe_svc.tables[0].table_name,
             },
             extra_policies=[
                 # Match Service needs to read the swipe table to check mutual likes
                 iam.PolicyStatement(
                     actions=["dynamodb:GetItem", "dynamodb:Query"],
-                    resources=[
-                        f"arn:aws:dynamodb:{self.region}:{self.account}:table/kismet-swipes",
-                    ],
+                    resources=[swipe_svc.tables[0].table_arn],
                 ),
             ],
             api=shared.api,
@@ -76,7 +74,7 @@ class Domain2Stack(cdk.Stack):
         )
 
         # ── Discovery Service ─────────────────────────────────────────────────
-        KismetService(
+        discovery_svc = KismetService(
             self,
             "DiscoveryService",
             service_name="discovery",
@@ -93,7 +91,7 @@ class Domain2Stack(cdk.Stack):
             ],
             consume_events=["profile.completed"],
             environment={
-                "SWIPE_TABLE_NAME": "kismet-swipes",
+                "SWIPE_TABLE_NAME": swipe_svc.tables[0].table_name,
                 "BAZI_API_URL": "https://match-date-nu.vercel.app/api/match",
                 "BAZI_API_KEY": "ABC",  # TODO: replace with real key before deploy
             },
@@ -101,9 +99,7 @@ class Domain2Stack(cdk.Stack):
                 # Discovery needs to read swipe table to filter already-swiped candidates
                 iam.PolicyStatement(
                     actions=["dynamodb:Query"],
-                    resources=[
-                        f"arn:aws:dynamodb:{self.region}:{self.account}:table/kismet-swipes",
-                    ],
+                    resources=[swipe_svc.tables[0].table_arn],
                 ),
             ],
             api=shared.api,
@@ -130,23 +126,19 @@ class Domain2Stack(cdk.Stack):
             ],
             consume_events=["profile.completed", "swipe.created"],
             environment={
-                "DISCOVERY_TABLE_NAME": "kismet-discovery",
-                "SWIPE_TABLE_NAME": "kismet-swipes",
+                "DISCOVERY_TABLE_NAME": discovery_svc.tables[0].table_name,
+                "SWIPE_TABLE_NAME": swipe_svc.tables[0].table_name,
             },
             extra_policies=[
                 # Recommendation needs to read discovery table for candidate profiles + BaZi cache
                 iam.PolicyStatement(
                     actions=["dynamodb:Scan", "dynamodb:Query", "dynamodb:GetItem"],
-                    resources=[
-                        f"arn:aws:dynamodb:{self.region}:{self.account}:table/kismet-discovery",
-                    ],
+                    resources=[discovery_svc.tables[0].table_arn],
                 ),
                 # Recommendation needs to read swipe table to exclude already-swiped candidates
                 iam.PolicyStatement(
                     actions=["dynamodb:Query"],
-                    resources=[
-                        f"arn:aws:dynamodb:{self.region}:{self.account}:table/kismet-swipes",
-                    ],
+                    resources=[swipe_svc.tables[0].table_arn],
                 ),
             ],
             api=shared.api,
