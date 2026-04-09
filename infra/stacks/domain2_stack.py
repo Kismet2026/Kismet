@@ -95,7 +95,7 @@ class Domain2Stack(cdk.Stack):
             environment={
                 "SWIPE_TABLE_NAME": "kismet-swipes",
                 "BAZI_API_URL": "https://match-date-nu.vercel.app/api/match",
-                "BAZI_API_KEY": "ABC",
+                "BAZI_API_KEY": "ABC",  # TODO: replace with real key before deploy
             },
             extra_policies=[
                 # Discovery needs to read swipe table to filter already-swiped candidates

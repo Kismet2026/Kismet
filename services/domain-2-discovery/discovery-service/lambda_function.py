@@ -1,9 +1,13 @@
 import json
 import boto3
 import os
+import logging
 from datetime import datetime
 from urllib import request as urllib_request
 from urllib.error import URLError
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 
 dynamodb = boto3.resource('dynamodb')
 
@@ -11,7 +15,9 @@ TABLE_NAME = os.environ.get('TABLE_NAME', 'kismet-discovery')
 SWIPE_TABLE_NAME = os.environ.get('SWIPE_TABLE_NAME', 'kismet-swipes')
 EVENT_BUS_NAME = os.environ.get('EVENT_BUS_NAME', 'kismet-events')
 BAZI_API_URL = os.environ.get('BAZI_API_URL', 'https://match-date-nu.vercel.app/api/match')
-BAZI_API_KEY = os.environ.get('BAZI_API_KEY', 'ABC')
+BAZI_API_KEY = os.environ.get('BAZI_API_KEY', '')
+if not BAZI_API_KEY:
+    logger.warning('BAZI_API_KEY not set — BaZi API calls will fail')
 
 table = dynamodb.Table(TABLE_NAME)
 swipe_table = dynamodb.Table(SWIPE_TABLE_NAME)
@@ -20,10 +26,12 @@ swipe_table = dynamodb.Table(SWIPE_TABLE_NAME)
 def handler(event, context):
     # EventBridge event (profile.completed)
     if event.get('source') == 'kismet.profile-service':
+        logger.info('EventBridge: profile.completed')
         return handle_profile_completed(event)
 
     method = _get_method(event)
     path = _get_path(event)
+    logger.info('Request: %s %s', method, path)
 
     if method == 'GET' and path == '/discovery':
         return get_candidates(event)
@@ -48,6 +56,7 @@ def handle_profile_completed(event):
 
     birth_date = detail.get('birthDate', '')
 
+    logger.info('Indexing profile: userId=%s birthDate=%s', user_id, birth_date)
     table.put_item(Item={
         'PK': f'PROFILE#{user_id}',
         'SK': 'META',
@@ -141,6 +150,7 @@ def get_candidates(event):
         if len(candidates) >= limit:
             break
 
+    logger.info('Candidates returned: %d (limit=%d, swiped=%d)', len(candidates), limit, len(swiped_ids))
     response_body = {'items': candidates, 'count': len(candidates)}
 
     if 'LastEvaluatedKey' in result and len(candidates) >= limit:
@@ -189,13 +199,16 @@ def _ensure_bazi_cache(birth_date):
     result = table.get_item(Key=cache_key)
     cached = result.get('Item')
     if cached and 'scores' in cached:
+        logger.info('BaZi cache hit: birthDate=%s', birth_date)
         # DynamoDB stores numbers as Decimal — convert to int for JSON
         return {k: int(v) for k, v in cached['scores'].items()}
 
     # Cache miss — call external API
+    logger.info('BaZi cache miss: birthDate=%s, calling API', birth_date)
     try:
         scores = _call_bazi_api(birth_date)
-    except (URLError, ValueError):
+    except (URLError, ValueError) as e:
+        logger.error('BaZi API error for birthDate=%s: %s', birth_date, e)
         return {}
 
     # Write to cache (birthDate never changes, so no TTL needed)

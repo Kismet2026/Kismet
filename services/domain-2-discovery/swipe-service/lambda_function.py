@@ -2,7 +2,11 @@ import json
 import boto3
 import os
 import uuid
+import logging
 from datetime import datetime
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 
 dynamodb = boto3.resource('dynamodb')
 events_client = boto3.client('events')
@@ -16,6 +20,7 @@ table = dynamodb.Table(TABLE_NAME)
 def handler(event, context):
     method = _get_method(event)
     path = _get_path(event)
+    logger.info('Request: %s %s', method, path)
 
     if method == 'POST' and path == '/swipe':
         return create_swipe(event)
@@ -61,7 +66,10 @@ def create_swipe(event):
             ConditionExpression='attribute_not_exists(userId) AND attribute_not_exists(targetUserId)',
         )
     except dynamodb.meta.client.exceptions.ConditionalCheckFailedException:
+        logger.warning('Duplicate swipe: user=%s target=%s', user_id, target_user_id)
         return _response(409, {'code': 'CONFLICT', 'message': 'Already swiped on this user'})
+
+    logger.info('Swipe created: user=%s target=%s action=%s', user_id, target_user_id, action)
 
     # Publish event only for likes
     if action == 'like':

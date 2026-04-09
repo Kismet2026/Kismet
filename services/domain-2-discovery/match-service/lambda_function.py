@@ -2,7 +2,11 @@ import json
 import boto3
 import os
 import uuid
+import logging
 from datetime import datetime
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 
 dynamodb = boto3.resource('dynamodb')
 dynamodb_client = boto3.client('dynamodb')
@@ -19,11 +23,13 @@ swipe_table = dynamodb.Table(SWIPE_TABLE)
 def handler(event, context):
     # EventBridge event (swipe.created)
     if event.get('source') == 'kismet.swipe-service':
+        logger.info('EventBridge: swipe.created')
         return handle_swipe_event(event)
 
     # API Gateway request
     method = _get_method(event)
     path = _get_path(event)
+    logger.info('Request: %s %s', method, path)
 
     # Extract path parameter (API Gateway sets pathParameters; fallback to path parsing for local tests)
     match_id = (event.get('pathParameters') or {}).get('matchId')
@@ -55,9 +61,11 @@ def handle_swipe_event(event):
     ).get('Item')
 
     if not reverse_swipe or reverse_swipe.get('action') != 'like':
+        logger.info('No mutual like: swiper=%s target=%s', swiper_id, target_id)
         return {'statusCode': 200, 'body': 'No mutual like'}
 
     # Mutual like detected — create match atomically
+    logger.info('Mutual like detected: %s <-> %s', swiper_id, target_id)
     match_id = f'match-{uuid.uuid4().hex[:8]}'
     timestamp = datetime.utcnow().isoformat() + 'Z'
     user_ids = sorted([swiper_id, target_id])
@@ -128,6 +136,7 @@ def handle_swipe_event(event):
         )
     except dynamodb_client.exceptions.TransactionCanceledException:
         # ConditionExpression failed → match already exists for this pair
+        logger.info('Match already exists for pair: %s', pair_key)
         return {'statusCode': 200, 'body': 'Match already exists'}
 
     # Publish match.created event
@@ -142,6 +151,7 @@ def handle_swipe_event(event):
         }),
     }])
 
+    logger.info('Match created: matchId=%s users=%s', match_id, user_ids)
     return {'statusCode': 200, 'body': json.dumps({'matchId': match_id})}
 
 
@@ -230,6 +240,7 @@ def unmatch(event, match_id):
     user_index_sk = f'MATCH#{matched_at}#{match_id}'
 
     # Update META + both user-index entries atomically
+    logger.info('Unmatch: matchId=%s by user=%s', match_id, user_id)
     dynamodb_client.transact_write_items(
         TransactItems=[
             {

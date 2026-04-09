@@ -1,5 +1,6 @@
 import json
 import os
+import logging
 from urllib import request as urllib_request
 from urllib.error import URLError
 
@@ -7,13 +8,19 @@ from urllib.error import URLError
 # Proxies to external BaZi API for compatibility scoring.
 # TODO: Add 1v1 compatibility endpoint when external API supports it.
 
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+
 BAZI_API_URL = os.environ.get('BAZI_API_URL', 'https://match-date-nu.vercel.app/api/match')
-BAZI_API_KEY = os.environ.get('BAZI_API_KEY', 'ABC')
+BAZI_API_KEY = os.environ.get('BAZI_API_KEY', '')
+if not BAZI_API_KEY:
+    logger.warning('BAZI_API_KEY not set — BaZi API calls will fail')
 
 
 def handler(event, context):
     method = _get_method(event)
     path = _get_path(event)
+    logger.info('Request: %s %s', method, path)
 
     if method == 'POST' and path == '/bazi/top-matches':
         return get_top_matches(event)
@@ -32,10 +39,12 @@ def get_top_matches(event):
         return _response(400, {'code': 'VALIDATION_ERROR', 'message': 'Missing field: birthDate'})
 
     limit = min(int(body.get('limit', 50)), 200)
+    logger.info('BaZi top-matches: birthDate=%s limit=%d', body['birthDate'], limit)
 
     try:
         result = _call_bazi_api(body['birthDate'], limit)
     except (URLError, ValueError) as e:
+        logger.error('BaZi API error: %s', e)
         return _response(502, {'code': 'UPSTREAM_ERROR', 'message': f'BaZi API error: {str(e)}'})
 
     return _response(200, {

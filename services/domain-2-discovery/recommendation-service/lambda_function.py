@@ -1,8 +1,12 @@
 import json
 import boto3
 import os
+import logging
 from datetime import datetime
 from decimal import Decimal
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 
 dynamodb = boto3.resource('dynamodb')
 
@@ -26,14 +30,17 @@ class DecimalEncoder(json.JSONEncoder):
 def handler(event, context):
     # EventBridge: profile.completed → add to recommendation pool
     if event.get('source') == 'kismet.profile-service':
+        logger.info('EventBridge: profile.completed')
         return handle_profile_completed(event)
 
     # EventBridge: swipe.created → remove swiped candidate
     if event.get('source') == 'kismet.swipe-service':
+        logger.info('EventBridge: swipe.created')
         return handle_swipe_created(event)
 
     method = _get_method(event)
     path = _get_path(event)
+    logger.info('Request: %s %s', method, path)
 
     if method == 'GET' and path == '/recommend':
         return get_recommendations(event)
@@ -106,7 +113,10 @@ def get_recommendations(event):
 
     # If no cached recommendations, compute on the fly
     if not items:
+        logger.info('No cached recommendations for user=%s, computing', user_id)
         items = _compute_recommendations(user_id, limit)
+    else:
+        logger.info('Returning %d cached recommendations for user=%s', len(items), user_id)
 
     recommendations = [{
         'userId': item.get('candidateUserId', ''),
@@ -210,6 +220,7 @@ def _compute_recommendations(user_id, limit):
 
     # Sort by score descending
     candidates.sort(key=lambda x: x.get('score', 0), reverse=True)
+    logger.info('Computed %d recommendations for user=%s (swiped=%d excluded)', len(candidates), user_id, len(swiped_ids))
     return candidates[:limit]
 
 
