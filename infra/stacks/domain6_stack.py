@@ -34,7 +34,7 @@ class Domain6Stack(cdk.Stack):
                     "method": "POST",
                     "path": "/analytics/log",
                     "auth": False,
-                },  # EventBridge trigger
+                },
                 {"method": "GET", "path": "/analytics/log/recent", "auth": True},
             ],
             consume_events=[
@@ -54,6 +54,10 @@ class Domain6Stack(cdk.Stack):
                     resources=[shared.activity_stream.stream_arn],
                 )
             ],
+            environment={
+                "ACTIVITY_LOG_TABLE": "kismet-activity-log",
+                "KINESIS_STREAM_NAME": shared.activity_stream.stream_name,
+            },
             api=shared.api,
             authorizer=shared.authorizer,
             event_bus=shared.event_bus,
