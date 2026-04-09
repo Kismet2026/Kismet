@@ -98,7 +98,7 @@ def get_recommendations(event):
         return _response(401, {'code': 'UNAUTHORIZED', 'message': 'Not authenticated'})
 
     params = event.get('queryStringParameters') or {}
-    limit = min(int(params.get('limit', 20)), 50)
+    limit = _safe_int(params.get('limit'), 20, 1, 50)
 
     from boto3.dynamodb.conditions import Key
 
@@ -273,6 +273,17 @@ def _get_swiped_user_ids(user_id):
 
 
 # --- Helpers ---
+
+def _safe_int(val, default, min_val=0, max_val=None):
+    try:
+        result = int(val)
+        result = max(result, min_val)
+        if max_val is not None:
+            result = min(result, max_val)
+        return result
+    except (ValueError, TypeError):
+        return default
+
 
 def _get_method(event):
     return (

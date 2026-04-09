@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import logging
 from urllib import request as urllib_request
 from urllib.error import URLError
@@ -38,7 +39,10 @@ def get_top_matches(event):
     if not body or 'birthDate' not in body:
         return _response(400, {'code': 'VALIDATION_ERROR', 'message': 'Missing field: birthDate'})
 
-    limit = min(int(body.get('limit', 50)), 200)
+    if not re.match(r'^\d{4}-\d{2}-\d{2}$', body['birthDate']):
+        return _response(400, {'code': 'VALIDATION_ERROR', 'message': 'birthDate must be YYYY-MM-DD format'})
+
+    limit = _safe_int(body.get('limit'), 50, 1, 200)
     logger.info('BaZi top-matches: birthDate=%s limit=%d', body['birthDate'], limit)
 
     try:
@@ -71,6 +75,17 @@ def _call_bazi_api(birth_date, limit=50):
 
 
 # --- Helpers ---
+
+def _safe_int(val, default, min_val=0, max_val=None):
+    try:
+        result = int(val)
+        result = max(result, min_val)
+        if max_val is not None:
+            result = min(result, max_val)
+        return result
+    except (ValueError, TypeError):
+        return default
+
 
 def _get_method(event):
     return (

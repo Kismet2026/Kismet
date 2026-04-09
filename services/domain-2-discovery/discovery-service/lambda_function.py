@@ -69,7 +69,7 @@ def handle_profile_completed(event):
         'age': age,
         'birthDate': birth_date,
         'avatarUrl': detail.get('avatarUrl', ''),
-        'bio': detail.get('bio', ''),
+        'bio': detail.get('bio', '')[:500],
         'cachedAt': timestamp,
     })
 
@@ -86,9 +86,9 @@ def get_candidates(event):
         return _response(401, {'code': 'UNAUTHORIZED', 'message': 'Not authenticated'})
 
     params = event.get('queryStringParameters') or {}
-    limit = min(int(params.get('limit', 20)), 50)
-    age_min = int(params.get('age_min', 0))
-    age_max = int(params.get('age_max', 200))
+    limit = _safe_int(params.get('limit'), 20, 1, 50)
+    age_min = _safe_int(params.get('age_min'), 0, 0, 200)
+    age_max = _safe_int(params.get('age_max'), 200, 0, 200)
     gender_filter = params.get('gender')
     cursor = params.get('cursor')
 
@@ -107,10 +107,13 @@ def get_candidates(event):
     }
 
     if cursor:
-        import base64
-        scan_params['ExclusiveStartKey'] = json.loads(
-            base64.b64decode(cursor).decode()
-        )
+        try:
+            import base64
+            scan_params['ExclusiveStartKey'] = json.loads(
+                base64.b64decode(cursor).decode()
+            )
+        except (json.JSONDecodeError, Exception):
+            return _response(400, {'code': 'VALIDATION_ERROR', 'message': 'Invalid cursor'})
 
     result = table.scan(**scan_params)
 
@@ -163,6 +166,17 @@ def get_candidates(event):
 
 
 # --- Helpers ---
+
+def _safe_int(val, default, min_val=0, max_val=None):
+    try:
+        result = int(val)
+        result = max(result, min_val)
+        if max_val is not None:
+            result = min(result, max_val)
+        return result
+    except (ValueError, TypeError):
+        return default
+
 
 def _calculate_age(birth_date_str):
     """Calculate age from YYYY-MM-DD birth date string."""

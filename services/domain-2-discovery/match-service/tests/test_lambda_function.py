@@ -150,6 +150,20 @@ class TestGetMatches:
         assert resp['statusCode'] == 401
 
 
+class TestInputValidation:
+    @patch('lambda_function.match_table')
+    def test_bad_limit_uses_default(self, mock_table):
+        mock_table.query.return_value = {'Items': []}
+        resp = handler(_api_event('GET', '/matches', query_params={'limit': 'abc'}), None)
+        assert resp['statusCode'] == 200
+
+    def test_bad_cursor_returns_400(self):
+        resp = handler(_api_event('GET', '/matches', query_params={'cursor': '!!!bad!!!'}), None)
+        assert resp['statusCode'] == 400
+        body = json.loads(resp['body'])
+        assert body['code'] == 'VALIDATION_ERROR'
+
+
 class TestGetMatchDetail:
     @patch('lambda_function.match_table')
     def test_returns_match_detail(self, mock_table):

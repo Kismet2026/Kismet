@@ -119,6 +119,21 @@ class TestGetSwipeHistory:
         assert resp['statusCode'] == 401
 
 
+class TestInputValidation:
+    @patch('lambda_function.table')
+    def test_bad_limit_uses_default(self, mock_table):
+        mock_table.query.return_value = {'Items': []}
+
+        resp = handler(_api_event('GET', '/swipe/history', query_params={'limit': 'abc'}), None)
+        assert resp['statusCode'] == 200
+
+    def test_bad_cursor_returns_400(self):
+        resp = handler(_api_event('GET', '/swipe/history', query_params={'cursor': 'not-valid-base64!'}), None)
+        assert resp['statusCode'] == 400
+        body = json.loads(resp['body'])
+        assert body['code'] == 'VALIDATION_ERROR'
+
+
 class TestRouting:
     def test_unknown_route_returns_404(self):
         resp = handler(_api_event('GET', '/unknown'), None)

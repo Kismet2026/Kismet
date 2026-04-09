@@ -97,6 +97,28 @@ class TestTopMatches:
         assert body['code'] == 'UPSTREAM_ERROR'
 
 
+class TestInputValidation:
+    @patch('lambda_function._call_bazi_api')
+    def test_bad_birthdate_format_returns_400(self, mock_api):
+        resp = handler(_api_event('POST', '/bazi/top-matches', {
+            'birthDate': '11-21-1995',
+        }), None)
+        assert resp['statusCode'] == 400
+        body = json.loads(resp['body'])
+        assert 'YYYY-MM-DD' in body['message']
+        mock_api.assert_not_called()
+
+    @patch('lambda_function._call_bazi_api')
+    def test_bad_limit_uses_default(self, mock_api):
+        mock_api.return_value = {'matches': [], 'has_more': False}
+        resp = handler(_api_event('POST', '/bazi/top-matches', {
+            'birthDate': '1995-11-21',
+            'limit': 'abc',
+        }), None)
+        assert resp['statusCode'] == 200
+        mock_api.assert_called_once_with('1995-11-21', 50)
+
+
 class TestRouting:
     def test_unknown_route_returns_404(self):
         resp = handler(_api_event('GET', '/unknown'), None)

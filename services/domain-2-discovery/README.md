@@ -149,7 +149,13 @@ Proxies to external BaZi API for compatibility scoring. Stateless — no table, 
 | `SWIPE_TABLE_NAME`     | Match, Discovery, Recommendation | `kismet-swipes` |
 | `DISCOVERY_TABLE_NAME` | Recommendation      | `kismet-discovery`       |
 | `BAZI_API_URL`         | Discovery, BaZi     | `https://match-date-nu.vercel.app/api/match` |
-| `BAZI_API_KEY`         | Discovery, BaZi     | `ABC`                    |
+| `BAZI_API_KEY`         | Discovery, BaZi     | *(none — must be set)*   |
+
+## Production TODOs
+
+- **Discovery GSI**: Currently `GET /discovery` does a full DynamoDB `Scan` with client-side filtering. At demo scale (tens to hundreds of profiles) this is fine — a single scan completes in milliseconds and costs <1 RCU. For production scale (100K+ users), add a GSI on `gender` (PK) + `age` (SK, Number) to enable `Query` instead of `Scan`. The `KismetService` construct already supports GSI via the `gsi` array in table config. Note that `age` is computed once at indexing time and becomes stale after a birthday — a production system should index by `birthDate` and convert age ranges to date ranges at query time.
+- **BaZi API key**: Move from CDK environment variable to SSM Parameter Store or Secrets Manager.
+- **Logging**: Structured JSON logging for easier CloudWatch Insights queries.
 
 ## Running Tests
 
