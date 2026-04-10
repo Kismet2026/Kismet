@@ -92,7 +92,7 @@ class ListPhotosTests(unittest.TestCase):
                 {"photoId": "photo-002", "s3Key": "user-123/photo-002.jpg", "isPrimary": False, "uploadedAt": "2026-04-01T11:00:00+00:00"},
             ]}
 
-            response = handler(make_event("/photos/user-123", "GET"), self.context)
+            response = handler(make_event("/users/user-123/photos", "GET"), self.context)
             payload = json.loads(response["body"])
 
             self.assertEqual(response["statusCode"], 200)
@@ -106,7 +106,7 @@ class ListPhotosTests(unittest.TestCase):
 
             mock_dynamodb.Table.return_value.query.return_value = {"Items": []}
 
-            response = handler(make_event("/photos/user-999", "GET"), self.context)
+            response = handler(make_event("/users/user-999/photos", "GET"), self.context)
             payload = json.loads(response["body"])
 
             self.assertEqual(response["statusCode"], 200)
@@ -119,7 +119,7 @@ class ListPhotosTests(unittest.TestCase):
 
             mock_dynamodb.Table.return_value.query.return_value = {"Items": []}
 
-            response = handler(make_event("/photos/user-123", "GET"), self.context)
+            response = handler(make_event("/users/user-123/photos", "GET"), self.context)
             self.assertEqual(response["statusCode"], 200)
             mock_dynamodb.Table.return_value.query.assert_called_once()
 
@@ -232,7 +232,7 @@ class CorsTests(unittest.TestCase):
         with patch.dict("os.environ", ENV), \
              patch("lambda_function.dynamodb") as mock_dynamodb:
             mock_dynamodb.Table.return_value.query.return_value = {"Items": []}
-            response = handler(make_event("/photos/user-123", "GET"), self.context)
+            response = handler(make_event("/users/user-123/photos", "GET"), self.context)
             self.assertEqual(response["headers"]["Access-Control-Allow-Origin"], "*")
             self.assertIn("Authorization", response["headers"]["Access-Control-Allow-Headers"])
 
@@ -278,6 +278,13 @@ class RoutingTests(unittest.TestCase):
 
     def test_unknown_route_returns_not_found(self):
         response = handler(make_event("/photos/photo-001/archive", "PUT"), self.context)
+        payload = json.loads(response["body"])
+
+        self.assertEqual(response["statusCode"], 404)
+        self.assertEqual(payload["code"], "NOT_FOUND")
+
+    def test_old_list_route_returns_not_found(self):
+        response = handler(make_event("/photos/user-123", "GET"), self.context)
         payload = json.loads(response["body"])
 
         self.assertEqual(response["statusCode"], 404)

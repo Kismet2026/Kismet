@@ -160,8 +160,8 @@ class Domain1Stack(cdk.Stack):
             ],
             routes=[
                 {"method": "POST", "path": "/photos/upload", "auth": True},
-                {"method": "GET", "path": "/photos/{identifier}", "auth": True},
-                {"method": "DELETE", "path": "/photos/{identifier}", "auth": True},
+                {"method": "GET", "path": "/users/{userId}/photos", "auth": True},
+                {"method": "DELETE", "path": "/photos/{photoId}", "auth": True},
                 {"method": "PUT", "path": "/photos/{photoId}/primary", "auth": True},
             ],
             publish_events=True,

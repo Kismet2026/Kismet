@@ -63,6 +63,7 @@ api.kismet.app/
 ├── /auth/*            → Auth Service Lambda
 ├── /profiles/*        → Profile Service Lambda
 ├── /photos/*          → Photo Service Lambda
+├── /users/*/photos    → Photo Service Lambda
 ├── /verify/*          → Email Verification Lambda
 ├── /discovery/*       → Discovery Service Lambda
 ├── /swipe/*           → Swipe Service Lambda
