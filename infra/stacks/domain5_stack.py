@@ -26,6 +26,12 @@ class Domain5Stack(cdk.Stack):
     def __init__(self, scope: Construct, construct_id: str, *, shared: SharedStack, **kwargs):
         super().__init__(scope, construct_id, **kwargs)
 
+        event_bus = events.EventBus.from_event_bus_name(
+            self,
+            "ImportedEventBus",
+            "kismet-events",
+        )
+
         # ══════════════════════════════════════════════════════════════════════
         # Nili's services (standard KismetService pattern)
         # ══════════════════════════════════════════════════════════════════════
@@ -69,7 +75,7 @@ class Domain5Stack(cdk.Stack):
             },
             api=shared.api,
             authorizer=shared.authorizer,
-            event_bus=shared.event_bus,
+            event_bus=event_bus,
         )
 
         # ── Email Service ─────────────────────────────────────────────────────
@@ -106,7 +112,7 @@ class Domain5Stack(cdk.Stack):
             },
             api=shared.api,
             authorizer=shared.authorizer,
-            event_bus=shared.event_bus,
+            event_bus=event_bus,
         )
 
         # ══════════════════════════════════════════════════════════════════════
@@ -139,7 +145,7 @@ class Domain5Stack(cdk.Stack):
 
         event_bus_env = {
             "EVENT_LOG_TABLE": event_log_table.table_name,
-            "EVENT_BUS_NAME": shared.event_bus.event_bus_name,
+            "EVENT_BUS_NAME": event_bus.event_bus_name,
             "ENVIRONMENT": "dev",
         }
 
@@ -164,7 +170,7 @@ class Domain5Stack(cdk.Stack):
             self,
             "CatchAllRule",
             rule_name="kismet-catch-all-logger",
-            event_bus=shared.event_bus,
+            event_bus=event_bus,
             event_pattern=events.EventPattern(
                 source=events.Match.prefix("kismet."),
             ),
@@ -186,7 +192,7 @@ class Domain5Stack(cdk.Stack):
         )
 
         event_log_table.grant_read_write_data(admin_events_fn)
-        shared.event_bus.grant_put_events_to(admin_events_fn)  # for replay
+        event_bus.grant_put_events_to(admin_events_fn)  # for replay
 
         admin_events_fn.add_to_role_policy(
             iam.PolicyStatement(
@@ -196,8 +202,8 @@ class Domain5Stack(cdk.Stack):
                     "events:DescribeRule",
                 ],
                 resources=[
-                    f"arn:aws:events:{self.region}:{self.account}:rule/{shared.event_bus.event_bus_name}/*",
-                    shared.event_bus.event_bus_arn,
+                    f"arn:aws:events:{self.region}:{self.account}:rule/{event_bus.event_bus_name}/*",
+                    event_bus.event_bus_arn,
                 ],
             )
         )
@@ -239,14 +245,14 @@ class Domain5Stack(cdk.Stack):
             memory_size=256,
             environment={
                 "SCHEDULER_TABLE": scheduler_table.table_name,
-                "EVENT_BUS_NAME": shared.event_bus.event_bus_name,
+                "EVENT_BUS_NAME": event_bus.event_bus_name,
                 "ENVIRONMENT": "dev",
             },
             log_retention=logs.RetentionDays.ONE_WEEK,
         )
 
         scheduler_table.grant_read_write_data(executor_fn)
-        shared.event_bus.grant_put_events_to(executor_fn)
+        event_bus.grant_put_events_to(executor_fn)
 
         # IAM Role for EventBridge Scheduler to invoke executor Lambda
         scheduler_role = iam.Role(
@@ -320,7 +326,7 @@ class Domain5Stack(cdk.Stack):
             memory_size=256,
             environment={
                 "SCHEDULER_TABLE": scheduler_table.table_name,
-                "EVENT_BUS_NAME": shared.event_bus.event_bus_name,
+                "EVENT_BUS_NAME": event_bus.event_bus_name,
                 "ENVIRONMENT": "dev",
                 "JOB_EXECUTOR_ARN": executor_fn.function_arn,
                 "SCHEDULER_ROLE_ARN": scheduler_role.role_arn,
