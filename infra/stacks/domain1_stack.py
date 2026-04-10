@@ -1,6 +1,6 @@
 import aws_cdk as cdk
 from constructs import Construct
-from aws_cdk import aws_iam as iam
+from aws_cdk import aws_events as events, aws_iam as iam
 
 from stacks.shared_stack import SharedStack
 from kismet_constructs.kismet_service import KismetService
@@ -14,6 +14,12 @@ class Domain1Stack(cdk.Stack):
 
     def __init__(self, scope: Construct, construct_id: str, *, shared: SharedStack, **kwargs):
         super().__init__(scope, construct_id, **kwargs)
+
+        event_bus = events.EventBus.from_event_bus_name(
+            self,
+            "ImportedEventBus",
+            "kismet-events",
+        )
 
         # ── Auth Service (KS) ─────────────────────────────────────────────────
         # signup, login, refresh, logout via Cognito
@@ -56,7 +62,7 @@ class Domain1Stack(cdk.Stack):
             ],
             api=shared.api,
             authorizer=shared.authorizer,
-            event_bus=shared.event_bus,
+            event_bus=event_bus,
         )
 
         # ── Profile Service (Quinn) ───────────────────────────────────────────
@@ -86,7 +92,7 @@ class Domain1Stack(cdk.Stack):
             },
             api=shared.api,
             authorizer=shared.authorizer,
-            event_bus=shared.event_bus,
+            event_bus=event_bus,
         )
 
         # ── Email Verification Service (Quinn/KS) ────────────────────────────
@@ -131,7 +137,7 @@ class Domain1Stack(cdk.Stack):
             ],
             api=shared.api,
             authorizer=shared.authorizer,
-            event_bus=shared.event_bus,
+            event_bus=event_bus,
         )
 
         # ── Photo Service (KS) ───────────────────────────────────────────────
@@ -170,5 +176,5 @@ class Domain1Stack(cdk.Stack):
             ],
             api=shared.api,
             authorizer=shared.authorizer,
-            event_bus=shared.event_bus,
+            event_bus=event_bus,
         )

@@ -1,6 +1,6 @@
 import aws_cdk as cdk
 from constructs import Construct
-from aws_cdk import aws_iam as iam
+from aws_cdk import aws_events as events, aws_iam as iam
 
 from stacks.shared_stack import SharedStack
 from kismet_constructs.kismet_service import KismetService
@@ -14,6 +14,12 @@ class Domain2Stack(cdk.Stack):
 
     def __init__(self, scope: Construct, construct_id: str, *, shared: SharedStack, **kwargs):
         super().__init__(scope, construct_id, **kwargs)
+
+        event_bus = events.EventBus.from_event_bus_name(
+            self,
+            "ImportedEventBus",
+            "kismet-events",
+        )
 
         # ── Swipe Service ─────────────────────────────────────────────────────
         swipe_svc = KismetService(
@@ -35,7 +41,7 @@ class Domain2Stack(cdk.Stack):
             publish_events=True,
             api=shared.api,
             authorizer=shared.authorizer,
-            event_bus=shared.event_bus,
+            event_bus=event_bus,
         )
 
         # ── Match Service ─────────────────────────────────────────────────────
@@ -70,7 +76,7 @@ class Domain2Stack(cdk.Stack):
             ],
             api=shared.api,
             authorizer=shared.authorizer,
-            event_bus=shared.event_bus,
+            event_bus=event_bus,
         )
 
         # ── Discovery Service ─────────────────────────────────────────────────
@@ -104,7 +110,7 @@ class Domain2Stack(cdk.Stack):
             ],
             api=shared.api,
             authorizer=shared.authorizer,
-            event_bus=shared.event_bus,
+            event_bus=event_bus,
         )
 
         # ── Recommendation Service ────────────────────────────────────────────
@@ -143,7 +149,7 @@ class Domain2Stack(cdk.Stack):
             ],
             api=shared.api,
             authorizer=shared.authorizer,
-            event_bus=shared.event_bus,
+            event_bus=event_bus,
         )
 
         # ── BaZi Service ─────────────────────────────────────────────────────
@@ -158,5 +164,5 @@ class Domain2Stack(cdk.Stack):
             ],
             api=shared.api,
             authorizer=shared.authorizer,
-            event_bus=shared.event_bus,
+            event_bus=event_bus,
         )
