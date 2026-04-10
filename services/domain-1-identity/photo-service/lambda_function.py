@@ -14,6 +14,7 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 SERVICE_NAME = "photo-service"
+USER_PHOTOS_PATTERN = re.compile(r"^/users/(?P<userId>[^/]+)/photos$")
 PHOTO_DETAIL_PATTERN = re.compile(r"^/photos/(?P<photoId>[^/]+)$")
 PHOTO_PRIMARY_PATTERN = re.compile(r"^/photos/(?P<photoId>[^/]+)/primary$")
 
@@ -37,6 +38,7 @@ def handler(event, context):
     path = _get_path(event)
     user_id = _get_user_id(event)
     operation = None
+    user_photos_match = USER_PHOTOS_PATTERN.match(path)
     primary_match = PHOTO_PRIMARY_PATTERN.match(path)
     detail_match = PHOTO_DETAIL_PATTERN.match(path)
 
@@ -56,11 +58,9 @@ def handler(event, context):
             if not user_id:
                 return _response(401, {"code": "UNAUTHORIZED", "message": "Authentication required."})
             return handle_set_primary(user_id, primary_match.group("photoId"))
-        elif detail_match and method == "GET":
+        elif user_photos_match and method == "GET":
             operation = "listPhotos"
-            # API Gateway path vars under /photos must share the same name.
-            # For GET /photos/{photoId}, this segment still carries the user id for listing.
-            return handle_list(detail_match.group("photoId"))
+            return handle_list(user_photos_match.group("userId"))
         elif detail_match and method == "DELETE":
             operation = "deletePhoto"
             if not user_id:

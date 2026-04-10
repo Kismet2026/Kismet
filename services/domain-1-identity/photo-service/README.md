@@ -8,7 +8,7 @@
 Manages profile photo upload, listing, deletion, and primary-photo selection workflows.
 
 ## AWS Services Used
-- Lambda — route `/photos/*` requests and host service logic
+- Lambda — route `/photos/*` and `/users/*/photos` requests and host service logic
 - S3 — planned storage for uploaded photo objects
 - CloudFront — planned CDN delivery for profile photo URLs
 - DynamoDB — planned metadata storage in `kismet-photos`
@@ -40,7 +40,7 @@ Manages profile photo upload, listing, deletion, and primary-photo selection wor
 }
 ```
 
-### GET /photos/{userId}
+### GET /users/{userId}/photos
 **Request:**
 ```json
 {}
@@ -87,7 +87,7 @@ Manages profile photo upload, listing, deletion, and primary-photo selection wor
 
 ## Dependencies
 - **Depends on:** Shared API Gateway/Cognito authorizer, `kismet-photos` table, shared photos bucket, CloudFront distribution/base URL, `kismet-events` EventBridge bus
-- **Called by:** Frontend (React) via `/photos/*`
+- **Called by:** Frontend (React) via photo-service routes
 - **Events published:** `photo.uploaded`
 - **Events consumed:** None
 
