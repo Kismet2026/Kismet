@@ -225,6 +225,3 @@ def _response(status_code: int, body: Dict[str, object]) -> Dict[str, object]:
         "headers": CORS_HEADERS,
         "body": json.dumps(body),
     }
-
-
-lambda_handler = handler
