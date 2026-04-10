@@ -1,6 +1,13 @@
 import aws_cdk as cdk
 from constructs import Construct
-from aws_cdk import aws_iam as iam
+from aws_cdk import (
+    aws_apigateway as apigateway,
+    aws_events as events,
+    aws_iam as iam,
+    aws_kinesis as kinesis,
+    aws_s3 as s3,
+    aws_sns as sns,
+)
 
 from stacks.shared_stack import SharedStack
 from kismet_constructs.kismet_service import KismetService
@@ -15,8 +22,38 @@ class Domain6Stack(cdk.Stack):
     def __init__(self, scope: Construct, construct_id: str, *, shared: SharedStack, **kwargs):
         super().__init__(scope, construct_id, **kwargs)
 
+        event_bus = events.EventBus.from_event_bus_name(
+            self,
+            "ImportedEventBus",
+            "kismet-events",
+        )
+        activity_stream = kinesis.Stream.from_stream_arn(
+            self,
+            "ImportedActivityStream",
+            f"arn:aws:kinesis:{self.region}:{self.account}:stream/kismet-activity-stream",
+        )
+        analytics_bucket = s3.Bucket.from_bucket_name(
+            self,
+            "ImportedAnalyticsBucket",
+            f"kismet-analytics-{self.account}-dev",
+        )
+        health_alerts_topic = sns.Topic.from_topic_arn(
+            self,
+            "ImportedHealthAlertsTopic",
+            f"arn:aws:sns:{self.region}:{self.account}:kismet-health-alerts",
+        )
+        # Import the API into this stack so that API Gateway resources (methods,
+        # integrations) live here rather than in KismetShared.  This prevents
+        # the circular cross-stack reference that would otherwise arise from
+        # SharedStack's deployment referencing Domain 6 Lambda ARNs.
+        imported_api = apigateway.RestApi.from_rest_api_attributes(
+            self,
+            "ImportedSharedApi",
+            rest_api_id=shared.api.rest_api_id,
+            root_resource_id=shared.api.rest_api_root_resource_id,
+        )
+
         # ── Activity Logger (Jessica) ─────────────────────────────────────────
-        # Catch-all EventBridge subscriber → writes every event to Kinesis stream
         KismetService(
             self,
             "ActivityLoggerService",
@@ -51,23 +88,19 @@ class Domain6Stack(cdk.Stack):
             extra_policies=[
                 iam.PolicyStatement(
                     actions=["kinesis:PutRecord", "kinesis:PutRecords"],
-                    resources=[shared.activity_stream.stream_arn],
+                    resources=[activity_stream.stream_arn],
                 )
             ],
             environment={
                 "ACTIVITY_LOG_TABLE": "kismet-activity-log",
-                "KINESIS_STREAM_NAME": shared.activity_stream.stream_name,
+                "KINESIS_STREAM_NAME": activity_stream.stream_name,
             },
-            api=shared.api,
+            api=imported_api,
             authorizer=shared.authorizer,
-            event_bus=shared.event_bus,
+            event_bus=event_bus,
         )
 
         # ── Analytics Pipeline (Jessica) ──────────────────────────────────────
-        # Reads from Kinesis Firehose → S3 → Athena
-        # Note: Kinesis Firehose delivery stream is not created here —
-        #       it is configured separately to read from kismet-activity-stream
-        #       and deliver to the analytics S3 bucket.
         KismetService(
             self,
             "AnalyticsPipelineService",
@@ -98,8 +131,8 @@ class Domain6Stack(cdk.Stack):
                         "s3:GetBucketLocation",
                     ],
                     resources=[
-                        shared.analytics_bucket.bucket_arn,
-                        f"{shared.analytics_bucket.bucket_arn}/*",
+                        analytics_bucket.bucket_arn,
+                        f"{analytics_bucket.bucket_arn}/*",
                     ],
                 ),
                 iam.PolicyStatement(
@@ -113,17 +146,16 @@ class Domain6Stack(cdk.Stack):
                 ),
             ],
             environment={
-                "ANALYTICS_BUCKET": shared.analytics_bucket.bucket_name,
+                "ANALYTICS_BUCKET": analytics_bucket.bucket_name,
                 "ATHENA_DATABASE": "kismet_analytics",
                 "S3_DATA_PREFIX": "events",
             },
-            api=shared.api,
+            api=imported_api,
             authorizer=shared.authorizer,
-            event_bus=shared.event_bus,
+            event_bus=event_bus,
         )
 
         # ── Admin Dashboard (Lingyun) ──────────────────────────────────────────
-        # Two DynamoDB tables: kismet-admin-stats and kismet-flagged-content
         KismetService(
             self,
             "AdminDashboardService",
@@ -155,13 +187,25 @@ class Domain6Stack(cdk.Stack):
             ],
             consume_events=["content.flagged", "user.reported"],
             publish_events=False,
-            api=shared.api,
+            extra_policies=[
+                iam.PolicyStatement(
+                    actions=[
+                        "dynamodb:GetItem",
+                        "dynamodb:UpdateItem",
+                        "dynamodb:Scan",
+                    ],
+                    resources=[
+                        f"arn:aws:dynamodb:{self.region}:{self.account}:table/kismet-profiles",
+                    ],
+                )
+            ],
+            api=imported_api,
             authorizer=shared.authorizer,
-            event_bus=shared.event_bus,
+            event_bus=event_bus,
         )
 
         # ── Health Monitor (Lingyun) ───────────────────────────────────────────
-        health_monitor = KismetService(
+        KismetService(
             self,
             "HealthMonitorService",
             service_name="health-monitor",
@@ -174,7 +218,7 @@ class Domain6Stack(cdk.Stack):
                 }
             ],
             routes=[
-                {"method": "GET", "path": "/health", "auth": False},  # public
+                {"method": "GET", "path": "/health", "auth": False},
                 {"method": "GET", "path": "/health/{serviceName}", "auth": True},
                 {"method": "GET", "path": "/health/alarms", "auth": True},
                 {"method": "POST", "path": "/health/check", "auth": True},
@@ -188,13 +232,13 @@ class Domain6Stack(cdk.Stack):
                 ),
                 iam.PolicyStatement(
                     actions=["sns:Publish"],
-                    resources=[shared.health_alerts_topic.topic_arn],
+                    resources=[health_alerts_topic.topic_arn],
                 ),
             ],
             environment={
-                "HEALTH_ALERTS_TOPIC_ARN": shared.health_alerts_topic.topic_arn,
+                "HEALTH_ALERTS_TOPIC_ARN": health_alerts_topic.topic_arn,
             },
-            api=shared.api,
+            api=imported_api,
             authorizer=shared.authorizer,
-            event_bus=shared.event_bus,
+            event_bus=event_bus,
         )

@@ -29,3 +29,10 @@ build/
 *.zip
 __pycache__
 *.pyc
+
+# Worktrees
+.worktrees/
+
+# CDK asset staging directory
+.cdk.staging
+cdk.out
