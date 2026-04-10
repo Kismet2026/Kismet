@@ -4,7 +4,7 @@ import os
 import secrets
 import string
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Dict
 
 import boto3
 from botocore.exceptions import ClientError
@@ -25,49 +25,45 @@ dynamodb = boto3.resource("dynamodb")
 cognito = boto3.client("cognito-idp")
 ses = boto3.client("ses")
 
-ROUTES = {
-    ("POST", "/verify/send"): {"operation": "sendVerificationCode", "expects_body": True},
-    ("POST", "/verify/confirm"): {"operation": "confirmVerificationCode", "expects_body": True},
-    ("GET", "/verify/status"): {"operation": "getVerificationStatus", "expects_body": False},
-}
 
-
-def lambda_handler(event: Optional[Dict[str, Any]], context: Any) -> Dict[str, Any]:
+def handler(event, context):
     event = event or {}
-    method = get_http_method(event)
-    path = normalize_path(get_request_path(event))
-
-    route = ROUTES.get((method, path))
-    if route is None:
-        return json_response(404, {"code": "NOT_FOUND", "message": f"No route matches {method} {path}."})
-
-    payload = None
-    if route["expects_body"]:
-        payload, error = parse_json_body(event)
-        if error is not None:
-            return error
+    method = _get_method(event)
+    path = _get_path(event)
+    operation = None
 
     try:
-        if route["operation"] == "sendVerificationCode":
+        if method == "POST" and path == "/verify/send":
+            operation = "sendVerificationCode"
+            payload, error = _parse_body(event)
+            if error is not None:
+                return error
             return handle_send(payload or {})
-        if route["operation"] == "confirmVerificationCode":
+        elif method == "POST" and path == "/verify/confirm":
+            operation = "confirmVerificationCode"
+            payload, error = _parse_body(event)
+            if error is not None:
+                return error
             return handle_confirm(payload or {})
-        if route["operation"] == "getVerificationStatus":
+        elif method == "GET" and path == "/verify/status":
+            operation = "getVerificationStatus"
             return handle_status(event)
+        else:
+            return _response(404, {"code": "NOT_FOUND", "message": f"No route matches {method} {path}."})
     except ClientError:
-        logger.exception("AWS error in %s", route["operation"])
-        return json_response(500, {"code": "INTERNAL_ERROR", "message": "An unexpected error occurred."})
+        logger.exception("AWS error in %s", operation or f"{method} {path}")
+        return _response(500, {"code": "INTERNAL_ERROR", "message": "An unexpected error occurred."})
     except Exception:
-        logger.exception("Unexpected error in %s", route["operation"])
-        return json_response(500, {"code": "INTERNAL_ERROR", "message": "An unexpected error occurred."})
+        logger.exception("Unexpected error in %s", operation or f"{method} {path}")
+        return _response(500, {"code": "INTERNAL_ERROR", "message": "An unexpected error occurred."})
 
 
-def handle_send(body: Dict[str, Any]) -> Dict[str, Any]:
+def handle_send(body: Dict[str, str]) -> Dict[str, object]:
     email = (body.get("email") or "").strip().lower()
     if not email:
-        return json_response(400, {"code": "VALIDATION_ERROR", "message": "email is required."})
+        return _response(400, {"code": "VALIDATION_ERROR", "message": "email is required."})
     if not email.endswith(".edu"):
-        return json_response(400, {"code": "VALIDATION_ERROR", "message": "Only .edu email addresses are supported."})
+        return _response(400, {"code": "VALIDATION_ERROR", "message": "Only .edu email addresses are supported."})
 
     code = _generate_code()
     now = datetime.now(timezone.utc)
@@ -96,36 +92,36 @@ def handle_send(body: Dict[str, Any]) -> Dict[str, Any]:
         },
     )
 
-    return json_response(200, {
+    return _response(200, {
         "message": "Verification code sent",
         "email": email,
         "expiresIn": CODE_EXPIRY_SECONDS,
     })
 
 
-def handle_confirm(body: Dict[str, Any]) -> Dict[str, Any]:
+def handle_confirm(body: Dict[str, str]) -> Dict[str, object]:
     email = (body.get("email") or "").strip().lower()
     code = str(body.get("code") or "").strip()
 
     if not email or not code:
-        return json_response(400, {"code": "VALIDATION_ERROR", "message": "email and code are required."})
+        return _response(400, {"code": "VALIDATION_ERROR", "message": "email and code are required."})
 
     table = dynamodb.Table(VERIFICATIONS_TABLE_NAME)
     result = table.get_item(Key={"PK": f"EMAIL#{email}", "SK": "LATEST"})
     item = result.get("Item")
 
     if not item:
-        return json_response(404, {"code": "NOT_FOUND", "message": "No verification code found for this email."})
+        return _response(404, {"code": "NOT_FOUND", "message": "No verification code found for this email."})
 
     if item.get("verified"):
-        return json_response(200, {"message": "Email already verified", "email": email, "verified": True})
+        return _response(200, {"message": "Email already verified", "email": email, "verified": True})
 
     now_ts = int(datetime.now(timezone.utc).timestamp())
     if item.get("ttl", 0) < now_ts:
-        return json_response(410, {"code": "EXPIRED", "message": "Verification code has expired. Please request a new code."})
+        return _response(410, {"code": "EXPIRED", "message": "Verification code has expired. Please request a new code."})
 
     if item.get("code") != code:
-        return json_response(400, {"code": "VALIDATION_ERROR", "message": "Invalid verification code."})
+        return _response(400, {"code": "VALIDATION_ERROR", "message": "Invalid verification code."})
 
     verified_at = datetime.now(timezone.utc).isoformat()
     long_ttl = int(datetime.now(timezone.utc).timestamp()) + VERIFIED_RECORD_TTL_SECONDS
@@ -147,26 +143,26 @@ def handle_confirm(body: Dict[str, Any]) -> Dict[str, Any]:
         # DynamoDB is source of truth; Cognito sync failure is non-fatal
         logger.warning("Failed to sync email_verified to Cognito for %s", email)
 
-    return json_response(200, {"message": "Email verified successfully", "email": email, "verified": True})
+    return _response(200, {"message": "Email verified successfully", "email": email, "verified": True})
 
 
-def handle_status(event: Dict[str, Any]) -> Dict[str, Any]:
+def handle_status(event: Dict[str, object]) -> Dict[str, object]:
     # Prefer JWT claims injected by Cognito authorizer; fall back to ?email= for local dev
     claims = event.get("requestContext", {}).get("authorizer", {}).get("claims", {})
     email = claims.get("email") or (event.get("queryStringParameters") or {}).get("email", "")
     email = email.strip().lower()
 
     if not email:
-        return json_response(401, {"code": "UNAUTHORIZED", "message": "Authentication required."})
+        return _response(401, {"code": "UNAUTHORIZED", "message": "Authentication required."})
 
     table = dynamodb.Table(VERIFICATIONS_TABLE_NAME)
     result = table.get_item(Key={"PK": f"EMAIL#{email}", "SK": "LATEST"})
     item = result.get("Item")
 
     if not item:
-        return json_response(200, {"email": email, "verified": False, "verifiedAt": None})
+        return _response(200, {"email": email, "verified": False, "verifiedAt": None})
 
-    return json_response(200, {
+    return _response(200, {
         "email": email,
         "verified": item.get("verified", False),
         "verifiedAt": item.get("verifiedAt"),
@@ -177,7 +173,7 @@ def _generate_code() -> str:
     return "".join(secrets.choice(string.digits) for _ in range(CODE_LENGTH))
 
 
-def get_http_method(event: Dict[str, Any]) -> str:
+def _get_method(event: Dict[str, object]) -> str:
     method = (
         event.get("requestContext", {}).get("http", {}).get("method")
         or event.get("httpMethod")
@@ -186,16 +182,13 @@ def get_http_method(event: Dict[str, Any]) -> str:
     return str(method).upper()
 
 
-def get_request_path(event: Dict[str, Any]) -> str:
-    return (
+def _get_path(event: Dict[str, object]) -> str:
+    path = (
         event.get("rawPath")
         or event.get("path")
         or event.get("requestContext", {}).get("http", {}).get("path")
         or "/"
     )
-
-
-def normalize_path(path: Any) -> str:
     if not path:
         return "/"
     normalized = str(path).strip()
@@ -206,7 +199,7 @@ def normalize_path(path: Any) -> str:
     return normalized
 
 
-def parse_json_body(event: Dict[str, Any]):
+def _parse_body(event: Dict[str, object]):
     body = event.get("body")
     if body in (None, ""):
         return None, None
@@ -215,7 +208,7 @@ def parse_json_body(event: Dict[str, Any]):
     try:
         return json.loads(body), None
     except json.JSONDecodeError:
-        return None, json_response(400, {"code": "VALIDATION_ERROR", "message": "Request body must be valid JSON."})
+        return None, _response(400, {"code": "VALIDATION_ERROR", "message": "Request body must be valid JSON."})
 
 
 CORS_HEADERS = {
@@ -226,9 +219,9 @@ CORS_HEADERS = {
 }
 
 
-def json_response(status_code: int, payload: Dict[str, Any]) -> Dict[str, Any]:
+def _response(status_code: int, body: Dict[str, object]) -> Dict[str, object]:
     return {
         "statusCode": status_code,
         "headers": CORS_HEADERS,
-        "body": json.dumps(payload),
+        "body": json.dumps(body),
     }

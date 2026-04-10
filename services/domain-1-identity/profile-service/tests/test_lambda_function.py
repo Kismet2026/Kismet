@@ -3,7 +3,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from lambda_function import lambda_handler
+from lambda_function import handler
 
 
 ENV = {
@@ -38,7 +38,7 @@ class CreateProfileTests(unittest.TestCase):
                 "birthDate": "1999-05-15",
                 "location": {"latitude": 42.3601, "longitude": -71.0589},
             }), **AUTHED_CONTEXT}
-            response = lambda_handler(event, self.context)
+            response = handler(event, self.context)
             payload = json.loads(response["body"])
 
             self.assertEqual(response["statusCode"], 201)
@@ -66,7 +66,7 @@ class CreateProfileTests(unittest.TestCase):
                 "city": "Boston",
                 "location": [42.36, -71.06],
             }), **AUTHED_CONTEXT}
-            lambda_handler(event, self.context)
+            handler(event, self.context)
 
             call_args = mock_events.put_events.call_args
             detail = json.loads(call_args[1]["Entries"][0]["Detail"])
@@ -90,7 +90,7 @@ class CreateProfileTests(unittest.TestCase):
                 "name": "Alice", "gender": "female", "interestedIn": "male",
                 "birthDate": "1999-05-15", "location": {"latitude": 42.36, "longitude": -71.06},
             }), **AUTHED_CONTEXT}
-            response = lambda_handler(event, self.context)
+            response = handler(event, self.context)
             payload = json.loads(response["body"])
 
             self.assertEqual(response["statusCode"], 409)
@@ -99,12 +99,12 @@ class CreateProfileTests(unittest.TestCase):
     def test_create_missing_name_returns_400(self):
         with patch.dict("os.environ", ENV):
             event = {**make_event("/profiles", "POST", body={"bio": "no name"}), **AUTHED_CONTEXT}
-            response = lambda_handler(event, self.context)
+            response = handler(event, self.context)
             self.assertEqual(response["statusCode"], 400)
 
     def test_create_unauthenticated_returns_401(self):
         with patch.dict("os.environ", ENV):
-            response = lambda_handler(make_event("/profiles", "POST", body={"name": "Alice"}), self.context)
+            response = handler(make_event("/profiles", "POST", body={"name": "Alice"}), self.context)
             self.assertEqual(response["statusCode"], 401)
 
 
@@ -125,7 +125,7 @@ class GetProfileTests(unittest.TestCase):
                 "updatedAt": "2026-04-01T12:00:00+00:00",
             }}
 
-            response = lambda_handler(make_event("/profiles/user-123", "GET"), self.context)
+            response = handler(make_event("/profiles/user-123", "GET"), self.context)
             payload = json.loads(response["body"])
 
             self.assertEqual(response["statusCode"], 200)
@@ -140,7 +140,7 @@ class GetProfileTests(unittest.TestCase):
 
             mock_dynamodb.Table.return_value.get_item.return_value = {}
 
-            response = lambda_handler(make_event("/profiles/nonexistent", "GET"), self.context)
+            response = handler(make_event("/profiles/nonexistent", "GET"), self.context)
             payload = json.loads(response["body"])
 
             self.assertEqual(response["statusCode"], 404)
@@ -154,7 +154,7 @@ class GetProfileTests(unittest.TestCase):
                 "PK": "USER#user-123", "SK": "PROFILE", "userId": "user-123", "name": "Alice",
             }}
 
-            response = lambda_handler(make_event("/profiles/user-123", "GET"), self.context)
+            response = handler(make_event("/profiles/user-123", "GET"), self.context)
             self.assertEqual(response["statusCode"], 200)
             mock_dynamodb.Table.return_value.get_item.assert_called_once_with(
                 Key={"PK": "USER#user-123", "SK": "PROFILE"}
@@ -180,7 +180,7 @@ class UpdateProfileTests(unittest.TestCase):
             mock_events.put_events.return_value = {"FailedEntryCount": 0, "Entries": [{"EventId": "e1"}]}
 
             event = {**make_event("/profiles/user-123", "PUT", body={"bio": "Updated bio", "interests": ["yoga"]}), **AUTHED_CONTEXT}
-            response = lambda_handler(event, self.context)
+            response = handler(event, self.context)
             payload = json.loads(response["body"])
 
             self.assertEqual(response["statusCode"], 200)
@@ -202,7 +202,7 @@ class UpdateProfileTests(unittest.TestCase):
             mock_events.put_events.return_value = {"FailedEntryCount": 0, "Entries": [{"EventId": "e1"}]}
 
             event = {**make_event("/profiles/user-123", "PUT", body={"bio": "New bio"}), **AUTHED_CONTEXT}
-            lambda_handler(event, self.context)
+            handler(event, self.context)
 
             mock_events.put_events.assert_called_once()
             call_args = mock_events.put_events.call_args
@@ -226,7 +226,7 @@ class UpdateProfileTests(unittest.TestCase):
             mock_events.put_events.return_value = {"FailedEntryCount": 0, "Entries": [{"EventId": "e1"}]}
 
             event = {**make_event("/profiles/user-123", "PUT", body={"city": "NYC", "avatarUrl": "https://cdn/photo.jpg"}), **AUTHED_CONTEXT}
-            response = lambda_handler(event, self.context)
+            response = handler(event, self.context)
             payload = json.loads(response["body"])
 
             self.assertEqual(response["statusCode"], 200)
@@ -236,7 +236,7 @@ class UpdateProfileTests(unittest.TestCase):
     def test_update_another_users_profile_returns_403(self):
         with patch.dict("os.environ", ENV):
             event = {**make_event("/profiles/other-user", "PUT", body={"bio": "Hacked"}), **AUTHED_CONTEXT}
-            response = lambda_handler(event, self.context)
+            response = handler(event, self.context)
             payload = json.loads(response["body"])
 
             self.assertEqual(response["statusCode"], 403)
@@ -249,7 +249,7 @@ class UpdateProfileTests(unittest.TestCase):
             mock_dynamodb.Table.return_value.get_item.return_value = {"Item": {"userId": "user-123"}}
 
             event = {**make_event("/profiles/user-123", "PUT", body={"unknownField": "value"}), **AUTHED_CONTEXT}
-            response = lambda_handler(event, self.context)
+            response = handler(event, self.context)
             payload = json.loads(response["body"])
 
             self.assertEqual(response["statusCode"], 400)
@@ -257,7 +257,7 @@ class UpdateProfileTests(unittest.TestCase):
 
     def test_update_invalid_json_body_returns_400(self):
         event = {**make_event("/profiles/user-123", "PUT", raw_body='{"bio": "broken"'), **AUTHED_CONTEXT}
-        response = lambda_handler(event, self.context)
+        response = handler(event, self.context)
         self.assertEqual(response["statusCode"], 400)
 
 
@@ -274,7 +274,7 @@ class DeleteProfileTests(unittest.TestCase):
             mock_table.delete_item.return_value = {}
 
             event = {**make_event("/profiles/user-123", "DELETE"), **AUTHED_CONTEXT}
-            response = lambda_handler(event, self.context)
+            response = handler(event, self.context)
             payload = json.loads(response["body"])
 
             self.assertEqual(response["statusCode"], 200)
@@ -284,7 +284,7 @@ class DeleteProfileTests(unittest.TestCase):
     def test_delete_another_users_profile_returns_403(self):
         with patch.dict("os.environ", ENV):
             event = {**make_event("/profiles/other-user", "DELETE"), **AUTHED_CONTEXT}
-            response = lambda_handler(event, self.context)
+            response = handler(event, self.context)
             self.assertEqual(response["statusCode"], 403)
 
     def test_delete_not_found_returns_404(self):
@@ -294,7 +294,7 @@ class DeleteProfileTests(unittest.TestCase):
             mock_dynamodb.Table.return_value.get_item.return_value = {}
 
             event = {**make_event("/profiles/user-123", "DELETE"), **AUTHED_CONTEXT}
-            response = lambda_handler(event, self.context)
+            response = handler(event, self.context)
             self.assertEqual(response["statusCode"], 404)
 
 
@@ -308,7 +308,7 @@ class CorsTests(unittest.TestCase):
             mock_dynamodb.Table.return_value.get_item.return_value = {"Item": {
                 "PK": "USER#u1", "SK": "PROFILE", "userId": "u1", "name": "A",
             }}
-            response = lambda_handler(make_event("/profiles/u1", "GET"), self.context)
+            response = handler(make_event("/profiles/u1", "GET"), self.context)
             self.assertEqual(response["headers"]["Access-Control-Allow-Origin"], "*")
             self.assertIn("Authorization", response["headers"]["Access-Control-Allow-Headers"])
 
@@ -318,7 +318,7 @@ class RoutingTests(unittest.TestCase):
         self.context = SimpleNamespace(aws_request_id="req-456")
 
     def test_unknown_route_returns_not_found(self):
-        response = lambda_handler(make_event("/profiles/user-123/preferences", "GET"), self.context)
+        response = handler(make_event("/profiles/user-123/preferences", "GET"), self.context)
         payload = json.loads(response["body"])
 
         self.assertEqual(response["statusCode"], 404)
@@ -326,7 +326,7 @@ class RoutingTests(unittest.TestCase):
 
     def test_invalid_json_body_returns_validation_error(self):
         event = {**make_event("/profiles/user-123", "PUT", raw_body='{"bio": "broken"'), **AUTHED_CONTEXT}
-        response = lambda_handler(event, self.context)
+        response = handler(event, self.context)
         payload = json.loads(response["body"])
 
         self.assertEqual(response["statusCode"], 400)
@@ -342,3 +342,5 @@ def make_event(path, method, body=None, raw_body=None):
 
 if __name__ == "__main__":
     unittest.main()
+
+

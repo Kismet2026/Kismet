@@ -17,6 +17,7 @@ Event chains tested:
 """
 
 import json
+import importlib.util
 import sys
 import os
 import unittest
@@ -24,7 +25,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 # ---------------------------------------------------------------------------
-# Path setup — allow importing each service's lambda_function directly
+# Service paths
 # ---------------------------------------------------------------------------
 REPO = Path(__file__).resolve().parent.parent
 SERVICES = REPO / "services"
@@ -45,10 +46,16 @@ D6_ACTIVITY = SERVICES / "domain-6-analytics" / "activity-logger-service"
 D6_ADMIN = SERVICES / "domain-6-analytics" / "admin-dashboard-service"
 
 
-def _add_path(p):
-    s = str(p)
-    if s not in sys.path:
-        sys.path.insert(0, s)
+def _load_module(module_name: str, service_dir: Path):
+    """Load a service lambda module directly from disk with a unique module name."""
+    module_path = service_dir / "lambda_function.py"
+    spec = importlib.util.spec_from_file_location(module_name, module_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Unable to load module from {module_path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules.pop(module_name, None)
+    spec.loader.exec_module(module)
+    return module
 
 
 # ---------------------------------------------------------------------------
@@ -467,16 +474,13 @@ class TestAuthServiceEventOutput(unittest.TestCase):
     """Verify auth-service lambda actually publishes correct user.created."""
 
     def test_signup_publishes_user_created(self):
-        _add_path(D1_AUTH)
         with patch.dict("os.environ", {
             "USERS_TABLE_NAME": "kismet-users",
             "COGNITO_USER_POOL_ID": "us-east-1_test",
             "COGNITO_APP_CLIENT_ID": "test-client",
             "EVENT_BUS_NAME": "kismet-events",
         }):
-            import importlib
-            import lambda_function as auth_mod
-            importlib.reload(auth_mod)
+            auth_mod = _load_module("d1_auth_lambda_function", D1_AUTH)
 
             with patch.object(auth_mod, "cognito") as mock_cognito, \
                  patch.object(auth_mod, "dynamodb") as mock_dynamodb, \
@@ -491,7 +495,7 @@ class TestAuthServiceEventOutput(unittest.TestCase):
                     "password": "SecurePass1",
                     "birthDate": "1999-01-01",
                 })
-                auth_mod.lambda_handler(event, None)
+                auth_mod.handler(event, None)
 
                 # Verify event was published
                 mock_events.put_events.assert_called_once()
@@ -513,14 +517,11 @@ class TestProfileServiceEventOutput(unittest.TestCase):
     """Verify profile-service publishes correct profile.completed event."""
 
     def test_create_profile_publishes_profile_completed(self):
-        _add_path(D1_PROFILE)
         with patch.dict("os.environ", {
             "PROFILES_TABLE_NAME": "kismet-profiles",
             "EVENT_BUS_NAME": "kismet-events",
         }):
-            import importlib
-            import lambda_function as profile_mod
-            importlib.reload(profile_mod)
+            profile_mod = _load_module("d1_profile_lambda_function", D1_PROFILE)
 
             with patch.object(profile_mod, "dynamodb") as mock_dynamodb, \
                  patch.object(profile_mod, "events") as mock_events:
@@ -540,7 +541,7 @@ class TestProfileServiceEventOutput(unittest.TestCase):
                     "bio": "Astronomy major",
                     "interests": ["astronomy", "hiking"],
                 })
-                response = profile_mod.lambda_handler(event, None)
+                response = profile_mod.handler(event, None)
                 self.assertEqual(response["statusCode"], 201)
 
                 # Verify event
@@ -568,14 +569,11 @@ class TestSwipeToMatchEventChain(unittest.TestCase):
     """Verify swipe-service → match-service event chain works."""
 
     def test_swipe_like_publishes_event(self):
-        _add_path(D2_SWIPE)
         with patch.dict("os.environ", {
             "TABLE_NAME": "kismet-swipes",
             "EVENT_BUS_NAME": "kismet-events",
         }):
-            import importlib
-            import lambda_function as swipe_mod
-            importlib.reload(swipe_mod)
+            swipe_mod = _load_module("d2_swipe_lambda_function_like", D2_SWIPE)
 
             with patch.object(swipe_mod, "table") as mock_table, \
                  patch.object(swipe_mod, "events_client") as mock_events:
@@ -607,14 +605,11 @@ class TestSwipeToMatchEventChain(unittest.TestCase):
                 self.assertIn("timestamp", detail)
 
     def test_swipe_pass_does_not_publish(self):
-        _add_path(D2_SWIPE)
         with patch.dict("os.environ", {
             "TABLE_NAME": "kismet-swipes",
             "EVENT_BUS_NAME": "kismet-events",
         }):
-            import importlib
-            import lambda_function as swipe_mod
-            importlib.reload(swipe_mod)
+            swipe_mod = _load_module("d2_swipe_lambda_function_pass", D2_SWIPE)
 
             with patch.object(swipe_mod, "table") as mock_table, \
                  patch.object(swipe_mod, "events_client") as mock_events:

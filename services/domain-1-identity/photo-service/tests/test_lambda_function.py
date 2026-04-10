@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 from botocore.exceptions import ClientError
 
-from lambda_function import lambda_handler
+from lambda_function import handler
 
 
 ENV = {
@@ -37,7 +37,7 @@ class UploadPhotoTests(unittest.TestCase):
             mock_events.put_events.return_value = {"FailedEntryCount": 0, "Entries": [{"EventId": "e1"}]}
 
             event = {**make_event("/photos/upload", "POST", body={"contentType": "image/jpeg", "filename": "profile.jpg"}), **AUTHED_EVENT_CONTEXT}
-            response = lambda_handler(event, self.context)
+            response = handler(event, self.context)
             payload = json.loads(response["body"])
 
             self.assertEqual(response["statusCode"], 200)
@@ -47,19 +47,19 @@ class UploadPhotoTests(unittest.TestCase):
 
     def test_upload_unauthenticated_returns_401(self):
         with patch.dict("os.environ", ENV):
-            response = lambda_handler(make_event("/photos/upload", "POST", body={"contentType": "image/jpeg"}), self.context)
+            response = handler(make_event("/photos/upload", "POST", body={"contentType": "image/jpeg"}), self.context)
             self.assertEqual(response["statusCode"], 401)
 
     def test_upload_missing_content_type_returns_400(self):
         with patch.dict("os.environ", ENV):
             event = {**make_event("/photos/upload", "POST", body={}), **AUTHED_EVENT_CONTEXT}
-            response = lambda_handler(event, self.context)
+            response = handler(event, self.context)
             self.assertEqual(response["statusCode"], 400)
 
     def test_upload_invalid_content_type_returns_400(self):
         with patch.dict("os.environ", ENV):
             event = {**make_event("/photos/upload", "POST", body={"contentType": "image/gif"}), **AUTHED_EVENT_CONTEXT}
-            response = lambda_handler(event, self.context)
+            response = handler(event, self.context)
             payload = json.loads(response["body"])
             self.assertEqual(response["statusCode"], 400)
             self.assertEqual(payload["code"], "VALIDATION_ERROR")
@@ -71,7 +71,7 @@ class UploadPhotoTests(unittest.TestCase):
             mock_dynamodb.Table.return_value.query.return_value = {"Count": 6, "Items": []}
 
             event = {**make_event("/photos/upload", "POST", body={"contentType": "image/jpeg"}), **AUTHED_EVENT_CONTEXT}
-            response = lambda_handler(event, self.context)
+            response = handler(event, self.context)
             payload = json.loads(response["body"])
 
             self.assertEqual(response["statusCode"], 422)
@@ -92,7 +92,7 @@ class ListPhotosTests(unittest.TestCase):
                 {"photoId": "photo-002", "s3Key": "user-123/photo-002.jpg", "isPrimary": False, "uploadedAt": "2026-04-01T11:00:00+00:00"},
             ]}
 
-            response = lambda_handler(make_event("/photos/user-123", "GET"), self.context)
+            response = handler(make_event("/photos/user-123", "GET"), self.context)
             payload = json.loads(response["body"])
 
             self.assertEqual(response["statusCode"], 200)
@@ -106,7 +106,7 @@ class ListPhotosTests(unittest.TestCase):
 
             mock_dynamodb.Table.return_value.query.return_value = {"Items": []}
 
-            response = lambda_handler(make_event("/photos/user-999", "GET"), self.context)
+            response = handler(make_event("/photos/user-999", "GET"), self.context)
             payload = json.loads(response["body"])
 
             self.assertEqual(response["statusCode"], 200)
@@ -119,7 +119,7 @@ class ListPhotosTests(unittest.TestCase):
 
             mock_dynamodb.Table.return_value.query.return_value = {"Items": []}
 
-            response = lambda_handler(make_event("/photos/user-123", "GET"), self.context)
+            response = handler(make_event("/photos/user-123", "GET"), self.context)
             self.assertEqual(response["statusCode"], 200)
             mock_dynamodb.Table.return_value.query.assert_called_once()
 
@@ -144,7 +144,7 @@ class DeletePhotoTests(unittest.TestCase):
             mock_s3.delete_object.return_value = {}
 
             event = {**make_event("/photos/photo-001", "DELETE"), **AUTHED_EVENT_CONTEXT}
-            response = lambda_handler(event, self.context)
+            response = handler(event, self.context)
             payload = json.loads(response["body"])
 
             self.assertEqual(response["statusCode"], 200)
@@ -158,14 +158,14 @@ class DeletePhotoTests(unittest.TestCase):
             mock_dynamodb.Table.return_value.get_item.return_value = {}
 
             event = {**make_event("/photos/nonexistent", "DELETE"), **AUTHED_EVENT_CONTEXT}
-            response = lambda_handler(event, self.context)
+            response = handler(event, self.context)
             payload = json.loads(response["body"])
 
             self.assertEqual(response["statusCode"], 404)
 
     def test_delete_unauthenticated_returns_401(self):
         with patch.dict("os.environ", ENV):
-            response = lambda_handler(make_event("/photos/photo-001", "DELETE"), self.context)
+            response = handler(make_event("/photos/photo-001", "DELETE"), self.context)
             self.assertEqual(response["statusCode"], 401)
 
 
@@ -185,7 +185,7 @@ class SetPrimaryPhotoTests(unittest.TestCase):
             mock_table.update_item.return_value = {}
 
             event = {**make_event("/photos/photo-002/primary", "PUT"), **AUTHED_EVENT_CONTEXT}
-            response = lambda_handler(event, self.context)
+            response = handler(event, self.context)
             payload = json.loads(response["body"])
 
             self.assertEqual(response["statusCode"], 200)
@@ -199,13 +199,13 @@ class SetPrimaryPhotoTests(unittest.TestCase):
             mock_dynamodb.Table.return_value.get_item.return_value = {}
 
             event = {**make_event("/photos/nonexistent/primary", "PUT"), **AUTHED_EVENT_CONTEXT}
-            response = lambda_handler(event, self.context)
+            response = handler(event, self.context)
 
             self.assertEqual(response["statusCode"], 404)
 
     def test_set_primary_unauthenticated_returns_401(self):
         with patch.dict("os.environ", ENV):
-            response = lambda_handler(make_event("/photos/photo-002/primary", "PUT"), self.context)
+            response = handler(make_event("/photos/photo-002/primary", "PUT"), self.context)
             self.assertEqual(response["statusCode"], 401)
 
     def test_set_primary_route_extracts_photo_id(self):
@@ -218,7 +218,7 @@ class SetPrimaryPhotoTests(unittest.TestCase):
             mock_table.update_item.return_value = {}
 
             event = {**make_event("/photos/photo-002/primary", "PUT"), **AUTHED_EVENT_CONTEXT}
-            response = lambda_handler(event, self.context)
+            response = handler(event, self.context)
             payload = json.loads(response["body"])
 
             self.assertEqual(payload["photoId"], "photo-002")
@@ -232,7 +232,7 @@ class CorsTests(unittest.TestCase):
         with patch.dict("os.environ", ENV), \
              patch("lambda_function.dynamodb") as mock_dynamodb:
             mock_dynamodb.Table.return_value.query.return_value = {"Items": []}
-            response = lambda_handler(make_event("/photos/user-123", "GET"), self.context)
+            response = handler(make_event("/photos/user-123", "GET"), self.context)
             self.assertEqual(response["headers"]["Access-Control-Allow-Origin"], "*")
             self.assertIn("Authorization", response["headers"]["Access-Control-Allow-Headers"])
 
@@ -255,7 +255,7 @@ class PhotoEventTests(unittest.TestCase):
             mock_events.put_events.return_value = {"FailedEntryCount": 0, "Entries": [{"EventId": "e1"}]}
 
             event = {**make_event("/photos/upload", "POST", body={"contentType": "image/jpeg"}), **AUTHED_EVENT_CONTEXT}
-            lambda_handler(event, self.context)
+            handler(event, self.context)
 
             call_args = mock_events.put_events.call_args
             detail = json.loads(call_args[1]["Entries"][0]["Detail"])
@@ -270,14 +270,14 @@ class RoutingTests(unittest.TestCase):
 
     def test_invalid_json_body_returns_validation_error(self):
         event = {**make_event("/photos/upload", "POST", raw_body='{"broken"'), **AUTHED_EVENT_CONTEXT}
-        response = lambda_handler(event, self.context)
+        response = handler(event, self.context)
         payload = json.loads(response["body"])
 
         self.assertEqual(response["statusCode"], 400)
         self.assertEqual(payload["code"], "VALIDATION_ERROR")
 
     def test_unknown_route_returns_not_found(self):
-        response = lambda_handler(make_event("/photos/photo-001/archive", "PUT"), self.context)
+        response = handler(make_event("/photos/photo-001/archive", "PUT"), self.context)
         payload = json.loads(response["body"])
 
         self.assertEqual(response["statusCode"], 404)
@@ -286,7 +286,7 @@ class RoutingTests(unittest.TestCase):
     def test_get_upload_path_returns_not_found(self):
         # GET /photos/upload matches the /photos/upload branch first, which only
         # allows POST — so non-POST methods correctly return 404
-        response = lambda_handler(make_event("/photos/upload", "GET"), self.context)
+        response = handler(make_event("/photos/upload", "GET"), self.context)
         self.assertEqual(response["statusCode"], 404)
 
 
@@ -299,3 +299,5 @@ def make_event(path, method, body=None, raw_body=None):
 
 if __name__ == "__main__":
     unittest.main()
+
+
