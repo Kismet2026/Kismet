@@ -1,6 +1,6 @@
 import aws_cdk as cdk
 from constructs import Construct
-from aws_cdk import aws_events as events, aws_iam as iam
+from aws_cdk import aws_events as events, aws_iam as iam, aws_apigateway as apigateway
 
 from stacks.shared_stack import SharedStack
 from kismet_constructs.kismet_service import KismetService
@@ -21,6 +21,13 @@ class Domain2Stack(cdk.Stack):
             "kismet-events",
         )
 
+        imported_api = apigateway.RestApi.from_rest_api_attributes(
+            self,
+            "ImportedSharedApi",
+            rest_api_id=shared.api.rest_api_id,
+            root_resource_id=shared.api.rest_api_root_resource_id,
+        )
+
         # ── Swipe Service ─────────────────────────────────────────────────────
         swipe_svc = KismetService(
             self,
@@ -39,7 +46,7 @@ class Domain2Stack(cdk.Stack):
                 {"method": "GET", "path": "/swipe/history", "auth": True},
             ],
             publish_events=True,
-            api=shared.api,
+            api=imported_api,
             authorizer=shared.authorizer,
             event_bus=event_bus,
         )
@@ -74,7 +81,7 @@ class Domain2Stack(cdk.Stack):
                     resources=[swipe_svc.tables[0].table_arn],
                 ),
             ],
-            api=shared.api,
+            api=imported_api,
             authorizer=shared.authorizer,
             event_bus=event_bus,
         )
@@ -108,7 +115,7 @@ class Domain2Stack(cdk.Stack):
                     resources=[swipe_svc.tables[0].table_arn],
                 ),
             ],
-            api=shared.api,
+            api=imported_api,
             authorizer=shared.authorizer,
             event_bus=event_bus,
         )
@@ -147,7 +154,7 @@ class Domain2Stack(cdk.Stack):
                     resources=[swipe_svc.tables[0].table_arn],
                 ),
             ],
-            api=shared.api,
+            api=imported_api,
             authorizer=shared.authorizer,
             event_bus=event_bus,
         )
@@ -162,7 +169,7 @@ class Domain2Stack(cdk.Stack):
             routes=[
                 {"method": "POST", "path": "/bazi/top-matches", "auth": True},
             ],
-            api=shared.api,
+            api=imported_api,
             authorizer=shared.authorizer,
             event_bus=event_bus,
         )

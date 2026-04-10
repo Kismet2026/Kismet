@@ -32,6 +32,13 @@ class Domain5Stack(cdk.Stack):
             "kismet-events",
         )
 
+        imported_api = apigateway.RestApi.from_rest_api_attributes(
+            self,
+            "ImportedSharedApi",
+            rest_api_id=shared.api.rest_api_id,
+            root_resource_id=shared.api.rest_api_root_resource_id,
+        )
+
         # ══════════════════════════════════════════════════════════════════════
         # Nili's services (standard KismetService pattern)
         # ══════════════════════════════════════════════════════════════════════
@@ -73,7 +80,7 @@ class Domain5Stack(cdk.Stack):
                 "NOTIFICATIONS_TABLE": "kismet-notifications",
                 "DEVICE_TOKENS_TABLE": "kismet-device-tokens",
             },
-            api=shared.api,
+            api=imported_api,
             authorizer=shared.authorizer,
             event_bus=event_bus,
         )
@@ -110,7 +117,7 @@ class Domain5Stack(cdk.Stack):
                 "SENDER_EMAIL": "noreply@kismet.app",
                 "ADMIN_EMAIL": "admin@kismet.app",
             },
-            api=shared.api,
+            api=imported_api,
             authorizer=shared.authorizer,
             event_bus=event_bus,
         )
@@ -209,7 +216,7 @@ class Domain5Stack(cdk.Stack):
         )
 
         # API Gateway: /events/*
-        events_resource = shared.api.root.add_resource("events")
+        events_resource = imported_api.root.add_resource("events")
         events_integration = apigateway.LambdaIntegration(admin_events_fn)
         events_resource.add_resource("rules").add_method("GET", events_integration)
         events_resource.add_resource("history").add_method("GET", events_integration)
@@ -357,7 +364,7 @@ class Domain5Stack(cdk.Stack):
         )
 
         # API Gateway: /scheduler/jobs/*
-        scheduler_resource = shared.api.root.add_resource("scheduler")
+        scheduler_resource = imported_api.root.add_resource("scheduler")
         jobs_resource = scheduler_resource.add_resource("jobs")
         sched_integration = apigateway.LambdaIntegration(admin_sched_fn)
         jobs_resource.add_method("GET", sched_integration)

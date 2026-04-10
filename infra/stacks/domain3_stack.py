@@ -6,6 +6,7 @@ from aws_cdk import (
     aws_dynamodb as dynamodb,
     aws_logs as logs,
     aws_events as events,
+    aws_apigateway as apigateway,
     aws_apigatewayv2 as apigwv2,
     aws_apigatewayv2_integrations as integrations,
 )
@@ -24,6 +25,13 @@ class Domain3Stack(cdk.Stack):
 
     def __init__(self, scope: Construct, construct_id: str, *, shared: SharedStack, **kwargs):
         super().__init__(scope, construct_id, **kwargs)
+
+        imported_api = apigateway.RestApi.from_rest_api_attributes(
+            self,
+            "ImportedSharedApi",
+            rest_api_id=shared.api.rest_api_id,
+            root_resource_id=shared.api.rest_api_root_resource_id,
+        )
 
         matches_table = dynamodb.Table.from_table_name(
             self,
@@ -70,7 +78,7 @@ class Domain3Stack(cdk.Stack):
                 "EVENT_BUS_NAME": event_bus.event_bus_name,
                 "MATCHES_TABLE": matches_table.table_name,
             },
-            api=shared.api,
+            api=imported_api,
             authorizer=shared.authorizer,
             event_bus=event_bus,
         )
@@ -219,7 +227,7 @@ class Domain3Stack(cdk.Stack):
                 "TYPING_TABLE":   typing_table.table_name,
                 "MATCHES_TABLE":  matches_table.table_name,
             },
-            api=shared.api,
+            api=imported_api,
             authorizer=shared.authorizer,
             event_bus=event_bus,
         )
@@ -263,7 +271,7 @@ class Domain3Stack(cdk.Stack):
             environment={
                 "TABLE_NAME": "kismet-icebreakers",
             },
-            api=shared.api,
+            api=imported_api,
             authorizer=shared.authorizer,
             event_bus=event_bus,
         )
