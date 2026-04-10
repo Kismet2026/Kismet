@@ -1,6 +1,6 @@
 <mxfile host="65bd71144e">
     <diagram id="domain3-architecture" name="Domain 3 Architecture">
-        <mxGraphModel dx="2292" dy="3007" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1200" math="0" shadow="0">
+        <mxGraphModel dx="2115" dy="1237" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1200" math="0" shadow="0">
             <root>
                 <mxCell id="0"/>
                 <mxCell id="1" parent="0"/>
@@ -23,7 +23,7 @@
                     <mxGeometry x="50" y="710" width="290" height="130" as="geometry"/>
                 </mxCell>
                 <mxCell id="icebreakerService" value="Icebreaker Service&#xa;POST /icebreaker/generate&#xa;GET /icebreaker/{matchId}" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dcfce7;strokeColor=#16a34a;fontSize=13;" parent="domain" vertex="1">
-                    <mxGeometry x="460" y="830" width="260" height="100" as="geometry"/>
+                    <mxGeometry x="540" y="830" width="260" height="100" as="geometry"/>
                 </mxCell>
                 <mxCell id="chatGateway" value="Chat Gateway (WebSocket transport layer)" style="swimlane;html=1;rounded=1;whiteSpace=wrap;horizontal=1;startSize=28;fillColor=#fff7ed;strokeColor=#d97706;fontSize=14;fontStyle=1;" parent="domain" vertex="1">
                     <mxGeometry x="20" y="50" width="620" height="430" as="geometry"/>
@@ -41,7 +41,7 @@
                     <mxGeometry x="230" y="240" width="230" height="145" as="geometry"/>
                 </mxCell>
                 <mxCell id="connectionsTable" value="DynamoDB&#xa;kismet-connections&#xa;PK=CONN#{connectionId}&#xa;SK=META&#xa;TTL=24h&#xa;GSI: matchId-index" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;fillColor=#fde68a;strokeColor=#ca8a04;fontSize=13;" parent="domain" vertex="1">
-                    <mxGeometry x="770" y="95" width="220" height="120" as="geometry"/>
+                    <mxGeometry x="760" y="165" width="220" height="120" as="geometry"/>
                 </mxCell>
                 <mxCell id="presenceTable" value="DynamoDB&#xa;kismet-presence&#xa;TTL=60s heartbeat status" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;fillColor=#fde68a;strokeColor=#ca8a04;fontSize=13;" parent="domain" vertex="1">
                     <mxGeometry x="70" y="970" width="190" height="90" as="geometry"/>
@@ -50,19 +50,19 @@
                     <mxGeometry x="330" y="970" width="190" height="90" as="geometry"/>
                 </mxCell>
                 <mxCell id="icebreakerTable" value="DynamoDB&#xa;kismet-icebreakers" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;fillColor=#fde68a;strokeColor=#ca8a04;fontSize=13;" parent="domain" vertex="1">
-                    <mxGeometry x="970" y="940" width="190" height="80" as="geometry"/>
+                    <mxGeometry x="970" y="980" width="190" height="80" as="geometry"/>
                 </mxCell>
                 <mxCell id="matchesTable" value="Imported DynamoDB&#xa;kismet-matches&#xa;(external domain dependency)" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;fillColor=#fee2e2;strokeColor=#dc2626;fontSize=13;" parent="domain" vertex="1">
-                    <mxGeometry x="450" y="655" width="220" height="100" as="geometry"/>
+                    <mxGeometry x="480" y="655" width="220" height="100" as="geometry"/>
                 </mxCell>
                 <mxCell id="eventBus" value="Imported EventBridge Bus&#xa;kismet-events" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fee2e2;strokeColor=#dc2626;fontSize=13;" parent="domain" vertex="1">
-                    <mxGeometry x="750" y="685" width="190" height="70" as="geometry"/>
+                    <mxGeometry x="800" y="685" width="190" height="70" as="geometry"/>
                 </mxCell>
                 <mxCell id="consumers" value="External event consumers&#xa;- Domain 4 moderation&#xa;- Domain 5 notifications&#xa;- Domain 6 activity logger" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f3f4f6;strokeColor=#6b7280;fontSize=13;" parent="domain" vertex="1">
-                    <mxGeometry x="1070" y="215" width="220" height="110" as="geometry"/>
+                    <mxGeometry x="1055" y="520" width="220" height="110" as="geometry"/>
                 </mxCell>
                 <mxCell id="bedrock" value="Amazon Bedrock&#xa;Claude 3 Haiku" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ede9fe;strokeColor=#7c3aed;fontSize=13;" parent="domain" vertex="1">
-                    <mxGeometry x="1085" y="790" width="190" height="80" as="geometry"/>
+                    <mxGeometry x="1070" y="840" width="190" height="80" as="geometry"/>
                 </mxCell>
                 <mxCell id="restApi" value="Imported Shared REST API&#xa;+ Cognito authorizer" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e0f2fe;strokeColor=#0284c7;fontSize=13;" parent="domain" vertex="1">
                     <mxGeometry x="50" y="510" width="220" height="70" as="geometry"/>
@@ -82,13 +82,7 @@
                 <mxCell id="e13" value="persist / query / soft delete" style="curved=1;html=1;endArrow=block;endFill=1;strokeColor=#ca8a04;fontSize=11;" parent="domain" source="messageService" target="messagesTable" edge="1">
                     <mxGeometry relative="1" as="geometry"/>
                 </mxCell>
-                <mxCell id="2" value="" style="curved=1;html=1;endArrow=block;endFill=1;dashed=1;strokeColor=#6b7280;fontSize=11;" edge="1" parent="domain" source="eventBus" target="messagesTable">
-                    <mxGeometry relative="1" as="geometry">
-                        <mxPoint x="640" y="654" as="sourcePoint"/>
-                        <mxPoint x="1070" y="511" as="targetPoint"/>
-                    </mxGeometry>
-                </mxCell>
-                <mxCell id="e20" value="consumed by other domains" style="curved=1;html=1;endArrow=block;endFill=1;dashed=1;strokeColor=#6b7280;fontSize=11;" parent="domain" source="messagesTable" target="consumers" edge="1">
+                <mxCell id="e20" value="consumed by other domains" style="curved=1;html=1;endArrow=block;endFill=1;dashed=1;strokeColor=#6b7280;fontSize=11;" parent="domain" source="eventBus" target="consumers" edge="1">
                     <mxGeometry relative="1" as="geometry"/>
                 </mxCell>
                 <mxCell id="e1" value="" style="curved=1;html=1;endArrow=block;endFill=1;strokeColor=#2563eb;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" parent="1" source="client" target="restApi" edge="1">
