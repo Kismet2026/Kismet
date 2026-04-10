@@ -39,7 +39,7 @@ Resources:
       FunctionName: !Sub kismet-auth-service-${EnvironmentName}
       Description: Handles account lifecycle routes for the Kismet auth service.
       CodeUri: .
-      Handler: lambda_function.lambda_handler
+      Handler: lambda_function.handler
       Policies:
         - AWSLambdaBasicExecutionRole
         - DynamoDBCrudPolicy:
@@ -85,3 +85,5 @@ Outputs:
   AuthServiceFunctionArn:
     Description: Auth service Lambda function ARN.
     Value: !GetAtt AuthServiceFunction.Arn
+
+

@@ -2,7 +2,7 @@ import json
 import logging
 import os
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 import boto3
 from botocore.exceptions import ClientError
@@ -21,41 +21,45 @@ cognito = boto3.client("cognito-idp")
 dynamodb = boto3.resource("dynamodb")
 events = boto3.client("events")
 
-ROUTES = {
-    ("POST", "/auth/signup"): "signup",
-    ("POST", "/auth/login"): "login",
-    ("POST", "/auth/refresh"): "refresh",
-    ("POST", "/auth/logout"): "logout",
-}
 
-
-def lambda_handler(event: Optional[Dict[str, Any]], context: Any) -> Dict[str, Any]:
+def handler(event, context):
     event = event or {}
-    method = get_http_method(event)
-    path = normalize_path(get_request_path(event))
-
-    operation = ROUTES.get((method, path))
-    if operation is None:
-        return json_response(404, {"code": "NOT_FOUND", "message": f"No route matches {method} {path}."})
-
-    payload, error = parse_json_body(event)
-    if error is not None:
-        return error
+    method = _get_method(event)
+    path = _get_path(event)
+    operation = None
 
     try:
-        if operation == "signup":
+        if method == "POST" and path == "/auth/signup":
+            operation = "signup"
+            payload, error = _parse_body(event)
+            if error is not None:
+                return error
             return handle_signup(payload or {})
-        if operation == "login":
+        elif method == "POST" and path == "/auth/login":
+            operation = "login"
+            payload, error = _parse_body(event)
+            if error is not None:
+                return error
             return handle_login(payload or {})
-        if operation == "refresh":
+        elif method == "POST" and path == "/auth/refresh":
+            operation = "refresh"
+            payload, error = _parse_body(event)
+            if error is not None:
+                return error
             return handle_refresh(payload or {})
-        if operation == "logout":
+        elif method == "POST" and path == "/auth/logout":
+            operation = "logout"
+            payload, error = _parse_body(event)
+            if error is not None:
+                return error
             return handle_logout(payload or {})
+        else:
+            return _response(404, {"code": "NOT_FOUND", "message": f"No route matches {method} {path}."})
     except ClientError as exc:
         return _handle_cognito_error(exc)
     except Exception:
-        logger.exception("Unexpected error in %s", operation)
-        return json_response(500, {"code": "INTERNAL_ERROR", "message": "An unexpected error occurred."})
+        logger.exception("Unexpected error in %s", operation or f"{method} {path}")
+        return _response(500, {"code": "INTERNAL_ERROR", "message": "An unexpected error occurred."})
 
 
 def handle_signup(body: Dict[str, Any]) -> Dict[str, Any]:
@@ -63,7 +67,7 @@ def handle_signup(body: Dict[str, Any]) -> Dict[str, Any]:
     password = body.get("password") or ""
 
     if not email or not password:
-        return json_response(400, {"code": "VALIDATION_ERROR", "message": "email and password are required."})
+        return _response(400, {"code": "VALIDATION_ERROR", "message": "email and password are required."})
 
     response = cognito.sign_up(
         ClientId=COGNITO_APP_CLIENT_ID,
@@ -96,7 +100,7 @@ def handle_signup(body: Dict[str, Any]) -> Dict[str, Any]:
         "EventBusName": EVENT_BUS_NAME,
     }])
 
-    return json_response(201, {"userId": user_id, "email": email, "createdAt": created_at})
+    return _response(201, {"userId": user_id, "email": email, "createdAt": created_at})
 
 
 def handle_login(body: Dict[str, Any]) -> Dict[str, Any]:
@@ -104,7 +108,7 @@ def handle_login(body: Dict[str, Any]) -> Dict[str, Any]:
     password = body.get("password") or ""
 
     if not email or not password:
-        return json_response(400, {"code": "VALIDATION_ERROR", "message": "email and password are required."})
+        return _response(400, {"code": "VALIDATION_ERROR", "message": "email and password are required."})
 
     response = cognito.initiate_auth(
         ClientId=COGNITO_APP_CLIENT_ID,
@@ -113,7 +117,7 @@ def handle_login(body: Dict[str, Any]) -> Dict[str, Any]:
     )
 
     auth = response["AuthenticationResult"]
-    return json_response(200, {
+    return _response(200, {
         "accessToken": auth["AccessToken"],
         "refreshToken": auth.get("RefreshToken"),
         "idToken": auth["IdToken"],
@@ -124,7 +128,7 @@ def handle_login(body: Dict[str, Any]) -> Dict[str, Any]:
 def handle_refresh(body: Dict[str, Any]) -> Dict[str, Any]:
     refresh_token = body.get("refreshToken") or ""
     if not refresh_token:
-        return json_response(400, {"code": "VALIDATION_ERROR", "message": "refreshToken is required."})
+        return _response(400, {"code": "VALIDATION_ERROR", "message": "refreshToken is required."})
 
     response = cognito.initiate_auth(
         ClientId=COGNITO_APP_CLIENT_ID,
@@ -133,16 +137,16 @@ def handle_refresh(body: Dict[str, Any]) -> Dict[str, Any]:
     )
 
     auth = response["AuthenticationResult"]
-    return json_response(200, {"accessToken": auth["AccessToken"], "expiresIn": auth["ExpiresIn"]})
+    return _response(200, {"accessToken": auth["AccessToken"], "expiresIn": auth["ExpiresIn"]})
 
 
 def handle_logout(body: Dict[str, Any]) -> Dict[str, Any]:
     refresh_token = body.get("refreshToken") or ""
     if not refresh_token:
-        return json_response(400, {"code": "VALIDATION_ERROR", "message": "refreshToken is required."})
+        return _response(400, {"code": "VALIDATION_ERROR", "message": "refreshToken is required."})
 
     cognito.revoke_token(Token=refresh_token, ClientId=COGNITO_APP_CLIENT_ID)
-    return json_response(200, {"message": "Successfully logged out"})
+    return _response(200, {"message": "Successfully logged out"})
 
 
 def _handle_cognito_error(exc: ClientError) -> Dict[str, Any]:
@@ -161,13 +165,13 @@ def _handle_cognito_error(exc: ClientError) -> Dict[str, Any]:
 
     if code in mapping:
         status, error_code, error_message = mapping[code]
-        return json_response(status, {"code": error_code, "message": error_message})
+        return _response(status, {"code": error_code, "message": error_message})
 
     logger.error("Unhandled Cognito error %s: %s", code, message)
-    return json_response(500, {"code": "INTERNAL_ERROR", "message": "An unexpected error occurred."})
+    return _response(500, {"code": "INTERNAL_ERROR", "message": "An unexpected error occurred."})
 
 
-def get_http_method(event: Dict[str, Any]) -> str:
+def _get_method(event: Dict[str, Any]) -> str:
     method = (
         event.get("requestContext", {}).get("http", {}).get("method")
         or event.get("httpMethod")
@@ -176,16 +180,13 @@ def get_http_method(event: Dict[str, Any]) -> str:
     return str(method).upper()
 
 
-def get_request_path(event: Dict[str, Any]) -> str:
-    return (
+def _get_path(event: Dict[str, Any]) -> str:
+    path = (
         event.get("rawPath")
         or event.get("path")
         or event.get("requestContext", {}).get("http", {}).get("path")
         or "/"
     )
-
-
-def normalize_path(path: Any) -> str:
     if not path:
         return "/"
     normalized = str(path).strip()
@@ -196,7 +197,7 @@ def normalize_path(path: Any) -> str:
     return normalized
 
 
-def parse_json_body(event: Dict[str, Any]):
+def _parse_body(event: Dict[str, Any]):
     body = event.get("body")
     if body in (None, ""):
         return None, None
@@ -205,7 +206,7 @@ def parse_json_body(event: Dict[str, Any]):
     try:
         return json.loads(body), None
     except json.JSONDecodeError:
-        return None, json_response(400, {"code": "VALIDATION_ERROR", "message": "Request body must be valid JSON."})
+        return None, _response(400, {"code": "VALIDATION_ERROR", "message": "Request body must be valid JSON."})
 
 
 CORS_HEADERS = {
@@ -216,9 +217,12 @@ CORS_HEADERS = {
 }
 
 
-def json_response(status_code: int, payload: Dict[str, Any]) -> Dict[str, Any]:
+def _response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "statusCode": status_code,
         "headers": CORS_HEADERS,
-        "body": json.dumps(payload),
+        "body": json.dumps(body),
     }
+
+
+lambda_handler = handler

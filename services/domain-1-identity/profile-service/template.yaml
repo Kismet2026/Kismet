@@ -49,7 +49,7 @@ Resources:
       FunctionName: !Sub kismet-profile-service-${EnvironmentName}
       Description: Handles profile CRUD routes for the Kismet profile service.
       CodeUri: .
-      Handler: lambda_function.lambda_handler
+      Handler: lambda_function.handler
       Policies:
         - AWSLambdaBasicExecutionRole
         - DynamoDBCrudPolicy:
@@ -96,3 +96,5 @@ Outputs:
   ProfilesTableArn:
     Description: Profile service DynamoDB table ARN.
     Value: !GetAtt ProfilesTable.Arn
+
+

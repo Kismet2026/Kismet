@@ -4,7 +4,7 @@ import os
 import re
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional
 
 import boto3
 from boto3.dynamodb.conditions import Attr, Key
@@ -31,44 +31,47 @@ s3 = boto3.client("s3")
 events = boto3.client("events")
 
 
-def lambda_handler(event: Optional[Dict[str, Any]], context: Any) -> Dict[str, Any]:
+def handler(event, context):
     event = event or {}
-    method = get_http_method(event)
-    path = normalize_path(get_request_path(event))
-
-    operation, route_params, expects_body = resolve_route(method, path)
-    if operation is None:
-        return json_response(404, {"code": "NOT_FOUND", "message": f"No route matches {method} {path}."})
-
-    payload = None
-    if expects_body:
-        payload, error = parse_json_body(event)
-        if error is not None:
-            return error
-
+    method = _get_method(event)
+    path = _get_path(event)
     user_id = _get_user_id(event)
+    operation = None
+    primary_match = PHOTO_PRIMARY_PATTERN.match(path)
+    detail_match = PHOTO_DETAIL_PATTERN.match(path)
 
     try:
-        if operation == "uploadPhoto":
+        if path == "/photos/upload":
+            if method != "POST":
+                return _response(404, {"code": "NOT_FOUND", "message": f"No route matches {method} {path}."})
+            operation = "uploadPhoto"
+            payload, error = _parse_body(event)
+            if error is not None:
+                return error
             if not user_id:
-                return json_response(401, {"code": "UNAUTHORIZED", "message": "Authentication required."})
+                return _response(401, {"code": "UNAUTHORIZED", "message": "Authentication required."})
             return handle_upload(user_id, payload or {})
-        if operation == "listPhotos":
-            return handle_list(route_params["userId"])
-        if operation == "deletePhoto":
+        elif primary_match and method == "PUT":
+            operation = "setPrimaryPhoto"
             if not user_id:
-                return json_response(401, {"code": "UNAUTHORIZED", "message": "Authentication required."})
-            return handle_delete(user_id, route_params["photoId"])
-        if operation == "setPrimaryPhoto":
+                return _response(401, {"code": "UNAUTHORIZED", "message": "Authentication required."})
+            return handle_set_primary(user_id, primary_match.group("photoId"))
+        elif detail_match and method == "GET":
+            operation = "listPhotos"
+            return handle_list(detail_match.group("identifier"))
+        elif detail_match and method == "DELETE":
+            operation = "deletePhoto"
             if not user_id:
-                return json_response(401, {"code": "UNAUTHORIZED", "message": "Authentication required."})
-            return handle_set_primary(user_id, route_params["photoId"])
+                return _response(401, {"code": "UNAUTHORIZED", "message": "Authentication required."})
+            return handle_delete(user_id, detail_match.group("identifier"))
+        else:
+            return _response(404, {"code": "NOT_FOUND", "message": f"No route matches {method} {path}."})
     except ClientError:
-        logger.exception("AWS error in %s", operation)
-        return json_response(500, {"code": "INTERNAL_ERROR", "message": "An unexpected error occurred."})
+        logger.exception("AWS error in %s", operation or f"{method} {path}")
+        return _response(500, {"code": "INTERNAL_ERROR", "message": "An unexpected error occurred."})
     except Exception:
-        logger.exception("Unexpected error in %s", operation)
-        return json_response(500, {"code": "INTERNAL_ERROR", "message": "An unexpected error occurred."})
+        logger.exception("Unexpected error in %s", operation or f"{method} {path}")
+        return _response(500, {"code": "INTERNAL_ERROR", "message": "An unexpected error occurred."})
 
 
 def handle_upload(user_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -76,15 +79,15 @@ def handle_upload(user_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
     filename = (body.get("filename") or "").strip()
 
     if not content_type:
-        return json_response(400, {"code": "VALIDATION_ERROR", "message": "contentType is required."})
+        return _response(400, {"code": "VALIDATION_ERROR", "message": "contentType is required."})
     if content_type not in ALLOWED_CONTENT_TYPES:
         allowed = ", ".join(sorted(ALLOWED_CONTENT_TYPES))
-        return json_response(400, {"code": "VALIDATION_ERROR", "message": f"Unsupported content type. Allowed: {allowed}"})
+        return _response(400, {"code": "VALIDATION_ERROR", "message": f"Unsupported content type. Allowed: {allowed}"})
 
     table = dynamodb.Table(PHOTOS_TABLE_NAME)
     existing = table.query(KeyConditionExpression=Key("PK").eq(f"USER#{user_id}"))
     if existing.get("Count", 0) >= MAX_PHOTOS_PER_USER:
-        return json_response(422, {"code": "LIMIT_EXCEEDED", "message": f"Maximum {MAX_PHOTOS_PER_USER} photos allowed per user."})
+        return _response(422, {"code": "LIMIT_EXCEEDED", "message": f"Maximum {MAX_PHOTOS_PER_USER} photos allowed per user."})
 
     photo_id = str(uuid.uuid4())
     ext = "jpg" if content_type == "image/jpeg" else content_type.split("/")[-1]
@@ -126,7 +129,7 @@ def handle_upload(user_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
         "EventBusName": EVENT_BUS_NAME,
     }])
 
-    return json_response(200, {"photoId": photo_id, "uploadUrl": upload_url, "expiresIn": PRESIGNED_URL_EXPIRY})
+    return _response(200, {"photoId": photo_id, "uploadUrl": upload_url, "expiresIn": PRESIGNED_URL_EXPIRY})
 
 
 def handle_list(user_id: str) -> Dict[str, Any]:
@@ -143,7 +146,7 @@ def handle_list(user_id: str) -> Dict[str, Any]:
         })
 
     photos.sort(key=lambda p: p["uploadedAt"] or "", reverse=True)
-    return json_response(200, {"photos": photos, "count": len(photos)})
+    return _response(200, {"photos": photos, "count": len(photos)})
 
 
 def handle_delete(user_id: str, photo_id: str) -> Dict[str, Any]:
@@ -152,7 +155,7 @@ def handle_delete(user_id: str, photo_id: str) -> Dict[str, Any]:
     item = result.get("Item")
 
     if not item:
-        return json_response(404, {"code": "NOT_FOUND", "message": "Photo not found."})
+        return _response(404, {"code": "NOT_FOUND", "message": "Photo not found."})
 
     s3.delete_object(Bucket=PHOTOS_BUCKET_NAME, Key=item["s3Key"])
     table.delete_item(Key={"PK": f"USER#{user_id}", "SK": f"PHOTO#{photo_id}"})
@@ -170,7 +173,7 @@ def handle_delete(user_id: str, photo_id: str) -> Dict[str, Any]:
                 ExpressionAttributeValues={":t": True},
             )
 
-    return json_response(200, {"message": "Photo deleted successfully"})
+    return _response(200, {"message": "Photo deleted successfully"})
 
 
 def handle_set_primary(user_id: str, photo_id: str) -> Dict[str, Any]:
@@ -178,7 +181,7 @@ def handle_set_primary(user_id: str, photo_id: str) -> Dict[str, Any]:
 
     result = table.get_item(Key={"PK": f"USER#{user_id}", "SK": f"PHOTO#{photo_id}"})
     if not result.get("Item"):
-        return json_response(404, {"code": "NOT_FOUND", "message": "Photo not found."})
+        return _response(404, {"code": "NOT_FOUND", "message": "Photo not found."})
 
     # Unset any existing primary photo
     existing = table.query(
@@ -199,30 +202,7 @@ def handle_set_primary(user_id: str, photo_id: str) -> Dict[str, Any]:
         ExpressionAttributeValues={":t": True},
     )
 
-    return json_response(200, {"photoId": photo_id, "isPrimary": True})
-
-
-def resolve_route(method: str, path: str) -> Tuple[Optional[str], Dict[str, str], bool]:
-    if path == "/photos/upload":
-        if method == "POST":
-            return "uploadPhoto", {}, True
-        return None, {}, False
-
-    primary_match = PHOTO_PRIMARY_PATTERN.match(path)
-    if primary_match and method == "PUT":
-        return "setPrimaryPhoto", {"photoId": primary_match.group("photoId")}, False
-
-    detail_match = PHOTO_DETAIL_PATTERN.match(path)
-    if not detail_match:
-        return None, {}, False
-
-    identifier = detail_match.group("identifier")
-    if method == "GET":
-        return "listPhotos", {"userId": identifier}, False
-    if method == "DELETE":
-        return "deletePhoto", {"photoId": identifier}, False
-
-    return None, {}, False
+    return _response(200, {"photoId": photo_id, "isPrimary": True})
 
 
 def _get_user_id(event: Dict[str, Any]) -> Optional[str]:
@@ -230,7 +210,7 @@ def _get_user_id(event: Dict[str, Any]) -> Optional[str]:
     return claims.get("sub") or claims.get("cognito:username")
 
 
-def get_http_method(event: Dict[str, Any]) -> str:
+def _get_method(event: Dict[str, Any]) -> str:
     method = (
         event.get("requestContext", {}).get("http", {}).get("method")
         or event.get("httpMethod")
@@ -239,16 +219,13 @@ def get_http_method(event: Dict[str, Any]) -> str:
     return str(method).upper()
 
 
-def get_request_path(event: Dict[str, Any]) -> str:
-    return (
+def _get_path(event: Dict[str, Any]) -> str:
+    path = (
         event.get("rawPath")
         or event.get("path")
         or event.get("requestContext", {}).get("http", {}).get("path")
         or "/"
     )
-
-
-def normalize_path(path: Any) -> str:
     if not path:
         return "/"
     normalized = str(path).strip()
@@ -259,7 +236,7 @@ def normalize_path(path: Any) -> str:
     return normalized
 
 
-def parse_json_body(event: Dict[str, Any]):
+def _parse_body(event: Dict[str, Any]):
     body = event.get("body")
     if body in (None, ""):
         return None, None
@@ -268,7 +245,7 @@ def parse_json_body(event: Dict[str, Any]):
     try:
         return json.loads(body), None
     except json.JSONDecodeError:
-        return None, json_response(400, {"code": "VALIDATION_ERROR", "message": "Request body must be valid JSON."})
+        return None, _response(400, {"code": "VALIDATION_ERROR", "message": "Request body must be valid JSON."})
 
 
 CORS_HEADERS = {
@@ -279,9 +256,12 @@ CORS_HEADERS = {
 }
 
 
-def json_response(status_code: int, payload: Dict[str, Any]) -> Dict[str, Any]:
+def _response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "statusCode": status_code,
         "headers": CORS_HEADERS,
-        "body": json.dumps(payload),
+        "body": json.dumps(body),
     }
+
+
+lambda_handler = handler

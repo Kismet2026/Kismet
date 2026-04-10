@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 from botocore.exceptions import ClientError
 
-from lambda_function import lambda_handler
+from lambda_function import handler
 
 
 ENV = {
@@ -30,7 +30,7 @@ class AuthServiceSignupTests(unittest.TestCase):
             mock_dynamodb.Table.return_value.put_item.return_value = {}
             mock_events.put_events.return_value = {"FailedEntryCount": 0, "Entries": [{"EventId": "e1"}]}
 
-            response = lambda_handler(make_event("/auth/signup", "POST", body={
+            response = handler(make_event("/auth/signup", "POST", body={
                 "email": "student@university.edu",
                 "password": "SecureP@ss123",
                 "birthDate": "1999-05-15",
@@ -54,7 +54,7 @@ class AuthServiceSignupTests(unittest.TestCase):
 
             mock_cognito.sign_up.side_effect = _cognito_error("UsernameExistsException")
 
-            response = lambda_handler(make_event("/auth/signup", "POST", body={
+            response = handler(make_event("/auth/signup", "POST", body={
                 "email": "existing@university.edu",
                 "password": "SecureP@ss123",
             }), self.context)
@@ -65,7 +65,7 @@ class AuthServiceSignupTests(unittest.TestCase):
 
     def test_signup_missing_email_returns_validation_error(self):
         with patch.dict("os.environ", ENV):
-            response = lambda_handler(make_event("/auth/signup", "POST", body={"password": "SecureP@ss123"}), self.context)
+            response = handler(make_event("/auth/signup", "POST", body={"password": "SecureP@ss123"}), self.context)
             payload = json.loads(response["body"])
 
             self.assertEqual(response["statusCode"], 400)
@@ -73,7 +73,7 @@ class AuthServiceSignupTests(unittest.TestCase):
 
     def test_signup_missing_password_returns_validation_error(self):
         with patch.dict("os.environ", ENV):
-            response = lambda_handler(make_event("/auth/signup", "POST", body={"email": "a@university.edu"}), self.context)
+            response = handler(make_event("/auth/signup", "POST", body={"email": "a@university.edu"}), self.context)
             payload = json.loads(response["body"])
 
             self.assertEqual(response["statusCode"], 400)
@@ -95,7 +95,7 @@ class AuthServiceLoginTests(unittest.TestCase):
                 "ExpiresIn": 3600,
             }}
 
-            response = lambda_handler(make_event("/auth/login", "POST", body={
+            response = handler(make_event("/auth/login", "POST", body={
                 "email": "student@university.edu",
                 "password": "SecureP@ss123",
             }), self.context)
@@ -112,7 +112,7 @@ class AuthServiceLoginTests(unittest.TestCase):
 
             mock_cognito.initiate_auth.side_effect = _cognito_error("NotAuthorizedException")
 
-            response = lambda_handler(make_event("/auth/login", "POST", body={
+            response = handler(make_event("/auth/login", "POST", body={
                 "email": "student@university.edu",
                 "password": "wrong",
             }), self.context)
@@ -123,7 +123,7 @@ class AuthServiceLoginTests(unittest.TestCase):
 
     def test_login_missing_fields_returns_validation_error(self):
         with patch.dict("os.environ", ENV):
-            response = lambda_handler(make_event("/auth/login", "POST", body={"email": "a@b.com"}), self.context)
+            response = handler(make_event("/auth/login", "POST", body={"email": "a@b.com"}), self.context)
             self.assertEqual(response["statusCode"], 400)
 
 
@@ -140,7 +140,7 @@ class AuthServiceRefreshTests(unittest.TestCase):
                 "ExpiresIn": 3600,
             }}
 
-            response = lambda_handler(make_event("/auth/refresh", "POST", body={"refreshToken": "valid-refresh"}), self.context)
+            response = handler(make_event("/auth/refresh", "POST", body={"refreshToken": "valid-refresh"}), self.context)
             payload = json.loads(response["body"])
 
             self.assertEqual(response["statusCode"], 200)
@@ -149,7 +149,7 @@ class AuthServiceRefreshTests(unittest.TestCase):
 
     def test_refresh_missing_token_returns_validation_error(self):
         with patch.dict("os.environ", ENV):
-            response = lambda_handler(make_event("/auth/refresh", "POST", body={}), self.context)
+            response = handler(make_event("/auth/refresh", "POST", body={}), self.context)
             self.assertEqual(response["statusCode"], 400)
 
 
@@ -164,7 +164,7 @@ class AuthServiceLogoutTests(unittest.TestCase):
 
             mock_cognito.revoke_token.return_value = {}
 
-            response = lambda_handler(make_event("/auth/logout", "POST", body={"refreshToken": "valid-refresh"}), self.context)
+            response = handler(make_event("/auth/logout", "POST", body={"refreshToken": "valid-refresh"}), self.context)
             payload = json.loads(response["body"])
 
             self.assertEqual(response["statusCode"], 200)
@@ -173,7 +173,7 @@ class AuthServiceLogoutTests(unittest.TestCase):
 
     def test_logout_missing_token_returns_validation_error(self):
         with patch.dict("os.environ", ENV):
-            response = lambda_handler(make_event("/auth/logout", "POST", body={}), self.context)
+            response = handler(make_event("/auth/logout", "POST", body={}), self.context)
             self.assertEqual(response["statusCode"], 400)
 
 
@@ -183,7 +183,7 @@ class AuthServiceCorsTests(unittest.TestCase):
 
     def test_response_includes_cors_headers(self):
         with patch.dict("os.environ", ENV):
-            response = lambda_handler(make_event("/auth/login", "POST", body={"email": "a@b.com"}), self.context)
+            response = handler(make_event("/auth/login", "POST", body={"email": "a@b.com"}), self.context)
             self.assertEqual(response["headers"]["Access-Control-Allow-Origin"], "*")
             self.assertIn("Authorization", response["headers"]["Access-Control-Allow-Headers"])
 
@@ -193,14 +193,14 @@ class AuthServiceRoutingTests(unittest.TestCase):
         self.context = SimpleNamespace(aws_request_id="req-123")
 
     def test_invalid_json_body_returns_validation_error(self):
-        response = lambda_handler(make_event("/auth/login", "POST", raw_body='{"broken"'), self.context)
+        response = handler(make_event("/auth/login", "POST", raw_body='{"broken"'), self.context)
         payload = json.loads(response["body"])
 
         self.assertEqual(response["statusCode"], 400)
         self.assertEqual(payload["code"], "VALIDATION_ERROR")
 
     def test_unknown_route_returns_not_found(self):
-        response = lambda_handler(make_event("/auth/unknown", "GET"), self.context)
+        response = handler(make_event("/auth/unknown", "GET"), self.context)
         payload = json.loads(response["body"])
 
         self.assertEqual(response["statusCode"], 404)
@@ -220,3 +220,5 @@ def _cognito_error(code: str) -> ClientError:
 
 if __name__ == "__main__":
     unittest.main()
+
+

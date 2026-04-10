@@ -55,7 +55,7 @@ Resources:
       FunctionName: !Sub kismet-photo-service-${EnvironmentName}
       Description: Handles photo upload and management routes for the Kismet photo service.
       CodeUri: .
-      Handler: lambda_function.lambda_handler
+      Handler: lambda_function.handler
       Policies:
         - AWSLambdaBasicExecutionRole
         - DynamoDBCrudPolicy:
@@ -106,3 +106,5 @@ Outputs:
   PhotosTableArn:
     Description: Photo service DynamoDB table ARN.
     Value: !GetAtt PhotosTable.Arn
+
+

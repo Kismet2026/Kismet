@@ -35,7 +35,6 @@ class Domain1Stack(cdk.Stack):
             "AuthService",
             service_name="auth",
             code_path="../services/domain-1-identity/auth-service",
-            handler="lambda_function.lambda_handler",
             tables=[
                 {
                     "table_name": "kismet-users",
@@ -79,7 +78,6 @@ class Domain1Stack(cdk.Stack):
             "ProfileService",
             service_name="profile",
             code_path="../services/domain-1-identity/profile-service",
-            handler="lambda_function.lambda_handler",
             tables=[
                 {
                     "table_name": "kismet-profiles",
@@ -109,7 +107,6 @@ class Domain1Stack(cdk.Stack):
             "EmailVerificationService",
             service_name="email-verification",
             code_path="../services/domain-1-identity/email-verification-service",
-            handler="lambda_function.lambda_handler",
             tables=[
                 {
                     "table_name": "kismet-verifications",
@@ -154,7 +151,6 @@ class Domain1Stack(cdk.Stack):
             "PhotoService",
             service_name="photo",
             code_path="../services/domain-1-identity/photo-service",
-            handler="lambda_function.lambda_handler",
             tables=[
                 {
                     "table_name": "kismet-photos",
@@ -185,3 +181,5 @@ class Domain1Stack(cdk.Stack):
             authorizer=shared.authorizer,
             event_bus=event_bus,
         )
+
+
