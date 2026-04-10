@@ -14,7 +14,7 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 SERVICE_NAME = "photo-service"
-PHOTO_DETAIL_PATTERN = re.compile(r"^/photos/(?P<identifier>[^/]+)$")
+PHOTO_DETAIL_PATTERN = re.compile(r"^/photos/(?P<photoId>[^/]+)$")
 PHOTO_PRIMARY_PATTERN = re.compile(r"^/photos/(?P<photoId>[^/]+)/primary$")
 
 PHOTOS_TABLE_NAME = os.environ.get("PHOTOS_TABLE_NAME", "")
@@ -58,12 +58,14 @@ def handler(event, context):
             return handle_set_primary(user_id, primary_match.group("photoId"))
         elif detail_match and method == "GET":
             operation = "listPhotos"
-            return handle_list(detail_match.group("identifier"))
+            # API Gateway path vars under /photos must share the same name.
+            # For GET /photos/{photoId}, this segment still carries the user id for listing.
+            return handle_list(detail_match.group("photoId"))
         elif detail_match and method == "DELETE":
             operation = "deletePhoto"
             if not user_id:
                 return _response(401, {"code": "UNAUTHORIZED", "message": "Authentication required."})
-            return handle_delete(user_id, detail_match.group("identifier"))
+            return handle_delete(user_id, detail_match.group("photoId"))
         else:
             return _response(404, {"code": "NOT_FOUND", "message": f"No route matches {method} {path}."})
     except ClientError:
