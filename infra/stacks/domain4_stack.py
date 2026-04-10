@@ -1,11 +1,13 @@
 import aws_cdk as cdk
 from constructs import Construct
 from aws_cdk import (
+    aws_events as events,
     aws_iam as iam,
     aws_ec2 as ec2,
     aws_elasticache as elasticache,
-    aws_apigateway as apigateway
+    aws_apigateway as apigateway,
 )
+
 
 from stacks.shared_stack import SharedStack
 from kismet_constructs.kismet_service import KismetService
@@ -19,10 +21,16 @@ class Domain4Stack(cdk.Stack):
     def __init__(self, scope: Construct, construct_id: str, *, shared: SharedStack, **kwargs):
         super().__init__(scope, construct_id, **kwargs)
 
+        event_bus = events.EventBus.from_event_bus_name(
+            self,
+            "ImportedEventBus",
+            "kismet-events",
+        )
+
         text_moderation_table = "kismet-text-moderation-dev"
         image_moderation_table = "kismet-image-moderation-dev"
         photos_table_name = "kismet-photos-dev"
-        
+
         imported_api = apigateway.RestApi.from_rest_api_attributes(
             self,
             "ImportedSharedApiForModeration",
@@ -69,7 +77,7 @@ class Domain4Stack(cdk.Stack):
             ],
             api=imported_api,
             authorizer=shared.authorizer,
-            event_bus=shared.event_bus,
+            event_bus=event_bus,
         )
 
         # ── Image Moderation (Yue) ──────────────────────────────────────────────
@@ -127,7 +135,7 @@ class Domain4Stack(cdk.Stack):
             ],
             api=imported_api,
             authorizer=shared.authorizer,
-            event_bus=shared.event_bus,
+            event_bus=event_bus,
         )
 
         # ── Report Service (Amber) ─────────────────────────────────────────────
@@ -172,7 +180,7 @@ class Domain4Stack(cdk.Stack):
             ],
             api=imported_api,
             authorizer=shared.authorizer,
-            event_bus=shared.event_bus,
+            event_bus=event_bus,
         )
 
         # ── Rate Limiter Service (Amber) ───────────────────────────────────────
@@ -242,7 +250,7 @@ class Domain4Stack(cdk.Stack):
             publish_events=False,
             api=imported_api,
             authorizer=shared.authorizer,
-            event_bus=shared.event_bus,
+            event_bus=event_bus,
             vpc=vpc,
             security_groups=[lambda_sg],
             environment={
