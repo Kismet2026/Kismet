@@ -367,8 +367,7 @@ class Domain2Stack(Stack):
             authorizer=shared.authorizer,
             event_bus=shared.event_bus,
             routes=[
-                {'method': 'POST', 'path': '/bazi/compatibility', 'auth': True},
-                {'method': 'GET', 'path': '/bazi/profile/{userId}', 'auth': True},
+                {'method': 'POST', 'path': '/bazi/top-matches', 'auth': True},
             ],
             table=None,  # 无状态，或可选缓存表
             consume_events=[],

@@ -1,0 +1,3 @@
+# Runtime dependencies intentionally left empty for the Week 1 scaffold.
+# boto3 is available in the Lambda runtime and service integrations are not
+# implemented yet.

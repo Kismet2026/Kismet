@@ -1,10 +1,26 @@
 import json
+import logging
+import os
 import re
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Tuple
 
+import boto3
+from botocore.exceptions import ClientError
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 
 SERVICE_NAME = "profile-service"
 PROFILE_DETAIL_PATTERN = re.compile(r"^/profiles/(?P<userId>[^/]+)$")
+
+PROFILES_TABLE_NAME = os.environ.get("PROFILES_TABLE_NAME", "")
+EVENT_BUS_NAME = os.environ.get("EVENT_BUS_NAME", "")
+
+dynamodb = boto3.resource("dynamodb")
+events = boto3.client("events")
+
+UPDATABLE_FIELDS = frozenset({"name", "bio", "gender", "interestedIn", "birthDate", "birthTime", "location", "interests", "city", "avatarUrl"})
 
 
 def lambda_handler(event: Optional[Dict[str, Any]], context: Any) -> Dict[str, Any]:
@@ -14,13 +30,7 @@ def lambda_handler(event: Optional[Dict[str, Any]], context: Any) -> Dict[str, A
 
     operation, route_params = resolve_route(method, path)
     if operation is None:
-        return json_response(
-            404,
-            {
-                "code": "NOT_FOUND",
-                "message": f"No route matches {method} {path}.",
-            },
-        )
+        return json_response(404, {"code": "NOT_FOUND", "message": f"No route matches {method} {path}."})
 
     if method in {"POST", "PUT"}:
         payload, error = parse_json_body(event)
@@ -29,20 +39,151 @@ def lambda_handler(event: Optional[Dict[str, Any]], context: Any) -> Dict[str, A
     else:
         payload = None
 
-    request_id = getattr(context, "aws_request_id", None)
-    return json_response(
-        501,
-        {
-            "code": "NOT_IMPLEMENTED",
-            "message": f"{operation} is scaffolded but not implemented yet.",
-            "service": SERVICE_NAME,
-            "operation": operation,
-            "path": path,
-            "pathParameters": route_params,
-            "requestId": request_id,
-            "receivedBody": payload,
-        },
+    user_id = _get_user_id(event)
+
+    try:
+        if operation == "createProfile":
+            if not user_id:
+                return json_response(401, {"code": "UNAUTHORIZED", "message": "Authentication required."})
+            return handle_create(user_id, payload or {})
+        if operation == "getProfile":
+            return handle_get(route_params["userId"])
+        if operation == "updateProfile":
+            if not user_id:
+                return json_response(401, {"code": "UNAUTHORIZED", "message": "Authentication required."})
+            return handle_update(user_id, route_params["userId"], payload or {})
+        if operation == "deleteProfile":
+            if not user_id:
+                return json_response(401, {"code": "UNAUTHORIZED", "message": "Authentication required."})
+            return handle_delete(user_id, route_params["userId"])
+    except ClientError:
+        logger.exception("AWS error in %s", operation)
+        return json_response(500, {"code": "INTERNAL_ERROR", "message": "An unexpected error occurred."})
+    except Exception:
+        logger.exception("Unexpected error in %s", operation)
+        return json_response(500, {"code": "INTERNAL_ERROR", "message": "An unexpected error occurred."})
+
+
+def handle_create(user_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
+    name = (body.get("name") or "").strip()
+    if not name:
+        return json_response(400, {"code": "VALIDATION_ERROR", "message": "name is required."})
+
+    table = dynamodb.Table(PROFILES_TABLE_NAME)
+    existing = table.get_item(Key={"PK": f"USER#{user_id}", "SK": "PROFILE"})
+    if existing.get("Item"):
+        return json_response(409, {"code": "CONFLICT", "message": "Profile already exists."})
+
+    now = datetime.now(timezone.utc).isoformat()
+    item: Dict[str, Any] = {
+        "PK": f"USER#{user_id}",
+        "SK": "PROFILE",
+        "userId": user_id,
+        "name": name,
+        "createdAt": now,
+        "updatedAt": now,
+    }
+    for field in UPDATABLE_FIELDS - {"name"}:
+        if body.get(field) is not None:
+            item[field] = body[field]
+
+    table.put_item(Item=item)
+
+    events.put_events(Entries=[{
+        "Source": "kismet.profile-service",
+        "DetailType": "profile.completed",
+        "Detail": json.dumps(_build_event_detail(item)),
+        "EventBusName": EVENT_BUS_NAME,
+    }])
+
+    return json_response(201, {"userId": user_id, "name": name, "createdAt": now})
+
+
+def handle_get(user_id: str) -> Dict[str, Any]:
+    table = dynamodb.Table(PROFILES_TABLE_NAME)
+    result = table.get_item(Key={"PK": f"USER#{user_id}", "SK": "PROFILE"})
+    item = result.get("Item")
+
+    if not item:
+        return json_response(404, {"code": "NOT_FOUND", "message": "Profile not found."})
+
+    profile = {k: v for k, v in item.items() if k not in ("PK", "SK")}
+    return json_response(200, profile)
+
+
+def handle_update(caller_id: str, user_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
+    if caller_id != user_id:
+        return json_response(403, {"code": "FORBIDDEN", "message": "You can only update your own profile."})
+
+    table = dynamodb.Table(PROFILES_TABLE_NAME)
+    if not table.get_item(Key={"PK": f"USER#{user_id}", "SK": "PROFILE"}).get("Item"):
+        return json_response(404, {"code": "NOT_FOUND", "message": "Profile not found."})
+
+    updates = {k: v for k, v in body.items() if k in UPDATABLE_FIELDS}
+    if not updates:
+        return json_response(400, {"code": "VALIDATION_ERROR", "message": "No valid fields to update."})
+
+    now = datetime.now(timezone.utc).isoformat()
+    updates["updatedAt"] = now
+
+    set_parts = []
+    expr_names: Dict[str, str] = {}
+    expr_values: Dict[str, Any] = {}
+    for i, (key, value) in enumerate(updates.items()):
+        name_ph = f"#f{i}"
+        val_ph = f":v{i}"
+        expr_names[name_ph] = key
+        expr_values[val_ph] = value
+        set_parts.append(f"{name_ph} = {val_ph}")
+
+    table.update_item(
+        Key={"PK": f"USER#{user_id}", "SK": "PROFILE"},
+        UpdateExpression=f"SET {', '.join(set_parts)}",
+        ExpressionAttributeNames=expr_names,
+        ExpressionAttributeValues=expr_values,
     )
+
+    # Publish profile.updated event with full current profile
+    updated_item = table.get_item(Key={"PK": f"USER#{user_id}", "SK": "PROFILE"}).get("Item", {})
+    events.put_events(Entries=[{
+        "Source": "kismet.profile-service",
+        "DetailType": "profile.updated",
+        "Detail": json.dumps(_build_event_detail(updated_item)),
+        "EventBusName": EVENT_BUS_NAME,
+    }])
+
+    return json_response(200, {"userId": user_id, **updates})
+
+
+def handle_delete(caller_id: str, user_id: str) -> Dict[str, Any]:
+    if caller_id != user_id:
+        return json_response(403, {"code": "FORBIDDEN", "message": "You can only delete your own profile."})
+
+    table = dynamodb.Table(PROFILES_TABLE_NAME)
+    if not table.get_item(Key={"PK": f"USER#{user_id}", "SK": "PROFILE"}).get("Item"):
+        return json_response(404, {"code": "NOT_FOUND", "message": "Profile not found."})
+
+    table.delete_item(Key={"PK": f"USER#{user_id}", "SK": "PROFILE"})
+    return json_response(200, {"message": "Profile deleted successfully"})
+
+
+def _build_event_detail(item: Dict[str, Any]) -> Dict[str, Any]:
+    """Build event payload with all fields D2 discovery-service needs."""
+    return {
+        "userId": item.get("userId", ""),
+        "name": item.get("name", ""),
+        "birthDate": item.get("birthDate", ""),
+        "birthTime": item.get("birthTime", ""),
+        "gender": item.get("gender", ""),
+        "preferred_gender": item.get("interestedIn", ""),
+        "location_coordinates": item.get("location", []),
+        "city": item.get("city", ""),
+        "avatarUrl": item.get("avatarUrl", ""),
+        "bio": item.get("bio", ""),
+        "interests": item.get("interests", []),
+        "createdAt": item.get("createdAt", ""),
+        "updatedAt": item.get("updatedAt", ""),
+    }
 
 
 def resolve_route(method: str, path: str) -> Tuple[Optional[str], Dict[str, str]]:
@@ -62,6 +203,11 @@ def resolve_route(method: str, path: str) -> Tuple[Optional[str], Dict[str, str]
         return "deleteProfile", {"userId": user_id}
 
     return None, {}
+
+
+def _get_user_id(event: Dict[str, Any]) -> Optional[str]:
+    claims = event.get("requestContext", {}).get("authorizer", {}).get("claims", {})
+    return claims.get("sub") or claims.get("cognito:username")
 
 
 def get_http_method(event: Dict[str, Any]) -> str:
@@ -85,14 +231,11 @@ def get_request_path(event: Dict[str, Any]) -> str:
 def normalize_path(path: Any) -> str:
     if not path:
         return "/"
-
     normalized = str(path).strip()
     if not normalized.startswith("/"):
         normalized = f"/{normalized}"
-
     if normalized != "/" and normalized.endswith("/"):
         normalized = normalized.rstrip("/")
-
     return normalized
 
 
@@ -100,25 +243,25 @@ def parse_json_body(event: Dict[str, Any]):
     body = event.get("body")
     if body in (None, ""):
         return None, None
-
     if isinstance(body, dict):
         return body, None
-
     try:
         return json.loads(body), None
     except json.JSONDecodeError:
-        return None, json_response(
-            400,
-            {
-                "code": "VALIDATION_ERROR",
-                "message": "Request body must be valid JSON.",
-            },
-        )
+        return None, json_response(400, {"code": "VALIDATION_ERROR", "message": "Request body must be valid JSON."})
+
+
+CORS_HEADERS = {
+    "Content-Type": "application/json",
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Headers": "Content-Type,Authorization",
+    "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS",
+}
 
 
 def json_response(status_code: int, payload: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "statusCode": status_code,
-        "headers": {"Content-Type": "application/json"},
+        "headers": CORS_HEADERS,
         "body": json.dumps(payload),
     }
