@@ -192,8 +192,9 @@ Routes to Message Service for persistence, then broadcasts to other participant'
 | `userId` | String | — |
 | `matchId` | String | — |
 | `connectedAt` | String (ISO 8601) | — |
+| `ttl` | Number | — (TTL attribute, auto-expires after 24 hours) |
 
-**GSI:** `match-index` — query all connections for a given matchId
+**GSI:** `matchId-index` — query all connections for a given matchId
 
 ---
 
