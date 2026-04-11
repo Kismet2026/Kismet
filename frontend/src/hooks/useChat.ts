@@ -55,6 +55,9 @@ export function useChat(matchId: string) {
       setMessages((prev) => [...prev, optimistic]);
 
       try {
+        // Content moderation (fire and forget)
+        api.post("/moderate/text", { content, context: "chat" }).catch(() => {});
+
         const saved = await api.post<Message>("/messages", {
           matchId,
           content,

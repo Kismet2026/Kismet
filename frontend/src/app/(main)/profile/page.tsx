@@ -1,13 +1,67 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useProfile } from "@/hooks/useProfile";
 import { usePhotos } from "@/hooks/usePhotos";
 import { useAuth } from "@/context/AuthContext";
+import { api } from "@/lib/api";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { Button } from "@/components/ui/button";
-import { PencilSimple, SignOut, MapPin, Calendar, Heart } from "@phosphor-icons/react";
+import { PencilSimple, SignOut, MapPin, Calendar, Heart, EnvelopeSimple } from "@phosphor-icons/react";
 import { calculateAge } from "@/lib/utils";
+
+function EmailPreferences() {
+  const [matchEmails, setMatchEmails] = useState(true);
+  const [messageEmails, setMessageEmails] = useState(true);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    api.get<{ matchNotifications?: boolean; messageNotifications?: boolean }>("/email/preferences")
+      .then((prefs) => {
+        setMatchEmails(prefs.matchNotifications ?? true);
+        setMessageEmails(prefs.messageNotifications ?? true);
+        setLoaded(true);
+      })
+      .catch(() => setLoaded(true));
+  }, []);
+
+  async function toggle(key: "matchNotifications" | "messageNotifications", value: boolean) {
+    if (key === "matchNotifications") setMatchEmails(value);
+    else setMessageEmails(value);
+    try {
+      await api.put("/email/preferences", { [key]: value });
+    } catch { /* silently fail */ }
+  }
+
+  if (!loaded) return null;
+
+  return (
+    <div className="bg-card rounded-xl p-4 space-y-3 mt-3">
+      <p className="text-xs text-muted-foreground flex items-center gap-1">
+        <EnvelopeSimple size={14} /> Email notifications
+      </p>
+      <label className="flex items-center justify-between text-sm cursor-pointer">
+        <span className="text-foreground">New matches</span>
+        <input
+          type="checkbox"
+          checked={matchEmails}
+          onChange={(e) => toggle("matchNotifications", e.target.checked)}
+          className="w-4 h-4 accent-primary"
+        />
+      </label>
+      <label className="flex items-center justify-between text-sm cursor-pointer">
+        <span className="text-foreground">New messages</span>
+        <input
+          type="checkbox"
+          checked={messageEmails}
+          onChange={(e) => toggle("messageNotifications", e.target.checked)}
+          className="w-4 h-4 accent-primary"
+        />
+      </label>
+    </div>
+  );
+}
 
 export default function ProfilePage() {
   const router = useRouter();
@@ -131,6 +185,9 @@ export default function ProfilePage() {
           </div>
         )}
       </div>
+
+      {/* Email preferences */}
+      <EmailPreferences />
 
       {/* Logout */}
       <button
