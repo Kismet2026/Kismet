@@ -22,7 +22,7 @@ export default function ChatPage({
       {/* Header */}
       <div className="flex items-center gap-3 px-4 py-3 border-b border-border/50 bg-card/50 backdrop-blur-sm">
         <button
-          onClick={() => router.back()}
+          onClick={() => router.push("/matches")}
           className="text-muted-foreground hover:text-foreground transition-colors"
         >
           <ArrowLeft size={24} />
