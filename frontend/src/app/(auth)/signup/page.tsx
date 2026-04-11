@@ -111,7 +111,7 @@ export default function SignupPage() {
               className="text-foreground"
             />
             <p className="text-xs text-muted-foreground">
-              Used for BaZi compatibility — only year, month, day needed
+              Used for BaZi compatibility
             </p>
           </div>
         </CardContent>
