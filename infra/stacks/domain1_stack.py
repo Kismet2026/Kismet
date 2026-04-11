@@ -106,6 +106,7 @@ class Domain1Stack(cdk.Stack):
             authorizer=shared.authorizer,
             event_bus=event_bus,
         )
+
         # ── Photo Service (KS) ───────────────────────────────────────────────
         # Upload (presigned URL), list, delete, set primary photo
         photo_svc = KismetService(
