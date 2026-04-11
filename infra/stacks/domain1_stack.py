@@ -130,7 +130,7 @@ class Domain1Stack(cdk.Stack):
             environment={
                 "PHOTOS_TABLE_NAME": "kismet-photos",
                 "PHOTOS_BUCKET_NAME": shared.photos_bucket.bucket_name,
-                "PHOTOS_CDN_BASE_URL": "",  # TODO: add CloudFront URL when available
+                "PHOTOS_CDN_BASE_URL": f"https://{shared.photos_bucket.bucket_name}.s3.{self.region}.amazonaws.com",  # TODO: add CloudFront URL when available
             },
             extra_policies=[
                 # S3 for presigned URL generation and object deletion
