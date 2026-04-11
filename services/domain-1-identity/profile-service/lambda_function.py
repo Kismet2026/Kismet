@@ -213,12 +213,19 @@ def handle_user_banned(event: Dict[str, Any]) -> Dict[str, Any]:
         return {"statusCode": 400, "body": "Missing userId"}
 
     # 1. 标记 profile 为 banned
-    dynamodb.Table(PROFILES_TABLE_NAME).update_item(
-        Key={"PK": f"USER#{user_id}", "SK": "PROFILE"},
-        UpdateExpression="SET #status = :banned",
-        ExpressionAttributeNames={"#status": "status"},
-        ExpressionAttributeValues={":banned": "banned"},
-    )
+    try:
+        dynamodb.Table(PROFILES_TABLE_NAME).update_item(
+            Key={"PK": f"USER#{user_id}", "SK": "PROFILE"},
+            UpdateExpression="SET #status = :banned",
+            ConditionExpression="attribute_exists(PK)",
+            ExpressionAttributeNames={"#status": "status"},
+            ExpressionAttributeValues={":banned": "banned"},
+        )
+    except ClientError as exc:
+        if exc.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+            logger.info("No profile found to ban for user: %s", user_id)
+        else:
+            raise
 
     # 2. 从 discovery 池里删掉这个用户
     dynamodb.Table(DISCOVERY_TABLE_NAME).delete_item(
