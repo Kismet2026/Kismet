@@ -35,7 +35,7 @@ export function useProfile(userId?: string) {
   }, [fetchProfile]);
 
   const createProfile = useCallback(
-    async (data: Omit<UserProfile, "userId" | "createdAt" | "updatedAt" | "avatarUrl">) => {
+    async (data: Partial<Omit<UserProfile, "userId" | "createdAt" | "updatedAt" | "avatarUrl">>) => {
       const result = await api.post<UserProfile>("/profiles", data);
       setProfile(result);
       return result;

@@ -10,8 +10,6 @@ interface ProfileFormData {
   name: string;
   gender: "male" | "female" | "non-binary";
   interestedIn: "male" | "female" | "everyone";
-  birthDate: string;
-  birthTime?: string;
   bio: string;
   interests: string[];
   location?: { latitude: number; longitude: number };
@@ -45,7 +43,6 @@ export function ProfileForm({ initialData, onSubmit, submitLabel = "Continue" }:
   const [name, setName] = useState(initialData?.name ?? "");
   const [gender, setGender] = useState<ProfileFormData["gender"]>(initialData?.gender ?? "male");
   const [interestedIn, setInterestedIn] = useState<ProfileFormData["interestedIn"]>(initialData?.interestedIn ?? "everyone");
-  const [birthDate, setBirthDate] = useState(initialData?.birthDate ?? "");
   const [bio, setBio] = useState(initialData?.bio ?? "");
   const [interests, setInterests] = useState<string[]>(initialData?.interests ?? []);
   const [location, setLocation] = useState(initialData?.location ?? undefined);
@@ -80,14 +77,14 @@ export function ProfileForm({ initialData, onSubmit, submitLabel = "Continue" }:
     e.preventDefault();
     setError("");
 
-    if (!name.trim() || !birthDate) {
-      setError("Name and birth date are required.");
+    if (!name.trim()) {
+      setError("Name is required.");
       return;
     }
 
     setLoading(true);
     try {
-      await onSubmit({ name: name.trim(), gender, interestedIn, birthDate, bio: bio.trim(), interests, location });
+      await onSubmit({ name: name.trim(), gender, interestedIn, bio: bio.trim(), interests, location });
     } catch (err: unknown) {
       const message = err && typeof err === "object" && "message" in err
         ? (err as { message: string }).message
@@ -115,18 +112,6 @@ export function ProfileForm({ initialData, onSubmit, submitLabel = "Continue" }:
           onChange={(e) => setName(e.target.value)}
           required
           maxLength={50}
-        />
-      </div>
-
-      <div className="space-y-2">
-        <Label htmlFor="birthDate">Birth Date</Label>
-        <Input
-          id="birthDate"
-          type="date"
-          value={birthDate}
-          onChange={(e) => setBirthDate(e.target.value)}
-          required
-          className="text-foreground"
         />
       </div>
 
