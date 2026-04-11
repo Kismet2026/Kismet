@@ -61,7 +61,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const body: Record<string, string> = { email, password, birthDate };
       if (birthTime) body.birthTime = birthTime;
       await api.post("/auth/signup", body);
-      // Don't auto-login — user must verify email first
+      // Stash birthDate for profile creation during onboarding
+      localStorage.setItem("kismet_birth_date", birthDate);
     },
     []
   );

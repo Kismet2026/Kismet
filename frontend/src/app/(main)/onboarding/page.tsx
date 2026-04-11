@@ -22,7 +22,8 @@ export default function OnboardingPage() {
       </div>
       <ProfileForm
         onSubmit={async (data) => {
-          await createProfile(data);
+          const birthDate = localStorage.getItem("kismet_birth_date") ?? "";
+          await createProfile({ ...data, birthDate });
           router.push("/onboarding/photos");
         }}
         submitLabel="Next: Add Photos"
