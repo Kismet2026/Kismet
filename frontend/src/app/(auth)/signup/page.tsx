@@ -4,7 +4,6 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/context/AuthContext";
-import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -40,10 +39,8 @@ export default function SignupPage() {
     setLoading(true);
     try {
       await signup(email, password, birthDate);
-      // Send verification code
-      await api.post("/verify/send", { email });
-      // Redirect to verify page with email in query
-      router.push(`/verify?email=${encodeURIComponent(email)}`);
+      // Cognito auto-verifies email — skip verify page, go straight to login
+      router.push("/login");
     } catch (err: unknown) {
       const message =
         err && typeof err === "object" && "message" in err
@@ -76,7 +73,7 @@ export default function SignupPage() {
             <Input
               id="email"
               type="email"
-              placeholder="you@university.edu"
+              placeholder="you@example.com"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
