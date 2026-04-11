@@ -45,9 +45,7 @@ export function usePhotos(userId?: string) {
         );
         // 2. Upload directly to S3
         await uploadToS3(uploadUrl, file);
-        // 3. Image moderation (fire and forget)
-        api.post("/moderate/image", { photoId }).catch(() => {});
-        // 4. Refresh photos list
+        // 3. Refresh photos list
         await fetchPhotos();
         return photoId;
       } finally {
