@@ -1,12 +1,24 @@
 import type { Metadata } from "next";
-import { Libre_Baskerville, Geist_Mono } from "next/font/google";
+import { Libre_Baskerville, DM_Sans, Dancing_Script, Geist_Mono } from "next/font/google";
 import { AuthProvider } from "@/context/AuthContext";
 import "./globals.css";
 
 const libreBaskerville = Libre_Baskerville({
-  variable: "--font-sans",
+  variable: "--font-serif",
   subsets: ["latin"],
   weight: ["400", "700"],
+});
+
+const dmSans = DM_Sans({
+  variable: "--font-sans",
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
+});
+
+const dancingScript = Dancing_Script({
+  variable: "--font-script",
+  subsets: ["latin"],
+  weight: ["700"],
 });
 
 const geistMono = Geist_Mono({
@@ -27,9 +39,9 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${libreBaskerville.variable} ${geistMono.variable} dark h-full antialiased`}
+      className={`${dmSans.variable} ${libreBaskerville.variable} ${dancingScript.variable} ${geistMono.variable} dark h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col bg-background text-foreground">
+      <body className="min-h-dvh bg-background text-foreground">
         <AuthProvider>{children}</AuthProvider>
       </body>
     </html>
