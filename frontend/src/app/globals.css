@@ -1,0 +1,136 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-geist-mono);
+  --font-heading: var(--font-sans);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+/*
+ * Kismet color palette (dark-only)
+ * #331D2C - deep plum (background)
+ * #3F2E3E - warm purple-brown (card/surface)
+ * #A78295 - dusty mauve (muted)
+ * #EFE1D1 - cream (foreground)
+ * #D4A056 - amber gold (accent/CTA)
+ */
+
+:root {
+  /* We only ship dark — set dark values as root */
+  --background: #331D2C;
+  --foreground: #EFE1D1;
+  --card: #3F2E3E;
+  --card-foreground: #EFE1D1;
+  --popover: #3F2E3E;
+  --popover-foreground: #EFE1D1;
+  --primary: #D4A056;
+  --primary-foreground: #331D2C;
+  --secondary: #3F2E3E;
+  --secondary-foreground: #EFE1D1;
+  --muted: #3F2E3E;
+  --muted-foreground: #A78295;
+  --accent: #D4A056;
+  --accent-foreground: #331D2C;
+  --destructive: #e54d4d;
+  --border: rgba(167, 130, 149, 0.2);
+  --input: rgba(167, 130, 149, 0.15);
+  --ring: #D4A056;
+  --chart-1: #D4A056;
+  --chart-2: #A78295;
+  --chart-3: #EFE1D1;
+  --chart-4: #3F2E3E;
+  --chart-5: #331D2C;
+  --radius: 0.75rem;
+  --sidebar: #2a1624;
+  --sidebar-foreground: #EFE1D1;
+  --sidebar-primary: #D4A056;
+  --sidebar-primary-foreground: #331D2C;
+  --sidebar-accent: #3F2E3E;
+  --sidebar-accent-foreground: #EFE1D1;
+  --sidebar-border: rgba(167, 130, 149, 0.2);
+  --sidebar-ring: #D4A056;
+}
+
+/* Keep .dark class for shadcn compat — same values */
+.dark {
+  --background: #331D2C;
+  --foreground: #EFE1D1;
+  --card: #3F2E3E;
+  --card-foreground: #EFE1D1;
+  --popover: #3F2E3E;
+  --popover-foreground: #EFE1D1;
+  --primary: #D4A056;
+  --primary-foreground: #331D2C;
+  --secondary: #3F2E3E;
+  --secondary-foreground: #EFE1D1;
+  --muted: #3F2E3E;
+  --muted-foreground: #A78295;
+  --accent: #D4A056;
+  --accent-foreground: #331D2C;
+  --destructive: #e54d4d;
+  --border: rgba(167, 130, 149, 0.2);
+  --input: rgba(167, 130, 149, 0.15);
+  --ring: #D4A056;
+  --sidebar: #2a1624;
+  --sidebar-foreground: #EFE1D1;
+  --sidebar-primary: #D4A056;
+  --sidebar-primary-foreground: #331D2C;
+  --sidebar-accent: #3F2E3E;
+  --sidebar-accent-foreground: #EFE1D1;
+  --sidebar-border: rgba(167, 130, 149, 0.2);
+  --sidebar-ring: #D4A056;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  html {
+    @apply font-sans;
+  }
+}
