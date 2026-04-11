@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { AuthGuard } from "@/components/layout/AuthGuard";
 import { BottomTabBar } from "@/components/layout/BottomTabBar";
 
-const HIDE_TAB_BAR = ["/onboarding"];
+const HIDE_TAB_BAR = ["/onboarding", "/chat"];
 
 export default function MainLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
