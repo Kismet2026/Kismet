@@ -94,56 +94,18 @@ class Domain1Stack(cdk.Stack):
             publish_events=True,
             environment={
                 "PROFILES_TABLE_NAME": "kismet-profiles",
-            },
-            api=imported_api,
-            authorizer=shared.authorizer,
-            event_bus=event_bus,
-        )
-
-        # ── Email Verification Service (Quinn/KS) ────────────────────────────
-        # Send verification code via SES, confirm code, update Cognito
-        email_verify_svc = KismetService(
-            self,
-            "EmailVerificationService",
-            service_name="email-verification",
-            code_path="../services/domain-1-identity/email-verification-service",
-            tables=[
-                {
-                    "table_name": "kismet-verifications",
-                    "pk": {"name": "PK", "type": "S"},
-                    "sk": {"name": "SK", "type": "S"},
-                }
-            ],
-            routes=[
-                {"method": "POST", "path": "/verify/send", "auth": True},
-                {"method": "POST", "path": "/verify/confirm", "auth": True},
-                {"method": "GET", "path": "/verify/status", "auth": True},
-            ],
-            environment={
-                "COGNITO_USER_POOL_ID": shared.user_pool.user_pool_id,
-                "VERIFICATIONS_TABLE_NAME": "kismet-verifications",
-                "SES_SOURCE_EMAIL": "noreply@university.edu",  # TODO: update before deploy
+                "DISCOVERY_TABLE_NAME": "kismet-discovery",
             },
             extra_policies=[
-                # SES for sending verification emails
                 iam.PolicyStatement(
-                    actions=["ses:SendEmail", "ses:SendRawEmail"],
-                    resources=["*"],
-                ),
-                # Cognito for updating email_verified attribute
-                iam.PolicyStatement(
-                    actions=[
-                        "cognito-idp:AdminGetUser",
-                        "cognito-idp:AdminUpdateUserAttributes",
-                    ],
-                    resources=[shared.user_pool.user_pool_arn],
+                    actions=["dynamodb:DeleteItem", "dynamodb:UpdateItem"],
+                    resources=["arn:aws:dynamodb:*:*:table/kismet-discovery"],
                 ),
             ],
             api=imported_api,
             authorizer=shared.authorizer,
             event_bus=event_bus,
         )
-
         # ── Photo Service (KS) ───────────────────────────────────────────────
         # Upload (presigned URL), list, delete, set primary photo
         photo_svc = KismetService(

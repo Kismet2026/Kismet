@@ -15,6 +15,7 @@ SERVICE_NAME = "profile-service"
 PROFILE_DETAIL_PATTERN = re.compile(r"^/profiles/(?P<userId>[^/]+)$")
 
 PROFILES_TABLE_NAME = os.environ.get("PROFILES_TABLE_NAME", "")
+DISCOVERY_TABLE_NAME = os.environ.get("DISCOVERY_TABLE_NAME", "kismet-discovery")
 EVENT_BUS_NAME = os.environ.get("EVENT_BUS_NAME", "")
 
 dynamodb = boto3.resource("dynamodb")
@@ -27,6 +28,10 @@ VALID_INTERESTED_IN = {"male", "female", "non-binary", "everyone"}
 
 def handler(event, context):
     event = event or {}
+    if event.get("source") == "kismet.report-service":
+        if event.get("detail-type") == "user.banned":
+            return handle_user_banned(event)
+
     method = _get_method(event)
     path = _get_path(event)
     user_id = _get_user_id(event)
@@ -128,6 +133,9 @@ def handle_get(user_id: str) -> Dict[str, Any]:
 
     if not item:
         return _response(404, {"code": "NOT_FOUND", "message": "Profile not found."})
+    
+    if item.get("status") == "banned":
+        return _response(404, {"code": "NOT_FOUND", "message": "Profile not found."})
 
     profile = {k: v for k, v in item.items() if k not in ("PK", "SK")}
     return _response(200, profile)
@@ -193,6 +201,32 @@ def handle_delete(caller_id: str, user_id: str) -> Dict[str, Any]:
 
     table.delete_item(Key={"PK": f"USER#{user_id}", "SK": "PROFILE"})
     return _response(200, {"message": "Profile deleted successfully"})
+
+def handle_user_banned(event: Dict[str, Any]) -> Dict[str, Any]:
+    detail = event.get("detail", {})
+    if isinstance(detail, str):
+        detail = json.loads(detail)
+
+    user_id = detail.get("userId")
+    if not user_id:
+        logger.warning("user.banned event missing userId")
+        return {"statusCode": 400, "body": "Missing userId"}
+
+    # 1. 标记 profile 为 banned
+    dynamodb.Table(PROFILES_TABLE_NAME).update_item(
+        Key={"PK": f"USER#{user_id}", "SK": "PROFILE"},
+        UpdateExpression="SET #status = :banned",
+        ExpressionAttributeNames={"#status": "status"},
+        ExpressionAttributeValues={":banned": "banned"},
+    )
+
+    # 2. 从 discovery 池里删掉这个用户
+    dynamodb.Table(DISCOVERY_TABLE_NAME).delete_item(
+        Key={"PK": f"PROFILE#{user_id}", "SK": "META"}
+    )
+
+    logger.info("User banned and removed from discovery: %s", user_id)
+    return {"statusCode": 200, "body": "User banned"}
 
 
 def _build_event_detail(item: Dict[str, Any]) -> Dict[str, Any]:
