@@ -98,8 +98,14 @@ class Domain1Stack(cdk.Stack):
             },
             extra_policies=[
                 iam.PolicyStatement(
-                    actions=["dynamodb:DeleteItem", "dynamodb:UpdateItem"],
-                    resources=["arn:aws:dynamodb:*:*:table/kismet-discovery"],
+                    actions=["dynamodb:DeleteItem"],
+                    resources=[
+                        self.format_arn(
+                            service="dynamodb",
+                            resource="table",
+                            resource_name="kismet-discovery",
+                        )
+                    ],
                 ),
             ],
             api=imported_api,
