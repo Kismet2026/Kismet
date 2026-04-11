@@ -169,6 +169,10 @@ class Domain2Stack(cdk.Stack):
             routes=[
                 {"method": "POST", "path": "/bazi/top-matches", "auth": True},
             ],
+            environment={
+                "BAZI_API_URL": "https://match-date-nu.vercel.app/api/match",
+                "BAZI_API_KEY": "ABC",
+            },
             api=imported_api,
             authorizer=shared.authorizer,
             event_bus=event_bus,
