@@ -64,9 +64,6 @@ async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
       res = await makeRequest(getAccessToken());
     } else {
       clearTokens();
-      if (typeof window !== "undefined") {
-        window.location.href = "/login";
-      }
       throw new Error("Session expired");
     }
   }
