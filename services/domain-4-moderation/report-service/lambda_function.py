@@ -195,6 +195,19 @@ def resolve_report(event):
             ReturnValues="ALL_NEW"
         )
         item = response.get('Attributes', {})
+        
+        if resolution == "ban":
+            events.put_events(Entries=[{
+                "Source": "kismet.report-service",
+                "DetailType": "user.banned",
+                "Detail": json.dumps({
+                    "userId": item.get("reportedUserId"),
+                    "reportId": report_id,
+                    "timestamp": now
+                }),
+                "EventBusName": "kismet-events"
+            }])
+
         return {
             "statusCode": 200,
             "body": json.dumps({
