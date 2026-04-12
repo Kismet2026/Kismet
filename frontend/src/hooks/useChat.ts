@@ -27,7 +27,7 @@ export function useChat(matchId: string) {
   const fetchHistory = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await api.get<PaginatedResponse<Message>>(`/messages/${matchId}?limit=50`);
+      const data = await api.get<PaginatedResponse<Message>>(`/messages/match/${matchId}?limit=50`);
       setMessages(data.items.sort((a, b) => a.timestamp.localeCompare(b.timestamp)));
       if (data.items.length > 0) {
         lastTimestampRef.current = data.items[data.items.length - 1].timestamp;
@@ -96,7 +96,7 @@ export function useChat(matchId: string) {
       if (!lastTimestampRef.current) return;
       try {
         const data = await api.get<PaginatedResponse<Message>>(
-          `/messages/${matchId}/since/${encodeURIComponent(lastTimestampRef.current)}`
+          `/messages/match/${matchId}/since/${encodeURIComponent(lastTimestampRef.current)}`
         );
         if (data.items.length > 0) {
           const newMsgs = data.items.filter((m) => m.senderId !== myId);
