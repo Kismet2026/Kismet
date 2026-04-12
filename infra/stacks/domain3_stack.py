@@ -70,7 +70,7 @@ class Domain3Stack(cdk.Stack):
             routes=[
                 {"method": "POST", "path": "/messages", "auth": True},
                 {"method": "POST", "path": "/messages/read", "auth": True},
-                {"method": "GET", "path": "/messages/{matchId}", "auth": True},
+                {"method": "GET", "path": "/messages/match/{matchId}", "auth": True},
                 {"method": "DELETE", "path": "/messages/{messageId}", "auth": True},
             ],
             consume_events=[],   # no incoming events; other services call via HTTP
@@ -232,7 +232,7 @@ class Domain3Stack(cdk.Stack):
             tables=[],  # created manually above to support TTL
             routes=[
                 {"method": "POST", "path": "/presence/heartbeat", "auth": True},
-                {"method": "GET",  "path": "/presence/{userId}",          "auth": True},
+                {"method": "GET",  "path": "/presence/user/{userId}",     "auth": True},
                 {"method": "POST", "path": "/presence/{matchId}/typing",  "auth": True},
                 {"method": "GET",  "path": "/presence/{matchId}/typing",  "auth": True},
             ],
