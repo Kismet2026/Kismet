@@ -1,7 +1,7 @@
 import json
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from lambda_function import handler
 
@@ -141,6 +141,24 @@ class GetProfileTests(unittest.TestCase):
             mock_dynamodb.Table.return_value.get_item.return_value = {}
 
             response = handler(make_event("/profiles/nonexistent", "GET"), self.context)
+            payload = json.loads(response["body"])
+
+            self.assertEqual(response["statusCode"], 404)
+            self.assertEqual(payload["code"], "NOT_FOUND")
+
+    def test_get_banned_profile_returns_404(self):
+        with patch.dict("os.environ", ENV), \
+             patch("lambda_function.dynamodb") as mock_dynamodb:
+
+            mock_dynamodb.Table.return_value.get_item.return_value = {"Item": {
+                "PK": "USER#user-123",
+                "SK": "PROFILE",
+                "userId": "user-123",
+                "name": "Alice",
+                "status": "banned",
+            }}
+
+            response = handler(make_event("/profiles/user-123", "GET"), self.context)
             payload = json.loads(response["body"])
 
             self.assertEqual(response["statusCode"], 404)
@@ -336,6 +354,43 @@ class RoutingTests(unittest.TestCase):
 class EventBridgeRoutingTests(unittest.TestCase):
     def setUp(self):
         self.context = SimpleNamespace(aws_request_id="req-456")
+
+    def test_user_banned_event_updates_profile_and_removes_from_discovery(self):
+        profile_table = MagicMock()
+        discovery_table = MagicMock()
+
+        def get_table(name):
+            if name == "kismet-profiles-dev":
+                return profile_table
+            if name == "kismet-discovery-dev":
+                return discovery_table
+            raise AssertionError(f"Unexpected table name: {name}")
+
+        event = {
+            "source": "kismet.report-service",
+            "detail-type": "user.banned",
+            "detail": {"userId": "user-123"},
+        }
+
+        with patch("lambda_function.PROFILES_TABLE_NAME", "kismet-profiles-dev"), \
+             patch("lambda_function.DISCOVERY_TABLE_NAME", "kismet-discovery-dev"), \
+             patch("lambda_function.dynamodb") as mock_dynamodb:
+            mock_dynamodb.Table.side_effect = get_table
+
+            response = handler(event, self.context)
+
+        self.assertEqual(response["statusCode"], 200)
+        self.assertEqual(response["body"], "User banned")
+        profile_table.update_item.assert_called_once_with(
+            Key={"PK": "USER#user-123", "SK": "PROFILE"},
+            UpdateExpression="SET #status = :banned",
+            ConditionExpression="attribute_exists(PK)",
+            ExpressionAttributeNames={"#status": "status"},
+            ExpressionAttributeValues={":banned": "banned"},
+        )
+        discovery_table.delete_item.assert_called_once_with(
+            Key={"PK": "PROFILE#user-123", "SK": "META"}
+        )
 
     def test_user_banned_event_uses_shared_error_handling(self):
         event = {
