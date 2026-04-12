@@ -133,7 +133,6 @@ def handle_get(user_id: str) -> Dict[str, Any]:
 
     if not item:
         return _response(404, {"code": "NOT_FOUND", "message": "Profile not found."})
-    
     if item.get("status") == "banned":
         return _response(404, {"code": "NOT_FOUND", "message": "Profile not found."})
 
