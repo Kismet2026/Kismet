@@ -192,6 +192,7 @@ def handle_delete(caller_id: str, user_id: str) -> Dict[str, Any]:
         return _response(404, {"code": "NOT_FOUND", "message": "Profile not found."})
 
     table.delete_item(Key={"PK": f"USER#{user_id}", "SK": "PROFILE"})
+    dynamodb.Table(DISCOVERY_TABLE_NAME).delete_item(Key={"PK": f"PROFILE#{user_id}", "SK": "META"})
     return _response(200, {"message": "Profile deleted successfully"})
 
 

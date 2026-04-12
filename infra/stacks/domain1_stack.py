@@ -101,7 +101,7 @@ class Domain1Stack(cdk.Stack):
 =======
             extra_policies=[
                 iam.PolicyStatement(
-                    actions=["dynamodb:DeleteItem", "dynamodb:UpdateItem"],
+                    actions=["dynamodb:DeleteItem"],
                     resources=[
                         self.format_arn(
                             service="dynamodb",

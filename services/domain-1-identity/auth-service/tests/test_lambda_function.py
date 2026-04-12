@@ -177,6 +177,78 @@ class AuthServiceLogoutTests(unittest.TestCase):
             self.assertEqual(response["statusCode"], 400)
 
 
+class AuthServiceConfirmTests(unittest.TestCase):
+    def setUp(self):
+        self.context = SimpleNamespace(aws_request_id="req-123")
+
+    def test_confirm_success(self):
+        with patch.dict("os.environ", ENV), \
+             patch("lambda_function.COGNITO_APP_CLIENT_ID", ENV["COGNITO_APP_CLIENT_ID"]), \
+             patch("lambda_function.cognito") as mock_cognito:
+
+            mock_cognito.confirm_sign_up.return_value = {}
+
+            response = handler(make_event("/auth/confirm", "POST", body={
+                "email": "student@university.edu",
+                "code": "123456",
+            }), self.context)
+            payload = json.loads(response["body"])
+
+            self.assertEqual(response["statusCode"], 200)
+            self.assertEqual(payload["message"], "Email confirmed successfully")
+            mock_cognito.confirm_sign_up.assert_called_once_with(
+                ClientId=ENV["COGNITO_APP_CLIENT_ID"],
+                Username="student@university.edu",
+                ConfirmationCode="123456",
+            )
+
+    def test_confirm_missing_email_returns_validation_error(self):
+        with patch.dict("os.environ", ENV):
+            response = handler(make_event("/auth/confirm", "POST", body={"code": "123456"}), self.context)
+            payload = json.loads(response["body"])
+
+            self.assertEqual(response["statusCode"], 400)
+            self.assertEqual(payload["code"], "VALIDATION_ERROR")
+
+    def test_confirm_missing_code_returns_validation_error(self):
+        with patch.dict("os.environ", ENV):
+            response = handler(make_event("/auth/confirm", "POST", body={"email": "student@university.edu"}), self.context)
+            payload = json.loads(response["body"])
+
+            self.assertEqual(response["statusCode"], 400)
+            self.assertEqual(payload["code"], "VALIDATION_ERROR")
+
+    def test_confirm_wrong_code_returns_validation_error(self):
+        with patch.dict("os.environ", ENV), \
+             patch("lambda_function.cognito") as mock_cognito:
+
+            mock_cognito.confirm_sign_up.side_effect = _cognito_error("CodeMismatchException")
+
+            response = handler(make_event("/auth/confirm", "POST", body={
+                "email": "student@university.edu",
+                "code": "000000",
+            }), self.context)
+            payload = json.loads(response["body"])
+
+            self.assertEqual(response["statusCode"], 400)
+            self.assertEqual(payload["code"], "VALIDATION_ERROR")
+
+    def test_confirm_expired_code_returns_410(self):
+        with patch.dict("os.environ", ENV), \
+             patch("lambda_function.cognito") as mock_cognito:
+
+            mock_cognito.confirm_sign_up.side_effect = _cognito_error("ExpiredCodeException")
+
+            response = handler(make_event("/auth/confirm", "POST", body={
+                "email": "student@university.edu",
+                "code": "123456",
+            }), self.context)
+            payload = json.loads(response["body"])
+
+            self.assertEqual(response["statusCode"], 410)
+            self.assertEqual(payload["code"], "EXPIRED")
+
+
 class AuthServiceCorsTests(unittest.TestCase):
     def setUp(self):
         self.context = SimpleNamespace(aws_request_id="req-123")

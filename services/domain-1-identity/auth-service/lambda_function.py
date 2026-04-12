@@ -182,6 +182,8 @@ def _handle_cognito_error(exc: ClientError) -> Dict[str, Any]:
         "InvalidPasswordException": (400, "VALIDATION_ERROR", message),
         "InvalidParameterException": (400, "VALIDATION_ERROR", message),
         "TooManyRequestsException": (429, "RATE_LIMITED", "Too many requests. Please try again later."),
+        "CodeMismatchException": (400, "VALIDATION_ERROR", "Invalid confirmation code."),
+        "ExpiredCodeException": (410, "EXPIRED", "Confirmation code has expired. Please sign up again."),
     }
 
     if code in mapping:
