@@ -97,21 +97,6 @@ class Domain1Stack(cdk.Stack):
             environment={
                 "PROFILES_TABLE_NAME": "kismet-profiles",
             },
-<<<<<<< HEAD
-=======
-            extra_policies=[
-                iam.PolicyStatement(
-                    actions=["dynamodb:DeleteItem"],
-                    resources=[
-                        self.format_arn(
-                            service="dynamodb",
-                            resource="table",
-                            resource_name="kismet-discovery",
-                        )
-                    ],
-                ),
-            ],
->>>>>>> 6cf3df6 (feat: add POST /auth/confirm endpoint for Cognito email verification)
             api=imported_api,
             authorizer=shared.authorizer,
             event_bus=event_bus,
