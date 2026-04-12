@@ -91,7 +91,12 @@ class Domain1Stack(cdk.Stack):
                 {"method": "PUT", "path": "/profiles/{userId}", "auth": True},
                 {"method": "DELETE", "path": "/profiles/{userId}", "auth": True},
             ],
-            consume_events=["user.banned"],
+            consume_events=[
+                {
+                    "source": "kismet.report-service",
+                    "detail_type": "user.banned",
+                }
+            ],
             publish_events=True,
             environment={
                 "PROFILES_TABLE_NAME": "kismet-profiles",
