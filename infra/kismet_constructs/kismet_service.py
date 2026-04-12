@@ -150,6 +150,7 @@ class KismetService(Construct):
         # ── API Gateway routes ────────────────────────────────────────────────
         if api and routes:
             integration = apigateway.LambdaIntegration(self.function)
+            cors_added: set[str] = set()
             for route in routes:
                 path_parts = [p for p in route["path"].split("/") if p]
                 resource = _get_or_create_resource(api.root, path_parts)
@@ -160,6 +161,18 @@ class KismetService(Construct):
                         apigateway.AuthorizationType.COGNITO
                     )
                 resource.add_method(route["method"], integration, **method_options)
+                # Add CORS OPTIONS method (needed for cross-stack imported APIs)
+                resource_path = resource.path
+                if resource_path not in cors_added:
+                    try:
+                        resource.add_cors_preflight(
+                            allow_origins=["*"],
+                            allow_methods=apigateway.Cors.ALL_METHODS,
+                            allow_headers=["Content-Type", "Authorization"],
+                        )
+                    except Exception:
+                        pass  # OPTIONS already exists on this resource
+                    cors_added.add(resource_path)
 
         # ── EventBridge: publish permission ──────────────────────────────────
         if publish_events and event_bus:
