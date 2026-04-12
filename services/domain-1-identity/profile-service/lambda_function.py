@@ -212,7 +212,7 @@ def handle_user_banned(event: Dict[str, Any]) -> Dict[str, Any]:
         logger.warning("user.banned event missing userId")
         return {"statusCode": 400, "body": "Missing userId"}
 
-    # 1. 标记 profile 为 banned
+    # 1. Mark the profile as banned.
     try:
         dynamodb.Table(PROFILES_TABLE_NAME).update_item(
             Key={"PK": f"USER#{user_id}", "SK": "PROFILE"},
@@ -227,7 +227,7 @@ def handle_user_banned(event: Dict[str, Any]) -> Dict[str, Any]:
         else:
             raise
 
-    # 2. 从 discovery 池里删掉这个用户
+    # 2. Remove the user from the discovery pool.
     dynamodb.Table(DISCOVERY_TABLE_NAME).delete_item(
         Key={"PK": f"PROFILE#{user_id}", "SK": "META"}
     )
