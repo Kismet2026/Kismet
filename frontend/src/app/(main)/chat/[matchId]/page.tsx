@@ -3,8 +3,10 @@
 import { use, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useChat } from "@/hooks/useChat";
+import { useIcebreakers } from "@/hooks/useIcebreakers";
 import { ChatWindow } from "@/components/chat/ChatWindow";
 import { ChatInput } from "@/components/chat/ChatInput";
+import { IcebreakerSuggestions } from "@/components/chat/IcebreakerSuggestions";
 import { ReportDialog } from "@/components/chat/ReportDialog";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { ArrowLeft, DotsThreeVertical } from "@phosphor-icons/react";
@@ -17,10 +19,11 @@ export default function ChatPage({
   const { matchId } = use(params);
   const router = useRouter();
   const { messages, loading, sendMessage, myId } = useChat(matchId);
+  const { icebreakers } = useIcebreakers(matchId);
   const [showReport, setShowReport] = useState(false);
 
-  // Derive the other user's ID from messages
   const otherUserId = messages.find((m) => m.senderId !== myId)?.senderId ?? "";
+  const isEmptyConversation = messages.length === 0;
 
   return (
     <div className="flex flex-col h-dvh">
@@ -48,6 +51,11 @@ export default function ChatPage({
         <LoadingSpinner size={32} className="flex-1" />
       ) : (
         <ChatWindow messages={messages} myId={myId} />
+      )}
+
+      {/* Icebreaker suggestions for empty conversations */}
+      {!loading && isEmptyConversation && (
+        <IcebreakerSuggestions icebreakers={icebreakers} onSelect={sendMessage} />
       )}
 
       {/* Input */}
