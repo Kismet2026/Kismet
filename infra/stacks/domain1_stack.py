@@ -47,6 +47,8 @@ class Domain1Stack(cdk.Stack):
                 {"method": "POST", "path": "/auth/login", "auth": False},
                 {"method": "POST", "path": "/auth/refresh", "auth": False},
                 {"method": "POST", "path": "/auth/logout", "auth": False},
+                {"method": "POST", "path": "/auth/confirm", "auth": False},
+
             ],
             publish_events=True,
             environment={
@@ -62,6 +64,7 @@ class Domain1Stack(cdk.Stack):
                         "cognito-idp:InitiateAuth",
                         "cognito-idp:RevokeToken",
                         "cognito-idp:AdminGetUser",
+                        "cognito-idp:ConfirmSignUp",
                     ],
                     resources=[shared.user_pool.user_pool_arn],
                 ),
@@ -99,7 +102,7 @@ class Domain1Stack(cdk.Stack):
             },
             extra_policies=[
                 iam.PolicyStatement(
-                    actions=["dynamodb:DeleteItem"],
+                    actions=["dynamodb:DeleteItem", "dynamodb:UpdateItem"],
                     resources=[
                         self.format_arn(
                             service="dynamodb",
