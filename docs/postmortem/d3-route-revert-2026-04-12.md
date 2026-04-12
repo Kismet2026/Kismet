@@ -21,6 +21,10 @@ Neither the author nor the reviewer noticed because:
 - The diff for #89 didn't show the route paths as changed (they matched the old main)
 - No CI/CD ran `cdk synth` or `cdk deploy` to catch the regression
 
+Additionally, both PR #88 and #89 sat open with no review or action for an extended period. #89 was already showing merge conflicts on GitHub but was not addressed by the D3 team. During the frontend deployment push, I had to step in personally to rebase #89, resolve conflicts, and merge both PRs to unblock progress.
+
+**This highlights a process gap**: PRs with conflicts should be resolved promptly by their authors, not left for others to clean up under time pressure.
+
 ## Impact
 
 - `KismetDomain3` stack failed to deploy twice (entered `ROLLBACK_COMPLETE` state)
