@@ -28,10 +28,6 @@ VALID_INTERESTED_IN = {"male", "female", "non-binary", "everyone"}
 
 def handler(event, context):
     event = event or {}
-    if event.get("source") == "kismet.report-service":
-        if event.get("detail-type") == "user.banned":
-            return handle_user_banned(event)
-
     method = _get_method(event)
     path = _get_path(event)
     user_id = _get_user_id(event)
@@ -39,6 +35,10 @@ def handler(event, context):
     profile_match = PROFILE_DETAIL_PATTERN.match(path)
 
     try:
+        if event.get("source") == "kismet.report-service":
+            if event.get("detail-type") == "user.banned":
+                operation = "handleUserBanned"
+                return handle_user_banned(event)
         if method == "POST" and path == "/profiles":
             operation = "createProfile"
             payload, error = _parse_body(event)

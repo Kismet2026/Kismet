@@ -333,6 +333,25 @@ class RoutingTests(unittest.TestCase):
         self.assertEqual(payload["code"], "VALIDATION_ERROR")
 
 
+class EventBridgeRoutingTests(unittest.TestCase):
+    def setUp(self):
+        self.context = SimpleNamespace(aws_request_id="req-456")
+
+    def test_user_banned_event_uses_shared_error_handling(self):
+        event = {
+            "source": "kismet.report-service",
+            "detail-type": "user.banned",
+            "detail": {"userId": "user-123"},
+        }
+
+        with patch("lambda_function.handle_user_banned", side_effect=ValueError("boom")):
+            response = handler(event, self.context)
+            payload = json.loads(response["body"])
+
+        self.assertEqual(response["statusCode"], 500)
+        self.assertEqual(payload["code"], "INTERNAL_ERROR")
+
+
 def make_event(path, method, body=None, raw_body=None):
     payload = raw_body
     if payload is None and body is not None:
