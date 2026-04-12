@@ -205,7 +205,11 @@ def handle_delete(caller_id: str, user_id: str) -> Dict[str, Any]:
 def handle_user_banned(event: Dict[str, Any]) -> Dict[str, Any]:
     detail = event.get("detail", {})
     if isinstance(detail, str):
-        detail = json.loads(detail)
+        try:
+            detail = json.loads(detail)
+        except json.JSONDecodeError:
+            logger.warning("user.banned event detail is not valid JSON")
+            return {"statusCode": 400, "body": "Malformed event detail"}
 
     user_id = detail.get("userId")
     if not user_id:
