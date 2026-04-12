@@ -47,6 +47,8 @@ class Domain1Stack(cdk.Stack):
                 {"method": "POST", "path": "/auth/login", "auth": False},
                 {"method": "POST", "path": "/auth/refresh", "auth": False},
                 {"method": "POST", "path": "/auth/logout", "auth": False},
+                {"method": "POST", "path": "/auth/confirm", "auth": False},
+
             ],
             publish_events=True,
             environment={
@@ -61,7 +63,7 @@ class Domain1Stack(cdk.Stack):
                         "cognito-idp:SignUp",
                         "cognito-idp:InitiateAuth",
                         "cognito-idp:RevokeToken",
-                        "cognito-idp:AdminGetUser",
+                        "cognito-idp:ConfirmSignUp",
                     ],
                     resources=[shared.user_pool.user_pool_arn],
                 ),
@@ -95,6 +97,21 @@ class Domain1Stack(cdk.Stack):
             environment={
                 "PROFILES_TABLE_NAME": "kismet-profiles",
             },
+<<<<<<< HEAD
+=======
+            extra_policies=[
+                iam.PolicyStatement(
+                    actions=["dynamodb:DeleteItem", "dynamodb:UpdateItem"],
+                    resources=[
+                        self.format_arn(
+                            service="dynamodb",
+                            resource="table",
+                            resource_name="kismet-discovery",
+                        )
+                    ],
+                ),
+            ],
+>>>>>>> 6cf3df6 (feat: add POST /auth/confirm endpoint for Cognito email verification)
             api=imported_api,
             authorizer=shared.authorizer,
             event_bus=event_bus,
