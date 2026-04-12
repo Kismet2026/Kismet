@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 from botocore.exceptions import ClientError
 
-from lambda_function import lambda_handler
+from lambda_function import handler
 
 
 ENV = {
@@ -28,7 +28,7 @@ class SendVerificationCodeTests(unittest.TestCase):
             mock_dynamodb.Table.return_value.put_item.return_value = {}
             mock_ses.send_email.return_value = {"MessageId": "msg-001"}
 
-            response = lambda_handler(make_event("/verify/send", "POST", body={"email": "student@university.edu"}), self.context)
+            response = handler(make_event("/verify/send", "POST", body={"email": "student@university.edu"}), self.context)
             payload = json.loads(response["body"])
 
             self.assertEqual(response["statusCode"], 200)
@@ -38,7 +38,7 @@ class SendVerificationCodeTests(unittest.TestCase):
 
     def test_send_non_edu_email_rejected(self):
         with patch.dict("os.environ", ENV):
-            response = lambda_handler(make_event("/verify/send", "POST", body={"email": "user@gmail.com"}), self.context)
+            response = handler(make_event("/verify/send", "POST", body={"email": "user@gmail.com"}), self.context)
             payload = json.loads(response["body"])
 
             self.assertEqual(response["statusCode"], 400)
@@ -46,7 +46,7 @@ class SendVerificationCodeTests(unittest.TestCase):
 
     def test_send_missing_email_returns_validation_error(self):
         with patch.dict("os.environ", ENV):
-            response = lambda_handler(make_event("/verify/send", "POST", body={}), self.context)
+            response = handler(make_event("/verify/send", "POST", body={}), self.context)
             self.assertEqual(response["statusCode"], 400)
 
     def test_send_normalizes_email_to_lowercase(self):
@@ -57,7 +57,7 @@ class SendVerificationCodeTests(unittest.TestCase):
             mock_dynamodb.Table.return_value.put_item.return_value = {}
             mock_ses.send_email.return_value = {"MessageId": "msg-001"}
 
-            response = lambda_handler(make_event("/verify/send", "POST", body={"email": "Student@University.EDU"}), self.context)
+            response = handler(make_event("/verify/send", "POST", body={"email": "Student@University.EDU"}), self.context)
             payload = json.loads(response["body"])
 
             self.assertEqual(response["statusCode"], 200)
@@ -86,7 +86,7 @@ class ConfirmVerificationCodeTests(unittest.TestCase):
             mock_table.update_item.return_value = {}
             mock_cognito.admin_update_user_attributes.return_value = {}
 
-            response = lambda_handler(make_event("/verify/confirm", "POST", body={
+            response = handler(make_event("/verify/confirm", "POST", body={
                 "email": "student@university.edu",
                 "code": "123456",
             }), self.context)
@@ -108,7 +108,7 @@ class ConfirmVerificationCodeTests(unittest.TestCase):
                 "ttl": future_ttl,
             }}
 
-            response = lambda_handler(make_event("/verify/confirm", "POST", body={
+            response = handler(make_event("/verify/confirm", "POST", body={
                 "email": "student@university.edu",
                 "code": "000000",
             }), self.context)
@@ -129,7 +129,7 @@ class ConfirmVerificationCodeTests(unittest.TestCase):
                 "ttl": past_ttl,
             }}
 
-            response = lambda_handler(make_event("/verify/confirm", "POST", body={
+            response = handler(make_event("/verify/confirm", "POST", body={
                 "email": "student@university.edu",
                 "code": "123456",
             }), self.context)
@@ -144,7 +144,7 @@ class ConfirmVerificationCodeTests(unittest.TestCase):
 
             mock_dynamodb.Table.return_value.get_item.return_value = {}
 
-            response = lambda_handler(make_event("/verify/confirm", "POST", body={
+            response = handler(make_event("/verify/confirm", "POST", body={
                 "email": "unknown@university.edu",
                 "code": "123456",
             }), self.context)
@@ -162,7 +162,7 @@ class ConfirmVerificationCodeTests(unittest.TestCase):
                 "verifiedAt": "2026-04-01T12:00:00+00:00",
             }}
 
-            response = lambda_handler(make_event("/verify/confirm", "POST", body={
+            response = handler(make_event("/verify/confirm", "POST", body={
                 "email": "student@university.edu",
                 "code": "123456",
             }), self.context)
@@ -189,7 +189,7 @@ class GetVerificationStatusTests(unittest.TestCase):
             event = make_event("/verify/status", "GET")
             event["requestContext"] = {"authorizer": {"claims": {"email": "student@university.edu"}}}
 
-            response = lambda_handler(event, self.context)
+            response = handler(event, self.context)
             payload = json.loads(response["body"])
 
             self.assertEqual(response["statusCode"], 200)
@@ -205,7 +205,7 @@ class GetVerificationStatusTests(unittest.TestCase):
             event = make_event("/verify/status", "GET")
             event["queryStringParameters"] = {"email": "student@university.edu"}
 
-            response = lambda_handler(event, self.context)
+            response = handler(event, self.context)
             payload = json.loads(response["body"])
 
             self.assertEqual(response["statusCode"], 200)
@@ -213,7 +213,7 @@ class GetVerificationStatusTests(unittest.TestCase):
 
     def test_status_no_auth_returns_401(self):
         with patch.dict("os.environ", ENV):
-            response = lambda_handler(make_event("/verify/status", "GET"), self.context)
+            response = handler(make_event("/verify/status", "GET"), self.context)
             self.assertEqual(response["statusCode"], 401)
 
 
@@ -223,7 +223,7 @@ class CorsTests(unittest.TestCase):
 
     def test_response_includes_cors_headers(self):
         with patch.dict("os.environ", ENV):
-            response = lambda_handler(make_event("/verify/send", "POST", body={}), self.context)
+            response = handler(make_event("/verify/send", "POST", body={}), self.context)
             self.assertEqual(response["headers"]["Access-Control-Allow-Origin"], "*")
             self.assertIn("Authorization", response["headers"]["Access-Control-Allow-Headers"])
 
@@ -233,14 +233,14 @@ class RoutingTests(unittest.TestCase):
         self.context = SimpleNamespace(aws_request_id="req-email-123")
 
     def test_invalid_json_body_returns_validation_error(self):
-        response = lambda_handler(make_event("/verify/send", "POST", raw_body='{"broken"'), self.context)
+        response = handler(make_event("/verify/send", "POST", raw_body='{"broken"'), self.context)
         payload = json.loads(response["body"])
 
         self.assertEqual(response["statusCode"], 400)
         self.assertEqual(payload["code"], "VALIDATION_ERROR")
 
     def test_unknown_route_returns_not_found(self):
-        response = lambda_handler(make_event("/verify/resend", "POST"), self.context)
+        response = handler(make_event("/verify/resend", "POST"), self.context)
         payload = json.loads(response["body"])
 
         self.assertEqual(response["statusCode"], 404)
@@ -256,3 +256,5 @@ def make_event(path, method, body=None, raw_body=None):
 
 if __name__ == "__main__":
     unittest.main()
+
+

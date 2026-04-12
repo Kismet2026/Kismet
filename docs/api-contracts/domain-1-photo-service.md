@@ -2,7 +2,7 @@
 
 **Owner:** KS
 **Domain:** Identity & Profiles
-**Base Path:** `/photos`
+**Base Paths:** `/photos`, `/users/{userId}/photos`
 **AWS Services:** S3, Lambda, CloudFront
 
 ---
@@ -54,7 +54,7 @@ Request a presigned S3 URL for direct photo upload from the client.
 
 ---
 
-### GET /photos/{userId}
+### GET /users/{userId}/photos
 
 List all photos for a user. Returns CloudFront CDN URLs for optimized delivery.
 
@@ -63,7 +63,7 @@ List all photos for a user. Returns CloudFront CDN URLs for optimized delivery.
 **Request:**
 
 ```
-GET /photos/user-123
+GET /users/user-123/photos
 ```
 
 | Param | Type | Required | Description |

@@ -141,16 +141,13 @@ kismet/
 ├── PRD.md
 │
 ├── docs/
+│   ├── PROJECT_STATUS.md             ← current deployment & progress status
 │   ├── api-contracts/                ← one API contract per service (25 files)
 │   ├── system-design/
 │   │   ├── Design_Doc.md             ← high-level architecture & decisions
-│   │   ├── Infrastructure_Design.md  ← AWS resource details
-│   │   ├── CDK_Migration_Plan.md     ← CDK migration guide
 │   │   └── event-schema.json         ← canonical EventBridge event schemas
 │   └── guides/
-│       ├── Kismet_Setup_Guide.md     ← dev environment setup
-│       ├── Service_Communication_Guide.md
-│       └── SERVICE_README_TEMPLATE.md
+│       └── Service_Communication_Guide.md
 │
 ├── infra/                            ← AWS CDK (Python)
 │   ├── app.py                        ← CDK entry point
@@ -200,7 +197,10 @@ kismet/
 │       ├── admin-dashboard-service/
 │       └── health-monitor-service/
 │
-└── frontend/                         ← React app (AI-generated)
+├── tests/
+│   └── test_cross_domain_integration.py  ← 49 integration tests
+│
+└── frontend/                         ← Next.js app (Vercel deployment)
 ```
 
 Each service follows the same structure:
@@ -227,14 +227,33 @@ service-name/
 
 ---
 
+## Current Status (as of Apr 10)
+
+**6 of 7 CDK stacks deployed to AWS.** See [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md) for full details.
+
+| Stack | Status |
+|-------|--------|
+| SharedStack | Deployed |
+| Domain 1 — Identity | Deployed |
+| Domain 2 — Discovery | Deployed |
+| Domain 3 — Messaging | Blocked (Issue #83) |
+| Domain 4 — Moderation | Deployed |
+| Domain 5 — Notifications | Deployed |
+| Domain 6 — Analytics | Deployed |
+
+- 49 cross-domain integration tests passing
+- Frontend plan ready ([`frontend/FRONTEND_PLAN.md`](frontend/FRONTEND_PLAN.md))
+
+---
+
 ## Timeline
 
 | Week | Milestone |
 |------|-----------|
-| **Week 1** (now → Apr 6) | API contracts, Lambda scaffolding |
-| **Week 2** (Apr 7–13) | Build & unit test services |
-| **Week 3** (Apr 14–16) | Integration, demo prep, slides |
-| **Apr 17** | 🎤 Presentation & Demo |
+| Week 1 (Apr 1–6) | API contracts, Lambda scaffolding |
+| Week 2 (Apr 7–10) | Build, unit test, CDK deploy, integration tests |
+| Week 3 (Apr 11–16) | Frontend, D3 fix, demo prep, slides |
+| **Apr 17** | Presentation & Demo |
 
 ---
 
@@ -243,14 +262,4 @@ service-name/
 1. Clone this repo
 2. Navigate to your service folder under `services/`
 3. Read your service's README for setup instructions
-4. Define your API contract in `docs/api-contracts/`
-5. Post daily standups in Discord `#standup`
-
-## Standup Format
-
-```
-[Name] — [Date]
-✅ Done:
-🔄 Doing:
-🚧 Blocked:
-```
+4. Deploy: `cd infra && npx cdk deploy <StackName> --app "python3 app.py"`
