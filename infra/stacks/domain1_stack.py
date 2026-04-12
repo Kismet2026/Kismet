@@ -72,7 +72,7 @@ class Domain1Stack(cdk.Stack):
         )
 
         # ── Profile Service (Quinn) ───────────────────────────────────────────
-        # CRUD for user profiles, publishes profile.completed
+        # CRUD for user profiles, publishes profile.completed, consumes user.banned
         profile_svc = KismetService(
             self,
             "ProfileService",
@@ -91,14 +91,29 @@ class Domain1Stack(cdk.Stack):
                 {"method": "PUT", "path": "/profiles/{userId}", "auth": True},
                 {"method": "DELETE", "path": "/profiles/{userId}", "auth": True},
             ],
+            consume_events=["user.banned"],
             publish_events=True,
             environment={
                 "PROFILES_TABLE_NAME": "kismet-profiles",
+                "DISCOVERY_TABLE_NAME": "kismet-discovery",
             },
+            extra_policies=[
+                iam.PolicyStatement(
+                    actions=["dynamodb:DeleteItem"],
+                    resources=[
+                        self.format_arn(
+                            service="dynamodb",
+                            resource="table",
+                            resource_name="kismet-discovery",
+                        )
+                    ],
+                ),
+            ],
             api=imported_api,
             authorizer=shared.authorizer,
             event_bus=event_bus,
         )
+
         # ── Photo Service (KS) ───────────────────────────────────────────────
         # Upload (presigned URL), list, delete, set primary photo
         photo_svc = KismetService(
@@ -123,7 +138,7 @@ class Domain1Stack(cdk.Stack):
             environment={
                 "PHOTOS_TABLE_NAME": "kismet-photos",
                 "PHOTOS_BUCKET_NAME": shared.photos_bucket.bucket_name,
-                "PHOTOS_CDN_BASE_URL": "",  # TODO: add CloudFront URL when available
+                "PHOTOS_CDN_BASE_URL": f"https://{shared.photos_bucket.bucket_name}.s3.{self.region}.amazonaws.com",  # TODO: add CloudFront URL when available
             },
             extra_policies=[
                 # S3 for presigned URL generation and object deletion
