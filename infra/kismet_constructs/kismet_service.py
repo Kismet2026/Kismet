@@ -164,6 +164,7 @@ class KismetService(Construct):
         # ── EventBridge: publish permission ──────────────────────────────────
         if publish_events and event_bus:
             event_bus.grant_put_events_to(self.function)
+            self.function.add_environment("EVENT_BUS_NAME", event_bus.event_bus_name)
 
         # ── EventBridge: consume (subscribe) ─────────────────────────────────
         for event_type in consume_events or []:
