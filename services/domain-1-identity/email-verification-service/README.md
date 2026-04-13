@@ -2,22 +2,25 @@
 
 **Owner(s):** Zhiping
 **Domain:** Identity & Profiles
-**Status:** 🟡 In progress
+**Status:** ⚪ Legacy / not deployed
 
 ## Description
-Sends `.edu` verification codes, confirms submitted codes, and exposes the current email verification state.
+Historical scaffold for a custom SES-based verification flow. It is no longer part of the deployed Domain 1 stack.
+
+The deployed flow is now Cognito-native:
+- `POST /auth/signup` sends the confirmation code
+- `POST /auth/confirm` confirms the code
 
 ## AWS Services Used
-- Lambda — route `/verify/*` requests and host service logic
-- SES — planned delivery of verification codes
-- Cognito — planned lookup/update of `email_verified` state
-- DynamoDB — planned TTL-backed storage for verification codes in `kismet-verifications`
+- Lambda — historical `/verify/*` handlers kept in repo as reference
+- SES — historical delivery mechanism for custom verification emails
+- Cognito — historical lookup/update of `email_verified` state
+- DynamoDB — historical TTL-backed storage for verification codes in `kismet-verifications`
 
 ## Scaffold Status
-- Week 1 skeleton is in place.
-- All documented routes are wired in `lambda_function.py`.
-- `template.yaml` includes both the Lambda function and the `kismet-verifications` DynamoDB table scaffold.
-- Each route currently returns `501 NOT_IMPLEMENTED` until Week 2 service logic is built.
+- The code remains in the repo as a legacy scaffold and test fixture.
+- The service is not wired into `infra/stacks/domain1_stack.py`.
+- The live API does not expose `/verify/*` routes.
 
 ## API Endpoints
 
@@ -69,15 +72,14 @@ Sends `.edu` verification codes, confirms submitted codes, and exposes the curre
 ```
 
 ## Dependencies
-- **Depends on:** Shared API Gateway/Cognito authorizer, Cognito user pool, SES sender identity, `kismet-verifications` table
-- **Called by:** Frontend (React) via `/verify/*`
+- **Depends on:** Historical shared API Gateway/Cognito authorizer, Cognito user pool, SES sender identity, `kismet-verifications` table
+- **Called by:** No deployed clients
 - **Events published:** None
 - **Events consumed:** None documented in this scaffold
 
 ## Integration Notes
-- `docs/api-contracts/domain-1-auth-service.md` says Auth publishes `user.created` for Email Verification Service, but the email verification API contract currently documents only HTTP routes. Confirm whether signup should auto-trigger verification emails in Week 2.
-- `docs/api-contracts/domain-1-email-verification-service.md` defines a `kismet-verifications` DynamoDB table, but `docs/system-design/Infrastructure_Design.md` does not currently list that table in section 3.1.
-- `infra/stacks/shared_stack.py` enables Cognito `auto_verify=email`, which conflicts with the manual verification flow described in the email verification API contract. Confirm the intended Cognito configuration before implementing business logic.
+- This service was superseded because the custom SES flow conflicted with Cognito's native signup confirmation.
+- Prefer `services/domain-1-identity/auth-service` and `docs/api-contracts/domain-1-auth-service.md` for the current verification behavior.
 
 ## Setup
 ```bash

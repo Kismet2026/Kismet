@@ -42,7 +42,7 @@ def lambda_handler(event: Optional[Dict[str, Any]], context: Any) -> Dict[str, A
         if method == "GET":
             return handle_typing_get(match_id, user_id)
 
-    # GET /presence/{userId}
+    # GET /presence/user/{userId}
     if method == "GET" and "userId" in path_params:
         return handle_get_presence(path_params["userId"])
 
@@ -74,7 +74,7 @@ def handle_heartbeat(user_id: str) -> Dict[str, Any]:
 
 
 def handle_get_presence(target_user_id: str) -> Dict[str, Any]:
-    """GET /presence/{userId} — Return online/offline status for any user."""
+    """GET /presence/user/{userId} — Return online/offline status for any user."""
     result = presence_table.get_item(Key={"PK": f"USER#{target_user_id}", "SK": "STATUS"})
     item = result.get("Item")
 
