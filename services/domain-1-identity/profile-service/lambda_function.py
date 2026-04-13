@@ -205,7 +205,7 @@ def _build_event_detail(item: Dict[str, Any]) -> Dict[str, Any]:
         "birthTime": item.get("birthTime", ""),
         "gender": item.get("gender", ""),
         "preferred_gender": item.get("interestedIn", ""),
-        "location_coordinates": [float(v) for v in (item.get("location") or {}).values()] if isinstance(item.get("location"), dict) else item.get("location", []),
+        "location_coordinates": [float(v) for v in (item.get("location", {}).values() if isinstance(item.get("location"), dict) else item.get("location", []))],
         "city": item.get("city", ""),
         "avatarUrl": item.get("avatarUrl", ""),
         "bio": item.get("bio", ""),
