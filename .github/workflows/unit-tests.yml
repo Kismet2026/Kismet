@@ -49,7 +49,7 @@ jobs:
             svc_dir="services/${{ matrix.domain.name }}/${svc}"
             if [ -d "${svc_dir}/tests" ]; then
               echo "::group::${svc}"
-              python -m pytest "${svc_dir}/tests/" -v --tb=short || failed=1
+              PYTHONPATH="${svc_dir}:${PYTHONPATH}" python -m pytest "${svc_dir}/tests/" -v --tb=short || failed=1
               echo "::endgroup::"
             fi
           done
