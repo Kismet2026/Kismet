@@ -249,9 +249,9 @@ def handle_user_banned(detail: Dict[str, Any]) -> Dict[str, Any]:
         "DetailType": "profile.banned",
         "Detail": json.dumps({
             "userId": user_id,
-            "reason": item.get("banReason", reason),
-            "reportId": item.get("banReportId", report_id),
-            "timestamp": item.get("bannedAt", banned_at),
+            "reason": item.get("banReason") or reason,
+            "reportId": item.get("banReportId") or report_id,
+            "timestamp": item.get("bannedAt") or banned_at,
         }),
         "EventBusName": EVENT_BUS_NAME,
     }])
