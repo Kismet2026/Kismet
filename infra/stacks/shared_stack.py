@@ -89,6 +89,13 @@ class SharedStack(cdk.Stack):
                     allowed_headers=["*"],
                 )
             ],
+            public_read_access=True,
+            block_public_access=s3.BlockPublicAccess(
+                block_public_acls=False,
+                ignore_public_acls=False,
+                block_public_policy=False,
+                restrict_public_buckets=False,
+            ),
             removal_policy=cdk.RemovalPolicy.DESTROY,
             auto_delete_objects=True,
         )
