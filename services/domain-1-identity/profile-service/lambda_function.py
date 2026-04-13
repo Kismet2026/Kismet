@@ -259,6 +259,14 @@ def handle_user_banned(detail: Dict[str, Any]) -> Dict[str, Any]:
     return _response(200, {"userId": user_id, "status": "banned"})
 
 
+def _normalize_location(location) -> list:
+    if isinstance(location, dict):
+        return [float(location.get("latitude", 0)), float(location.get("longitude", 0))]
+    if isinstance(location, list):
+        return [float(c) for c in location]
+    return []
+
+
 def _build_event_detail(item: Dict[str, Any]) -> Dict[str, Any]:
     """Build event payload with all fields D2 discovery-service needs."""
     return {
@@ -268,7 +276,7 @@ def _build_event_detail(item: Dict[str, Any]) -> Dict[str, Any]:
         "birthTime": item.get("birthTime", ""),
         "gender": item.get("gender", ""),
         "preferred_gender": item.get("interestedIn", ""),
-        "location_coordinates": [float(c) for c in item.get("location", [])],
+        "location_coordinates": _normalize_location(item.get("location")),
         "city": item.get("city", ""),
         "avatarUrl": item.get("avatarUrl", ""),
         "bio": item.get("bio", ""),
