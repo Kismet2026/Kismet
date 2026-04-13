@@ -127,6 +127,7 @@ class Domain1Stack(cdk.Stack):
                 "PHOTOS_TABLE_NAME": "kismet-photos",
                 "PHOTOS_BUCKET_NAME": shared.photos_bucket.bucket_name,
                 "PHOTOS_CDN_BASE_URL": shared.photos_cdn_base_url,
+                "EVENT_BUS_NAME": event_bus.event_bus_name,
             },
             extra_policies=[
                 # S3 for presigned URL generation and object deletion
