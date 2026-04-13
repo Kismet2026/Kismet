@@ -5,6 +5,8 @@
 **Base Paths:** `/photos`, `/users/{userId}/photos`
 **AWS Services:** S3, Lambda, CloudFront
 
+Canonical delivery model: uploaded objects stay in the shared photos S3 bucket, while read URLs and `photo.uploaded.detail.cdnUrl` are built from the CloudFront base URL injected into photo-service as `PHOTOS_CDN_BASE_URL`.
+
 ---
 
 ## Endpoints
@@ -34,7 +36,7 @@ Request a presigned S3 URL for direct photo upload from the client.
 ```json
 {
   "photoId": "photo-001",
-  "uploadUrl": "https://kismet-photos-dev.s3.amazonaws.com/user-123/photo-001?X-Amz-Signature=...",
+  "uploadUrl": "https://kismet-photos-<account>-dev.s3.amazonaws.com/user-123/photo-001?X-Amz-Signature=...",
   "expiresIn": 300
 }
 ```
@@ -123,7 +125,7 @@ DELETE /photos/photo-001
 
 **Side Effects:**
 - Removes photo record from DynamoDB `kismet-photos` table
-- Deletes object from S3 bucket `kismet-photos-dev`
+- Deletes object from S3 bucket `kismet-photos-{account}-dev`
 
 **Errors:**
 
@@ -171,14 +173,14 @@ PUT /photos/photo-002/primary
 
 ## S3 Bucket
 
-**Bucket:** `kismet-photos-dev`
+**Bucket pattern:** `kismet-photos-{account}-dev`
 
 | Property | Value |
 |----------|-------|
 | Key format | `{userId}/{photoId}.{ext}` |
 | Max file size | 10 MB |
 | Allowed types | `image/jpeg`, `image/png`, `image/webp` |
-| CloudFront distribution | Serves optimized images via CDN |
+| CloudFront distribution | Canonical public delivery path for photo reads and emitted `cdnUrl` values |
 
 ---
 
@@ -213,7 +215,7 @@ Published when a photo is successfully uploaded to S3 (triggered by S3 event not
     "photoId": "photo-001",
     "userId": "user-123",
     "s3Key": "user-123/photo-001.jpg",
-    "s3Bucket": "kismet-photos-dev",
+    "s3Bucket": "kismet-photos-<account>-dev",
     "contentType": "image/jpeg",
     "cdnUrl": "https://d1234abcd.cloudfront.net/user-123/photo-001.jpg",
     "isPrimary": true,
@@ -233,4 +235,4 @@ Published when a photo is successfully uploaded to S3 (triggered by S3 event not
 | **Called by** | Frontend (React) | HTTP via API Gateway |
 | **Publishes to** | Image Moderation Service | EventBridge `photo.uploaded` |
 | **Depends on** | Auth (Cognito) | JWT validation via API Gateway Authorizer |
-| **Depends on** | S3, CloudFront | Photo storage and CDN delivery |
+| **Depends on** | S3, CloudFront | Private photo storage plus canonical CDN delivery |
