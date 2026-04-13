@@ -15,19 +15,23 @@ jobs:
       matrix:
         domain:
           - name: domain-1-identity
-            services: auth-service email-verification-service photo-service profile-service
+            services: auth-service photo-service profile-service
           - name: domain-2-discovery
             services: bazi-service discovery-service match-service recommendation-service swipe-service
           - name: domain-3-messaging
-            services: chat-gateway message-service presence-service
+            services: chat-gateway message-service presence-service icebreaker-service
           - name: domain-4-moderation
-            services: image-moderation-service text-moderation-service
+            services: image-moderation-service text-moderation-service report-service rate-limiter-service
           - name: domain-5-notifications
             services: email-service event-bus-service push-notification-service scheduler-service
           - name: domain-6-analytics
             services: activity-logger-service admin-dashboard-service analytics-pipeline-service health-monitor-service
 
     name: ${{ matrix.domain.name }}
+    env:
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: testing
+      AWS_SECRET_ACCESS_KEY: testing
     steps:
       - uses: actions/checkout@v4
 
@@ -54,6 +58,10 @@ jobs:
   integration:
     runs-on: ubuntu-latest
     name: cross-domain-integration
+    env:
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: testing
+      AWS_SECRET_ACCESS_KEY: testing
     steps:
       - uses: actions/checkout@v4
 
