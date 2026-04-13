@@ -30,7 +30,11 @@ export default function ProfileEditPage() {
           interestedIn: profile.interestedIn,
           bio: profile.bio ?? "",
           interests: profile.interests ?? [],
-          location: profile.location,
+          location: profile.location ? {
+            latitude: Number(profile.location.latitude),
+            longitude: Number(profile.location.longitude),
+          } : undefined,
+          city: profile.city ?? "",
         } : undefined}
         onSubmit={async (data) => {
           await updateProfile(data);

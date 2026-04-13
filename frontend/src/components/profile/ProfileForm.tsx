@@ -217,7 +217,7 @@ export function ProfileForm({ initialData, onSubmit, submitLabel = "Continue" }:
         )}
         {location && (
           <p className="text-sm text-primary flex items-center gap-1">
-            <MapPin size={14} /> Location set ({location.latitude.toFixed(2)}, {location.longitude.toFixed(2)})
+            <MapPin size={14} /> Location set ({Number(location.latitude).toFixed(2)}, {Number(location.longitude).toFixed(2)})
           </p>
         )}
         {(locError || !location) && (

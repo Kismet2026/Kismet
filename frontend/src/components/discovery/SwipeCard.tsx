@@ -8,18 +8,31 @@ import type { Candidate } from "@/types";
 interface SwipeCardProps {
   candidate: Candidate;
   onSwipe: (action: "like" | "pass") => void;
+  onTap?: () => void;
   isTop: boolean;
 }
 
 const SWIPE_THRESHOLD = 100;
 
-export function SwipeCard({ candidate, onSwipe, isTop }: SwipeCardProps) {
+export function SwipeCard({ candidate, onSwipe, onTap, isTop }: SwipeCardProps) {
+  const dragStartRef = { x: 0, y: 0 };
   const x = useMotionValue(0);
   const rotate = useTransform(x, [-200, 200], [-15, 15]);
   const likeOpacity = useTransform(x, [0, 80], [0, 1]);
   const passOpacity = useTransform(x, [-80, 0], [1, 0]);
 
+  function handleDragStart(_: unknown, info: PanInfo) {
+    dragStartRef.x = info.point.x;
+    dragStartRef.y = info.point.y;
+  }
+
   function handleDragEnd(_: unknown, info: PanInfo) {
+    const dx = Math.abs(info.offset.x);
+    const dy = Math.abs(info.offset.y);
+    if (dx < 10 && dy < 10 && onTap) {
+      onTap();
+      return;
+    }
     if (info.offset.x > SWIPE_THRESHOLD) {
       onSwipe("like");
     } else if (info.offset.x < -SWIPE_THRESHOLD) {
@@ -41,6 +54,7 @@ export function SwipeCard({ candidate, onSwipe, isTop }: SwipeCardProps) {
       drag={isTop ? "x" : false}
       dragConstraints={{ left: 0, right: 0 }}
       dragElastic={0.8}
+      onDragStart={isTop ? handleDragStart : undefined}
       onDragEnd={isTop ? handleDragEnd : undefined}
       exit={{
         x: x.get() > 0 ? 300 : -300,

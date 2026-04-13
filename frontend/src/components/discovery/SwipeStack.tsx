@@ -9,9 +9,10 @@ interface SwipeStackProps {
   candidates: Candidate[];
   onSwipe: (targetUserId: string, action: "like" | "pass") => Promise<{ matched?: boolean; matchId?: string }>;
   onMatch: (matchId: string, candidate: Candidate) => void;
+  onTap?: (candidate: Candidate) => void;
 }
 
-export function SwipeStack({ candidates, onSwipe, onMatch }: SwipeStackProps) {
+export function SwipeStack({ candidates, onSwipe, onMatch, onTap }: SwipeStackProps) {
   const visibleCards = candidates.slice(0, 2);
   const topCard = visibleCards[0];
 
@@ -36,6 +37,9 @@ export function SwipeStack({ candidates, onSwipe, onMatch }: SwipeStackProps) {
               candidate={candidate}
               onSwipe={(action) => {
                 if (i === 0) handleSwipe(action);
+              }}
+              onTap={() => {
+                if (i === 0 && onTap) onTap(candidate);
               }}
               isTop={i === 0}
             />

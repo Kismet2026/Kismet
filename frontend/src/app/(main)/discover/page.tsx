@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useDiscovery } from "@/hooks/useDiscovery";
 import { SwipeStack } from "@/components/discovery/SwipeStack";
 import { MatchModal } from "@/components/discovery/MatchModal";
+import { ProfileDetail } from "@/components/discovery/ProfileDetail";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { MagnifyingGlass } from "@phosphor-icons/react";
@@ -20,13 +21,16 @@ export default function DiscoverPage() {
     matchId: string | null;
   }>({ isOpen: false, candidate: null, matchId: null });
 
-  // Fetch initial candidates
+  const [profileDetail, setProfileDetail] = useState<{
+    isOpen: boolean;
+    candidate: Candidate | null;
+  }>({ isOpen: false, candidate: null });
+
   useEffect(() => {
     fetchCandidates();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Fetch more when running low
   useEffect(() => {
     if (candidates.length <= 2 && !loading && !exhausted) {
       fetchCandidates();
@@ -35,6 +39,10 @@ export default function DiscoverPage() {
 
   const handleMatch = useCallback((matchId: string, candidate: Candidate) => {
     setMatchModal({ isOpen: true, candidate, matchId });
+  }, []);
+
+  const handleTap = useCallback((candidate: Candidate) => {
+    setProfileDetail({ isOpen: true, candidate });
   }, []);
 
   if (loading && candidates.length === 0) {
@@ -58,6 +66,13 @@ export default function DiscoverPage() {
         candidates={candidates}
         onSwipe={swipe}
         onMatch={handleMatch}
+        onTap={handleTap}
+      />
+
+      <ProfileDetail
+        candidate={profileDetail.candidate}
+        isOpen={profileDetail.isOpen}
+        onClose={() => setProfileDetail({ isOpen: false, candidate: null })}
       />
 
       <MatchModal
