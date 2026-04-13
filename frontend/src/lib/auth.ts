@@ -18,7 +18,8 @@ export function saveTokens(tokens: AuthTokens): void {
 
 export function getAccessToken(): string | null {
   if (typeof window === "undefined") return null;
-  const token = localStorage.getItem(STORAGE_KEYS.accessToken);
+  // Cognito User Pool Authorizer requires idToken, not accessToken
+  const token = localStorage.getItem(STORAGE_KEYS.idToken);
   const expiresAt = localStorage.getItem(STORAGE_KEYS.expiresAt);
   if (!token || !expiresAt) return null;
   // 30s buffer before expiry
