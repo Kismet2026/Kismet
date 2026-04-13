@@ -84,7 +84,7 @@ function VerifyContent() {
 
       setLoading(true);
       try {
-        await api.post("/verify/confirm", { email, code });
+        await api.post("/auth/confirm", { email, code });
         router.push("/login");
       } catch (err: unknown) {
         const message =
@@ -102,7 +102,7 @@ function VerifyContent() {
   async function handleResend() {
     if (resendCooldown > 0) return;
     try {
-      await api.post("/verify/send", { email });
+      // TODO: add POST /auth/resend endpoint to backend
       setResendCooldown(60);
     } catch {
       setError("Failed to resend code.");

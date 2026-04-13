@@ -39,8 +39,8 @@ export default function SignupPage() {
     setLoading(true);
     try {
       await signup(email, password, birthDate);
-      // Cognito auto-verifies email — skip verify page, go straight to login
-      router.push("/login");
+      // Cognito sends verification code — go to verify page
+      router.push(`/verify?email=${encodeURIComponent(email)}`);
     } catch (err: unknown) {
       const message =
         err && typeof err === "object" && "message" in err
