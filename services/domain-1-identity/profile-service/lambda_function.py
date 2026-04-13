@@ -143,7 +143,6 @@ def handle_update(caller_id: str, user_id: str, body: Dict[str, Any]) -> Dict[st
         return _response(404, {"code": "NOT_FOUND", "message": "Profile not found."})
 
     updates = {k: json.loads(json.dumps(v), parse_float=Decimal) if isinstance(v, (dict, list, float)) else v
-    updates = {k: json.loads(json.dumps(v), parse_float=Decimal) if isinstance(v, (dict, list, float)) else v
                 for k, v in body.items() if k in UPDATABLE_FIELDS}
     if not updates:
         return _response(400, {"code": "VALIDATION_ERROR", "message": "No valid fields to update."})
