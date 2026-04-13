@@ -63,6 +63,29 @@ export function ProfileForm({ initialData, onSubmit, submitLabel = "Continue" }:
     );
   }
 
+  async function geocodeCity(cityName: string) {
+    if (!cityName.trim()) return;
+    setLocating(true);
+    setLocError("");
+    try {
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(cityName)}&format=json&limit=1`,
+        { headers: { "User-Agent": "Kismet-App" } }
+      );
+      const data = await res.json();
+      if (data.length > 0) {
+        setLocation({ latitude: parseFloat(data[0].lat), longitude: parseFloat(data[0].lon) });
+        setCity(data[0].display_name.split(",")[0]);
+      } else {
+        setLocError("City not found — try a different name");
+      }
+    } catch {
+      setLocError("Could not look up city");
+    } finally {
+      setLocating(false);
+    }
+  }
+
   function handleLocate() {
     if (!navigator.geolocation) {
       setLocError("Location not supported on this device");
@@ -220,13 +243,25 @@ export function ProfileForm({ initialData, onSubmit, submitLabel = "Continue" }:
             <MapPin size={14} /> Location set ({Number(location.latitude).toFixed(2)}, {Number(location.longitude).toFixed(2)})
           </p>
         )}
-        {(locError || !location) && (
+        <div className="flex gap-2">
           <Input
             placeholder="Enter your city (e.g. Boston)"
             value={city}
             onChange={(e) => setCity(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); geocodeCity(city); } }}
           />
-        )}
+          {city && !location && (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => geocodeCity(city)}
+              disabled={locating}
+              className="flex-shrink-0"
+            >
+              {locating ? "..." : "Set"}
+            </Button>
+          )}
+        </div>
         {locError && (
           <p className="text-xs text-muted-foreground">{locError}</p>
         )}
