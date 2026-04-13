@@ -108,7 +108,7 @@ export default function SignupPage() {
               value={birthDate}
               onChange={(e) => setBirthDate(e.target.value)}
               required
-              className="text-foreground"
+              className="text-foreground h-10 appearance-none"
             />
             <p className="text-xs text-muted-foreground">
               Used for BaZi compatibility

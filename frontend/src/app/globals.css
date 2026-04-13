@@ -138,4 +138,12 @@
   h1, h2, h3 {
     font-family: var(--font-serif);
   }
+  /* Fix date input sizing on mobile */
+  input[type="date"] {
+    min-height: 2.5rem;
+    line-height: 1.5;
+  }
+  input[type="date"]::-webkit-date-and-time-value {
+    text-align: left;
+  }
 }
