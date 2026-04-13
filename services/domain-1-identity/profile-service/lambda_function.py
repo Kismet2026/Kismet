@@ -113,7 +113,7 @@ def handle_create(user_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
     events.put_events(Entries=[{
         "Source": "kismet.profile-service",
         "DetailType": "profile.completed",
-        "Detail": json.dumps(_build_event_detail(item)),
+        "Detail": json.dumps(_build_event_detail(item), default=str),
         "EventBusName": EVENT_BUS_NAME,
     }])
 
@@ -205,7 +205,7 @@ def _build_event_detail(item: Dict[str, Any]) -> Dict[str, Any]:
         "birthTime": item.get("birthTime", ""),
         "gender": item.get("gender", ""),
         "preferred_gender": item.get("interestedIn", ""),
-        "location_coordinates": item.get("location", []),
+        "location_coordinates": [float(v) for v in (item.get("location") or {}).values()] if isinstance(item.get("location"), dict) else item.get("location", []),
         "city": item.get("city", ""),
         "avatarUrl": item.get("avatarUrl", ""),
         "bio": item.get("bio", ""),
