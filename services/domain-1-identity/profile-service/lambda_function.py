@@ -141,7 +141,8 @@ def handle_update(caller_id: str, user_id: str, body: Dict[str, Any]) -> Dict[st
     if not table.get_item(Key={"PK": f"USER#{user_id}", "SK": "PROFILE"}).get("Item"):
         return _response(404, {"code": "NOT_FOUND", "message": "Profile not found."})
 
-    updates = {k: v for k, v in body.items() if k in UPDATABLE_FIELDS}
+    updates = {k: json.loads(json.dumps(v), parse_float=Decimal) if isinstance(v, (dict, list, float)) else v
+                for k, v in body.items() if k in UPDATABLE_FIELDS}
     if not updates:
         return _response(400, {"code": "VALIDATION_ERROR", "message": "No valid fields to update."})
 
@@ -175,7 +176,7 @@ def handle_update(caller_id: str, user_id: str, body: Dict[str, Any]) -> Dict[st
     events.put_events(Entries=[{
         "Source": "kismet.profile-service",
         "DetailType": "profile.updated",
-        "Detail": json.dumps(_build_event_detail(updated_item)),
+        "Detail": json.dumps(_build_event_detail(updated_item), default=str),
         "EventBusName": EVENT_BUS_NAME,
     }])
 
