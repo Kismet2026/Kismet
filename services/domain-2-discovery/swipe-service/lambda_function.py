@@ -206,5 +206,5 @@ def _response(status_code, body):
     return {
         'statusCode': status_code,
         'headers': CORS_HEADERS,
-        'body': json.dumps(body),
+        'body': json.dumps(body, default=str),
     }
