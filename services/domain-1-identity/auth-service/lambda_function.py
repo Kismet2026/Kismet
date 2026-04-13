@@ -53,6 +53,12 @@ def handler(event, context):
             if error is not None:
                 return error
             return handle_logout(payload or {})
+        elif method == "POST" and path == "/auth/confirm":
+            operation = "confirm"
+            payload, error = _parse_body(event)
+            if error is not None:
+                return error
+            return handle_confirm(payload or {})
         else:
             return _response(404, {"code": "NOT_FOUND", "message": f"No route matches {method} {path}."})
     except ClientError as exc:
@@ -148,6 +154,21 @@ def handle_logout(body: Dict[str, Any]) -> Dict[str, Any]:
     cognito.revoke_token(Token=refresh_token, ClientId=COGNITO_APP_CLIENT_ID)
     return _response(200, {"message": "Successfully logged out"})
 
+def handle_confirm(body: Dict[str, Any]) -> Dict[str, Any]:
+    email = (body.get("email") or "").strip()
+    code = (body.get("code") or "").strip()
+
+    if not email or not code:
+        return _response(400, {"code": "VALIDATION_ERROR", "message": "email and code are required."})
+
+    cognito.confirm_sign_up(
+        ClientId=COGNITO_APP_CLIENT_ID,
+        Username=email,
+        ConfirmationCode=code,
+    )
+
+    return _response(200, {"message": "Email confirmed successfully"})
+
 
 def _handle_cognito_error(exc: ClientError) -> Dict[str, Any]:
     code = exc.response["Error"]["Code"]
@@ -161,6 +182,8 @@ def _handle_cognito_error(exc: ClientError) -> Dict[str, Any]:
         "InvalidPasswordException": (400, "VALIDATION_ERROR", message),
         "InvalidParameterException": (400, "VALIDATION_ERROR", message),
         "TooManyRequestsException": (429, "RATE_LIMITED", "Too many requests. Please try again later."),
+        "CodeMismatchException": (400, "VALIDATION_ERROR", "Invalid confirmation code."),
+        "ExpiredCodeException": (410, "EXPIRED", "Confirmation code has expired. Please sign up again."),
     }
 
     if code in mapping:
