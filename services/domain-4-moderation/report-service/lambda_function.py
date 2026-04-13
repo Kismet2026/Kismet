@@ -203,6 +203,7 @@ def resolve_report(event):
                 "Detail": json.dumps({
                     "userId": item.get("reportedUserId"),
                     "reportId": report_id,
+                    "reason": item.get("reason"),
                     "timestamp": now
                 }),
                 "EventBusName": "kismet-events"

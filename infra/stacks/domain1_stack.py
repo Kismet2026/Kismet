@@ -74,7 +74,7 @@ class Domain1Stack(cdk.Stack):
         )
 
         # ── Profile Service (Quinn) ───────────────────────────────────────────
-        # CRUD for user profiles, publishes profile.completed
+        # CRUD for user profiles, publishes profile.* events, consumes user.banned
         profile_svc = KismetService(
             self,
             "ProfileService",
@@ -93,6 +93,7 @@ class Domain1Stack(cdk.Stack):
                 {"method": "PUT", "path": "/profiles/{userId}", "auth": True},
                 {"method": "DELETE", "path": "/profiles/{userId}", "auth": True},
             ],
+            consume_events=["user.banned"],
             publish_events=True,
             environment={
                 "PROFILES_TABLE_NAME": "kismet-profiles",

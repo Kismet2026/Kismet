@@ -102,7 +102,7 @@ class Domain2Stack(cdk.Stack):
             routes=[
                 {"method": "GET", "path": "/discovery", "auth": True},
             ],
-            consume_events=["profile.completed"],
+            consume_events=["profile.completed", "profile.banned"],
             environment={
                 "SWIPE_TABLE_NAME": swipe_svc.tables[0].table_name,
                 "BAZI_API_URL": "https://match-date-nu.vercel.app/api/match",
