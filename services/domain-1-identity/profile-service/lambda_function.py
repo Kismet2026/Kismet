@@ -261,9 +261,19 @@ def handle_user_banned(detail: Dict[str, Any]) -> Dict[str, Any]:
 
 def _normalize_location(location) -> list:
     if isinstance(location, dict):
-        return [float(location.get("latitude", 0)), float(location.get("longitude", 0))]
+        latitude = location.get("latitude", 0)
+        longitude = location.get("longitude", 0)
+        try:
+            return [float(latitude), float(longitude)]
+        except (TypeError, ValueError):
+            return []
     if isinstance(location, list):
-        return [float(c) for c in location]
+        if len(location) != 2:
+            return []
+        try:
+            return [float(location[0]), float(location[1])]
+        except (TypeError, ValueError):
+            return []
     return []
 
 
