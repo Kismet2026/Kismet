@@ -22,11 +22,22 @@
 ## Tech Stack
 
 - **Next.js 14+** (App Router) + TypeScript
-- **Tailwind CSS** + **shadcn/ui** (dark theme)
+- **Tailwind CSS** + **shadcn/ui** (dark theme, custom palette below)
+- **Phosphor Icons** (`@phosphor-icons/react`)
 - **framer-motion** (swipe card gestures)
 - **react-hook-form** + **zod** (form validation)
 - **jwt-decode** (token parsing)
 - **date-fns** (date formatting)
+
+### Color Palette
+
+| Token | Hex | Usage |
+|-------|-----|-------|
+| `--background` | `#331D2C` | Page background |
+| `--card` / `--surface` | `#3F2E3E` | Cards, modals, inputs |
+| `--muted` | `#A78295` | Secondary text, borders, placeholders |
+| `--foreground` | `#EFE1D1` | Primary text, headings |
+| `--accent` | `#D4A056` | CTA buttons, like indicator, BaZi gold badge, match celebration |
 - **Vercel** (deployment, root dir = `frontend/`)
 
 ---
@@ -120,7 +131,7 @@ frontend/
 
 ### Phase 2: Auth Flow (~4h)
 1. `(auth)/layout.tsx` — centered card layout
-2. `SignupForm` → `signup/page.tsx` (email + password + birthDate + birthTime)
+2. `SignupForm` → `signup/page.tsx` (email + password + birthDate; birthTime optional — BaZi only uses first 3 pillars)
 3. After signup → call `POST /verify/send`, redirect to verify page
 4. `VerifyForm` → `verify/page.tsx` (6-digit code → `POST /verify/confirm`, resend → `POST /verify/send`)
 5. `LoginForm` → `login/page.tsx` (→ onboarding if no profile, → discover if exists)
@@ -133,7 +144,7 @@ frontend/
 1. `BottomTabBar` (Discover, Matches, Profile — 3 tabs)
 2. `(main)/layout.tsx` — AuthGuard + BottomTabBar + presence heartbeat
 3. `useProfile` hook (`POST /profiles`, `GET /profiles/{userId}`, `PUT /profiles/{userId}`)
-4. `ProfileForm`: name, gender, interestedIn, birthDate, birthTime, location, bio, interests
+4. `ProfileForm`: name, gender, interestedIn, birthDate, location, bio, interests (birthTime optional)
 5. `onboarding/page.tsx`
 6. `usePhotos` hook (`POST /photos/upload` → S3 PUT, `GET /users/{userId}/photos`, `DELETE`, `PUT .../primary`)
 7. `PhotoUploader` — 2x3 grid, file picker, presigned URL upload
