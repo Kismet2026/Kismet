@@ -13,6 +13,7 @@ interface ProfileFormData {
   bio: string;
   interests: string[];
   location?: { latitude: number; longitude: number };
+  city?: string;
 }
 
 interface ProfileFormProps {
@@ -46,7 +47,9 @@ export function ProfileForm({ initialData, onSubmit, submitLabel = "Continue" }:
   const [bio, setBio] = useState(initialData?.bio ?? "");
   const [interests, setInterests] = useState<string[]>(initialData?.interests ?? []);
   const [location, setLocation] = useState(initialData?.location ?? undefined);
+  const [city, setCity] = useState(initialData?.city ?? "");
   const [locating, setLocating] = useState(false);
+  const [locError, setLocError] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -61,14 +64,23 @@ export function ProfileForm({ initialData, onSubmit, submitLabel = "Continue" }:
   }
 
   function handleLocate() {
-    if (!navigator.geolocation) return;
+    if (!navigator.geolocation) {
+      setLocError("Location not supported on this device");
+      return;
+    }
     setLocating(true);
+    setLocError("");
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         setLocation({ latitude: pos.coords.latitude, longitude: pos.coords.longitude });
         setLocating(false);
       },
-      () => setLocating(false),
+      (err) => {
+        setLocating(false);
+        if (err.code === 1) setLocError("Permission denied — enter city manually");
+        else if (err.code === 3) setLocError("Timed out — enter city manually");
+        else setLocError("Could not get location — enter city manually");
+      },
       { timeout: 10000 }
     );
   }
@@ -84,7 +96,7 @@ export function ProfileForm({ initialData, onSubmit, submitLabel = "Continue" }:
 
     setLoading(true);
     try {
-      await onSubmit({ name: name.trim(), gender, interestedIn, bio: bio.trim(), interests, location });
+      await onSubmit({ name: name.trim(), gender, interestedIn, bio: bio.trim(), interests, location, city: city.trim() });
     } catch (err: unknown) {
       const message = err && typeof err === "object" && "message" in err
         ? (err as { message: string }).message
@@ -191,20 +203,33 @@ export function ProfileForm({ initialData, onSubmit, submitLabel = "Continue" }:
 
       <div className="space-y-2">
         <Label>Location</Label>
-        <Button
-          type="button"
-          variant="outline"
-          onClick={handleLocate}
-          disabled={locating}
-          className="w-full justify-start gap-2"
-        >
-          <MapPin size={18} />
-          {location
-            ? `${location.latitude.toFixed(2)}, ${location.longitude.toFixed(2)}`
-            : locating
-              ? "Getting location..."
-              : "Enable location"}
-        </Button>
+        {!location && (
+          <Button
+            type="button"
+            variant="outline"
+            onClick={handleLocate}
+            disabled={locating}
+            className="w-full justify-start gap-2"
+          >
+            <MapPin size={18} />
+            {locating ? "Getting location..." : "Use my location"}
+          </Button>
+        )}
+        {location && (
+          <p className="text-sm text-primary flex items-center gap-1">
+            <MapPin size={14} /> Location set ({location.latitude.toFixed(2)}, {location.longitude.toFixed(2)})
+          </p>
+        )}
+        {(locError || !location) && (
+          <Input
+            placeholder="Enter your city (e.g. Boston)"
+            value={city}
+            onChange={(e) => setCity(e.target.value)}
+          />
+        )}
+        {locError && (
+          <p className="text-xs text-muted-foreground">{locError}</p>
+        )}
       </div>
 
       <Button type="submit" className="w-full" disabled={loading}>
