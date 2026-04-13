@@ -29,7 +29,7 @@ export function SwipeCard({ candidate, onSwipe, onTap, isTop }: SwipeCardProps) 
   function handleDragEnd(_: unknown, info: PanInfo) {
     const dx = Math.abs(info.offset.x);
     const dy = Math.abs(info.offset.y);
-    if (dx < 10 && dy < 10 && onTap) {
+    if (dx < 30 && dy < 30 && onTap) {
       onTap();
       return;
     }
@@ -121,6 +121,9 @@ export function SwipeCard({ candidate, onSwipe, onTap, isTop }: SwipeCardProps) 
           )}
           {candidate.bio && (
             <p className="text-sm text-white/80 mt-2 line-clamp-2">{candidate.bio}</p>
+          )}
+          {isTop && (
+            <p className="text-xs text-white/40 mt-2">Tap for details</p>
           )}
 
           {/* Inline action buttons */}
