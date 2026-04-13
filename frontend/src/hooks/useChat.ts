@@ -6,15 +6,6 @@ import { getUserIdFromToken } from "@/lib/auth";
 import { KismetWebSocket } from "@/lib/ws";
 import type { Message, PaginatedResponse } from "@/types";
 
-const MOCK_MESSAGES: Message[] = [
-  { messageId: "m1", matchId: "match-1", senderId: "u1", content: "Hey! I saw we have a 92 BaZi score 😊", messageType: "text", timestamp: "2026-04-10T14:00:00Z" },
-  { messageId: "m2", matchId: "match-1", senderId: "test-123", content: "That's amazing! I've never seen one that high", messageType: "text", timestamp: "2026-04-10T14:01:00Z" },
-  { messageId: "m3", matchId: "match-1", senderId: "u1", content: "Right? The stars really aligned for us ✨", messageType: "text", timestamp: "2026-04-10T14:02:00Z" },
-  { messageId: "m4", matchId: "match-1", senderId: "test-123", content: "So what's your story? What brought you to Boston?", messageType: "text", timestamp: "2026-04-10T14:05:00Z" },
-  { messageId: "m5", matchId: "match-1", senderId: "u1", content: "I moved here for grad school! Studying astrophysics at MIT. You?", messageType: "text", timestamp: "2026-04-10T14:10:00Z" },
-  { messageId: "m6", matchId: "match-1", senderId: "u1", content: "Hey! Our BaZi score is amazing 😊", messageType: "text", timestamp: "2026-04-10T14:30:00Z" },
-];
-
 export function useChat(matchId: string) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
@@ -33,9 +24,7 @@ export function useChat(matchId: string) {
         lastTimestampRef.current = data.items[data.items.length - 1].timestamp;
       }
     } catch {
-      // Mock data for demo
-      setMessages(MOCK_MESSAGES.filter((m) => m.matchId === matchId || matchId.startsWith("match")));
-      lastTimestampRef.current = MOCK_MESSAGES[MOCK_MESSAGES.length - 1]?.timestamp ?? "";
+      setMessages([]);
     } finally {
       setLoading(false);
     }

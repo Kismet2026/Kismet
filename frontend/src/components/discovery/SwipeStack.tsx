@@ -28,7 +28,7 @@ export function SwipeStack({ candidates, onSwipe, onMatch }: SwipeStackProps) {
 
   return (
     <div className="flex flex-col items-center w-full">
-      <div className="relative w-full max-w-sm" style={{ height: "min(60dvh, 500px)" }}>
+      <div className="relative w-full" style={{ height: "min(72dvh, 580px)" }}>
         <AnimatePresence>
           {visibleCards.map((candidate, i) => (
             <SwipeCard
