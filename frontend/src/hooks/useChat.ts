@@ -21,13 +21,7 @@ export function useChat(matchId: string) {
       const sorted = (data.items || []).sort((a, b) =>
         a.timestamp.localeCompare(b.timestamp)
       );
-      setMessages((prev) => {
-        const serverIds = new Set(sorted.map((m) => m.messageId));
-        const pendingOptimistic = prev.filter(
-          (m) => m.messageId.startsWith("temp-") && !serverIds.has(m.messageId)
-        );
-        return [...sorted, ...pendingOptimistic];
-      });
+      setMessages(sorted);
     } catch {
       // Keep existing messages on error
     }
