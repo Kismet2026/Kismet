@@ -18,7 +18,7 @@ export default function ChatPage({
 }) {
   const { matchId } = use(params);
   const router = useRouter();
-  const { messages, loading, sendMessage, myId } = useChat(matchId);
+  const { messages, loading, sendMessage, myId, debugInfo } = useChat(matchId);
   const { icebreakers } = useIcebreakers(matchId);
   const [showReport, setShowReport] = useState(false);
 
@@ -37,6 +37,9 @@ export default function ChatPage({
         </button>
         <div className="flex-1">
           <h2 className="font-semibold text-foreground">Chat</h2>
+          {debugInfo && (
+            <p className="text-[10px] text-muted-foreground font-mono">{debugInfo}</p>
+          )}
         </div>
         <button
           onClick={() => setShowReport(true)}
