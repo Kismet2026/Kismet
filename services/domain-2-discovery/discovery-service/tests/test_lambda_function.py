@@ -89,6 +89,7 @@ class TestHandleProfileCompleted:
         assert item['displayName'] == 'Bob'
         assert item['age'] >= 27
         assert item['birthDate'] == '1998-03-15'
+        from decimal import Decimal
         assert item['location'] == [Decimal('42.36'), Decimal('-71.06')]
 
         # Verify BaZi cache was pre-warmed

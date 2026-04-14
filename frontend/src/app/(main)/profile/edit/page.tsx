@@ -2,13 +2,16 @@
 
 import { useRouter } from "next/navigation";
 import { useProfile } from "@/hooks/useProfile";
+import { usePhotos } from "@/hooks/usePhotos";
 import { ProfileForm } from "@/components/profile/ProfileForm";
+import { PhotoUploader } from "@/components/profile/PhotoUploader";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { ArrowLeft } from "@phosphor-icons/react";
 
 export default function ProfileEditPage() {
   const router = useRouter();
   const { profile, loading, updateProfile } = useProfile();
+  const { photos, uploading, uploadPhoto, deletePhoto, setPrimary } = usePhotos();
 
   if (loading) return <LoadingSpinner size={48} className="flex-1 py-20" />;
 
@@ -23,6 +26,20 @@ export default function ProfileEditPage() {
         </button>
         <h1 className="text-2xl font-bold">Edit Profile</h1>
       </div>
+
+      {/* Photo management */}
+      <div className="mb-6">
+        <h2 className="text-sm font-medium text-muted-foreground mb-3">Photos</h2>
+        <PhotoUploader
+          photos={photos}
+          uploading={uploading}
+          onUpload={async (file) => { await uploadPhoto(file); }}
+          onDelete={async (id) => { await deletePhoto(id); }}
+          onSetPrimary={async (id) => { await setPrimary(id); }}
+        />
+      </div>
+
+      {/* Profile form */}
       <ProfileForm
         initialData={profile ? {
           name: profile.name,
