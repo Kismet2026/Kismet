@@ -8,7 +8,7 @@ import { useAuth } from "@/context/AuthContext";
 import { api } from "@/lib/api";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { Button } from "@/components/ui/button";
-import { PencilSimple, SignOut, MapPin, Calendar, Heart, EnvelopeSimple } from "@phosphor-icons/react";
+import { PencilSimple, SignOut, Trash, MapPin, Calendar, Heart, EnvelopeSimple } from "@phosphor-icons/react";
 import { calculateAge } from "@/lib/utils";
 
 function EmailPreferences() {
@@ -195,11 +195,72 @@ export default function ProfilePage() {
           logout();
           router.push("/login");
         }}
-        className="flex items-center justify-center gap-2 w-full mt-8 py-3 text-sm text-destructive hover:text-destructive/80 transition-colors"
+        className="flex items-center justify-center gap-2 w-full mt-8 py-3 text-sm text-muted-foreground hover:text-foreground transition-colors"
       >
         <SignOut size={18} />
         Log Out
       </button>
+
+      {/* Delete Account */}
+      <DeleteAccount userId={profile.userId} />
+    </div>
+  );
+}
+
+function DeleteAccount({ userId }: { userId: string }) {
+  const router = useRouter();
+  const { logout } = useAuth();
+  const [confirming, setConfirming] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  async function handleDelete() {
+    setDeleting(true);
+    try {
+      await api.delete(`/profiles/${userId}`);
+    } catch {
+      // Continue with local cleanup even if API fails
+    }
+    logout();
+    router.push("/");
+  }
+
+  if (!confirming) {
+    return (
+      <button
+        onClick={() => setConfirming(true)}
+        className="flex items-center justify-center gap-2 w-full mt-2 py-3 text-sm text-destructive/60 hover:text-destructive transition-colors"
+      >
+        <Trash size={16} />
+        Delete Account
+      </button>
+    );
+  }
+
+  return (
+    <div className="mt-2 bg-destructive/10 rounded-xl p-4 space-y-3">
+      <p className="text-sm text-destructive font-medium">Delete your account?</p>
+      <p className="text-xs text-muted-foreground">
+        This will permanently delete your profile, photos, matches, and messages. This cannot be undone.
+      </p>
+      <div className="flex gap-2">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setConfirming(false)}
+          className="flex-1"
+        >
+          Cancel
+        </Button>
+        <Button
+          variant="destructive"
+          size="sm"
+          onClick={handleDelete}
+          disabled={deleting}
+          className="flex-1"
+        >
+          {deleting ? "Deleting..." : "Delete Forever"}
+        </Button>
+      </div>
     </div>
   );
 }
