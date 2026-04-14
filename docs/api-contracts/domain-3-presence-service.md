@@ -44,7 +44,7 @@ No request body required. The userId is extracted from the JWT.
 
 ---
 
-### GET /presence/{userId}
+### GET /presence/user/{userId}
 
 Get a user's presence status.
 
@@ -53,7 +53,7 @@ Get a user's presence status.
 **Request:**
 
 ```
-GET /presence/user-456
+GET /presence/user/user-456
 ```
 
 | Param | Type | Required | Description |
@@ -72,8 +72,8 @@ GET /presence/user-456
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `status` | string | `"online"` or `"offline"` |
-| `lastSeen` | string (ISO 8601) | Last heartbeat timestamp. Present for both online and offline users. |
+| `status` | string | Current status stored in the presence record, typically `"online"` |
+| `lastSeen` | string (ISO 8601) | Last heartbeat timestamp from the active presence record |
 
 **Errors:**
 

@@ -5,6 +5,8 @@ from aws_cdk import (
     aws_apigateway as apigateway,
     aws_events as events,
     aws_s3 as s3,
+    aws_cloudfront as cloudfront,
+    aws_cloudfront_origins as origins,
     aws_kinesis as kinesis,
     aws_sns as sns,
 )
@@ -100,6 +102,20 @@ class SharedStack(cdk.Stack):
             auto_delete_objects=True,
         )
 
+        self.photos_distribution = cloudfront.Distribution(
+            self,
+            "PhotosDistribution",
+            comment="Kismet profile photos CDN",
+            default_behavior=cloudfront.BehaviorOptions(
+                origin=origins.S3BucketOrigin(self.photos_bucket),
+                viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+                allowed_methods=cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS,
+                cache_policy=cloudfront.CachePolicy.CACHING_OPTIMIZED,
+                compress=True,
+            ),
+        )
+        self.photos_cdn_base_url = f"https://{self.photos_distribution.distribution_domain_name}"
+
         self.analytics_bucket = s3.Bucket(
             self,
             "AnalyticsBucket",
@@ -134,4 +150,10 @@ class SharedStack(cdk.Stack):
         cdk.CfnOutput(self, "ApiUrl", value=self.api.url)
         cdk.CfnOutput(self, "EventBusArn", value=self.event_bus.event_bus_arn)
         cdk.CfnOutput(self, "PhotosBucketName", value=self.photos_bucket.bucket_name)
+        cdk.CfnOutput(
+            self,
+            "PhotosCdnBaseUrl",
+            value=self.photos_cdn_base_url,
+            description="CloudFront base URL for profile photo delivery",
+        )
         cdk.CfnOutput(self, "ActivityStreamArn", value=self.activity_stream.stream_arn)

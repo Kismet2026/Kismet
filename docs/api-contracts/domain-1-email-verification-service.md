@@ -1,13 +1,23 @@
 # Email Verification Service — API Contract
 
+> Legacy contract only. This SES-based `/verify/*` flow is not part of the deployed architecture anymore.
+>
+> The current production flow is Cognito-native:
+> - `POST /auth/signup` creates the user and triggers the email code
+> - `POST /auth/confirm` confirms the code
+>
+> PR #90 removed the custom verification service from the Domain 1 CDK stack, and PR #99 added the replacement `POST /auth/confirm` endpoint in auth-service.
+
 **Owner:** KS
 **Domain:** Identity & Profiles
 **Base Path:** `/verify`
 **AWS Services:** SES, Lambda, Cognito
 
+**Status:** Legacy / not deployed
+
 ---
 
-## Endpoints
+## Historical Endpoints
 
 ### POST /verify/send
 
@@ -125,7 +135,7 @@ GET /verify/status
 
 ---
 
-## DynamoDB Table
+## Historical DynamoDB Table
 
 **Table:** `kismet-verifications`
 

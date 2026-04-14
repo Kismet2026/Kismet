@@ -45,6 +45,18 @@ def _profile_event(user_id, name='Alice', gender='female', birth_date='1999-05-1
     }
 
 
+def _profile_banned_event(user_id, reason='harassment'):
+    return {
+        'source': 'kismet.profile-service',
+        'detail-type': 'profile.banned',
+        'detail': {
+            'userId': user_id,
+            'reason': reason,
+            'timestamp': '2026-04-12T18:00:00Z',
+        },
+    }
+
+
 class TestCalculateAge:
     def test_normal_age(self):
         age = _calculate_age('2000-01-01')
@@ -93,6 +105,29 @@ class TestHandleProfileCompleted:
 
         assert resp['statusCode'] == 200
         mock_cache.assert_not_called()
+
+
+class TestHandleProfileBanned:
+    @patch('lambda_function.table')
+    def test_deletes_profile_from_discovery(self, mock_table):
+        resp = handler(_profile_banned_event('user-ban'), None)
+
+        assert resp['statusCode'] == 200
+        mock_table.delete_item.assert_called_once_with(Key={
+            'PK': 'PROFILE#user-ban',
+            'SK': 'META',
+        })
+
+    @patch('lambda_function.table')
+    def test_missing_user_id_returns_400(self, mock_table):
+        resp = handler({
+            'source': 'kismet.profile-service',
+            'detail-type': 'profile.banned',
+            'detail': {},
+        }, None)
+
+        assert resp['statusCode'] == 400
+        mock_table.delete_item.assert_not_called()
 
 
 class TestBaziCache:

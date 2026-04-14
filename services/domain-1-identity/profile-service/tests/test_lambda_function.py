@@ -146,6 +146,23 @@ class GetProfileTests(unittest.TestCase):
             self.assertEqual(response["statusCode"], 404)
             self.assertEqual(payload["code"], "NOT_FOUND")
 
+    def test_get_banned_profile_returns_404(self):
+        with patch.dict("os.environ", ENV), \
+             patch("lambda_function.dynamodb") as mock_dynamodb:
+
+            mock_dynamodb.Table.return_value.get_item.return_value = {"Item": {
+                "PK": "USER#user-123",
+                "SK": "PROFILE",
+                "userId": "user-123",
+                "status": "banned",
+            }}
+
+            response = handler(make_event("/profiles/user-123", "GET"), self.context)
+            payload = json.loads(response["body"])
+
+            self.assertEqual(response["statusCode"], 404)
+            self.assertEqual(payload["code"], "NOT_FOUND")
+
     def test_get_profile_route_extracts_user_id(self):
         with patch.dict("os.environ", ENV), \
              patch("lambda_function.dynamodb") as mock_dynamodb:
@@ -331,6 +348,66 @@ class RoutingTests(unittest.TestCase):
 
         self.assertEqual(response["statusCode"], 400)
         self.assertEqual(payload["code"], "VALIDATION_ERROR")
+
+
+class UserBannedEventTests(unittest.TestCase):
+    def setUp(self):
+        self.context = SimpleNamespace(aws_request_id="req-456")
+
+    def test_user_banned_marks_profile_and_publishes_profile_banned(self):
+        with patch.dict("os.environ", ENV), \
+             patch("lambda_function.EVENT_BUS_NAME", ENV["EVENT_BUS_NAME"]), \
+             patch("lambda_function.dynamodb") as mock_dynamodb, \
+             patch("lambda_function.events") as mock_events:
+
+            mock_table = mock_dynamodb.Table.return_value
+            mock_table.get_item.side_effect = [
+                {"Item": {"userId": "user-123", "status": "active"}},
+                {"Item": {
+                    "userId": "user-123",
+                    "status": "banned",
+                    "banReason": "harassment",
+                    "banReportId": "report-123",
+                    "bannedAt": "2026-04-12T18:00:00Z",
+                }},
+            ]
+            mock_table.update_item.return_value = {}
+            mock_events.put_events.return_value = {"FailedEntryCount": 0, "Entries": [{"EventId": "e1"}]}
+
+            response = handler({
+                "source": "kismet.report-service",
+                "detail-type": "user.banned",
+                "detail": {
+                    "userId": "user-123",
+                    "reason": "harassment",
+                    "reportId": "report-123",
+                    "timestamp": "2026-04-12T18:00:00Z",
+                },
+            }, self.context)
+            payload = json.loads(response["body"])
+
+            self.assertEqual(response["statusCode"], 200)
+            self.assertEqual(payload["status"], "banned")
+            mock_table.update_item.assert_called_once()
+            mock_events.put_events.assert_called_once()
+            event_entry = mock_events.put_events.call_args[1]["Entries"][0]
+            self.assertEqual(event_entry["DetailType"], "profile.banned")
+            detail = json.loads(event_entry["Detail"])
+            self.assertEqual(detail["userId"], "user-123")
+            self.assertEqual(detail["reason"], "harassment")
+            self.assertEqual(detail["reportId"], "report-123")
+
+    def test_user_banned_missing_user_id_returns_validation_error(self):
+        with patch.dict("os.environ", ENV):
+            response = handler({
+                "source": "kismet.report-service",
+                "detail-type": "user.banned",
+                "detail": {},
+            }, self.context)
+            payload = json.loads(response["body"])
+
+            self.assertEqual(response["statusCode"], 400)
+            self.assertEqual(payload["code"], "VALIDATION_ERROR")
 
 
 def make_event(path, method, body=None, raw_body=None):

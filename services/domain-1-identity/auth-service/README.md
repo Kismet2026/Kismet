@@ -2,21 +2,21 @@
 
 **Owner(s):** Quinn Gao
 **Domain:** Identity & Profiles
-**Status:** 🟡 In progress
+**Status:** 🟢 Deployed
 
 ## Description
-Handles account sign-up, login, token refresh, and logout for Kismet users.
+Handles Cognito-backed sign-up, email confirmation, login, token refresh, and logout for Kismet users.
 
 ## AWS Services Used
-- Lambda — route `/auth/*` requests and host service logic
-- Cognito — primary identity store and JWT/token management
-- DynamoDB — planned persistence for auth-side user metadata in `kismet-users`
-- EventBridge — planned publication of `user.created`
+- Lambda — routes `/auth/*` requests and hosts service logic
+- Cognito — identity store, email confirmation, and JWT/token management
+- DynamoDB — persists auth-side user metadata in `kismet-users`
+- EventBridge — publishes `user.created`
 
 ## Scaffold Status
-- Week 1 skeleton is in place.
-- All documented routes are wired in `lambda_function.py`.
-- Each route currently returns `501 NOT_IMPLEMENTED` until Week 2 service logic is built.
+- Service logic is implemented in `lambda_function.py`.
+- Cognito sends the verification code during signup, and clients confirm with `POST /auth/confirm`.
+- Unit tests cover success paths plus common Cognito error handling.
 
 ## API Endpoints
 
@@ -57,6 +57,21 @@ Handles account sign-up, login, token refresh, and logout for Kismet users.
 }
 ```
 
+### POST /auth/confirm
+**Request:**
+```json
+{
+  "email": "student@university.edu",
+  "code": "123456"
+}
+```
+**Response:**
+```json
+{
+  "message": "Email confirmed successfully"
+}
+```
+
 ### POST /auth/refresh
 **Request:**
 ```json
@@ -93,9 +108,8 @@ Handles account sign-up, login, token refresh, and logout for Kismet users.
 - **Events consumed:** None
 
 ## Integration Notes
-- `docs/api-contracts/domain-1-auth-service.md` says `user.created` is consumed by Profile Service and Email Verification Service.
-- `docs/event-schema.json` and `docs/Infrastructure_Design.md` currently list Email Service and Activity Logger instead.
-- Confirm the downstream consumers before implementing event publication in Week 2.
+- Legacy `/verify/*` docs describe the removed SES-based verification flow and are kept only as historical reference.
+- The deployed signup flow is Cognito-native: `POST /auth/signup` sends the code and `POST /auth/confirm` completes verification.
 
 ## Setup
 ```bash

@@ -25,10 +25,17 @@ swipe_table = dynamodb.Table(SWIPE_TABLE_NAME)
 
 
 def handler(event, context):
-    # EventBridge event (profile.completed)
+    detail_type = event.get('detail-type') or event.get('detailType')
+
     if event.get('source') == 'kismet.profile-service':
-        logger.info('EventBridge: profile.completed')
-        return handle_profile_completed(event)
+        if detail_type == 'profile.completed':
+            logger.info('EventBridge: profile.completed')
+            return handle_profile_completed(event)
+        if detail_type == 'profile.banned':
+            logger.info('EventBridge: profile.banned')
+            return handle_profile_banned(event)
+        logger.info('Ignoring profile-service event: %s', detail_type)
+        return {'statusCode': 200, 'body': 'Ignored event'}
 
     method = _get_method(event)
     path = _get_path(event)
@@ -79,6 +86,20 @@ def handle_profile_completed(event):
         _ensure_bazi_cache(birth_date)
 
     return {'statusCode': 200, 'body': 'Profile indexed'}
+
+
+def handle_profile_banned(event):
+    """Remove a banned user from the discovery pool."""
+    detail = _get_event_detail(event)
+    user_id = detail.get('userId')
+    if not user_id:
+        return {'statusCode': 400, 'body': 'Missing userId'}
+
+    table.delete_item(Key={
+        'PK': f'PROFILE#{user_id}',
+        'SK': 'META',
+    })
+    return {'statusCode': 200, 'body': 'Profile removed from discovery'}
 
 
 def get_candidates(event):
@@ -305,6 +326,19 @@ def _get_user_id(event):
         or {}
     )
     return claims.get('sub') or claims.get('cognito:username')
+
+
+def _get_event_detail(event):
+    detail = event.get('detail') or {}
+    if isinstance(detail, dict):
+        return detail
+    if isinstance(detail, str):
+        try:
+            parsed = json.loads(detail)
+        except json.JSONDecodeError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
 
 
 CORS_HEADERS = {

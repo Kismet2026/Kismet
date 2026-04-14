@@ -2,24 +2,24 @@
 
 **Owner(s):** Zhiping
 **Domain:** Identity & Profiles
-**Status:** 🟡 In progress
+**Status:** 🟡 Ready for deploy
 
 ## Description
 Manages profile photo upload, listing, deletion, and primary-photo selection workflows.
+This rollout fronts the shared photos bucket with a dedicated CloudFront distribution so photo reads use stable public URLs without making S3 public.
 
 ## AWS Services Used
-- Lambda — route `/photos/*` and `/users/*/photos` requests and host service logic
-- S3 — planned storage for uploaded photo objects
-- CloudFront — planned CDN delivery for profile photo URLs
-- DynamoDB — planned metadata storage in `kismet-photos`
-- EventBridge — planned publication of `photo.uploaded`
-- Cognito authorizer — planned JWT enforcement through shared API Gateway
+- Lambda — routes `/photos/*` and `/users/*/photos` requests and hosts service logic
+- S3 — stores uploaded photo objects in the shared photos bucket
+- CloudFront — serves stable public photo URLs via `PHOTOS_CDN_BASE_URL` after the shared/domain1 rollout is deployed
+- DynamoDB — stores metadata in `kismet-photos`
+- EventBridge — publishes `photo.uploaded`
+- Cognito authorizer — enforces JWT auth through shared API Gateway
 
 ## Scaffold Status
-- Week 1 skeleton is in place.
-- All documented HTTP routes are wired in `lambda_function.py`.
-- `template.yaml` includes the Lambda function and the `kismet-photos` DynamoDB table scaffold, plus parameters for the shared photos bucket and CDN base URL.
-- Each route currently returns `501 NOT_IMPLEMENTED` until Week 2 service logic is built.
+- Service logic is implemented in `lambda_function.py`.
+- This branch sources `PHOTOS_CDN_BASE_URL` from the shared photos CloudFront distribution in `SharedStack`.
+- After deploying `KismetShared` and then `KismetDomain1`, `GET /users/{userId}/photos` and `photo.uploaded` will return CloudFront-backed photo URLs.
 
 ## API Endpoints
 
@@ -86,7 +86,7 @@ Manages profile photo upload, listing, deletion, and primary-photo selection wor
 ```
 
 ## Dependencies
-- **Depends on:** Shared API Gateway/Cognito authorizer, `kismet-photos` table, shared photos bucket, CloudFront distribution/base URL, `kismet-events` EventBridge bus
+- **Depends on:** Shared API Gateway/Cognito authorizer, `kismet-photos` table, shared photos bucket, shared photos CloudFront distribution/base URL, `kismet-events` EventBridge bus
 - **Called by:** Frontend (React) via photo-service routes
 - **Events published:** `photo.uploaded`
 - **Events consumed:** None
@@ -94,7 +94,8 @@ Manages profile photo upload, listing, deletion, and primary-photo selection wor
 ## Integration Notes
 - `docs/api-contracts/domain-1-photo-service.md` lists Image Moderation Service as the consumer of `photo.uploaded`, while `docs/system-design/event-schema.json`, `docs/guides/Service_Communication_Guide.md`, and `docs/system-design/Infrastructure_Design.md` also list Activity Logger.
 - `docs/api-contracts/domain-1-photo-service.md` uses bucket name `kismet-photos-dev`, while `infra/stacks/shared_stack.py` currently provisions `kismet-photos-{account}-dev`.
-- `docs/system-design/Infrastructure_Design.md` documents a dedicated CloudFront photos distribution, but the current shared infrastructure code only provisions the S3 bucket. Confirm where the CDN distribution will live before Week 2 implementation.
+- This rollout adds a dedicated photos CloudFront distribution in shared infrastructure and injects its base URL into photo-service.
+- Keep the S3 bucket private and treat CloudFront as the canonical delivery URL for photo reads and `photo.uploaded` events.
 
 ## Setup
 ```bash

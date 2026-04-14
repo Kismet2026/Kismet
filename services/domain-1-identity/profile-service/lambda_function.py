@@ -28,6 +28,8 @@ VALID_INTERESTED_IN = {"male", "female", "non-binary", "everyone"}
 
 def handler(event, context):
     event = event or {}
+    event_source = event.get("source")
+    detail_type = event.get("detail-type") or event.get("detailType")
     method = _get_method(event)
     path = _get_path(event)
     user_id = _get_user_id(event)
@@ -35,7 +37,10 @@ def handler(event, context):
     profile_match = PROFILE_DETAIL_PATTERN.match(path)
 
     try:
-        if method == "POST" and path == "/profiles":
+        if event_source == "kismet.report-service" and detail_type == "user.banned":
+            operation = "handleUserBanned"
+            return handle_user_banned(_get_event_detail(event))
+        elif method == "POST" and path == "/profiles":
             operation = "createProfile"
             payload, error = _parse_body(event)
             if error is not None:
@@ -97,6 +102,7 @@ def handle_create(user_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
         "PK": f"USER#{user_id}",
         "SK": "PROFILE",
         "userId": user_id,
+        "status": "active",
         "name": name,
         "gender": gender,
         "interestedIn": interested_in,
@@ -127,7 +133,7 @@ def handle_get(user_id: str) -> Dict[str, Any]:
     result = table.get_item(Key={"PK": f"USER#{user_id}", "SK": "PROFILE"})
     item = result.get("Item")
 
-    if not item:
+    if not item or item.get("status") == "banned":
         return _response(404, {"code": "NOT_FOUND", "message": "Profile not found."})
 
     profile = {k: v for k, v in item.items() if k not in ("PK", "SK")}
@@ -197,6 +203,82 @@ def handle_delete(caller_id: str, user_id: str) -> Dict[str, Any]:
     return _response(200, {"message": "Profile deleted successfully"})
 
 
+def handle_user_banned(detail: Dict[str, Any]) -> Dict[str, Any]:
+    user_id = (detail.get("userId") or "").strip()
+    if not user_id:
+        return _response(400, {"code": "VALIDATION_ERROR", "message": "userId is required."})
+
+    table = dynamodb.Table(PROFILES_TABLE_NAME)
+    result = table.get_item(Key={"PK": f"USER#{user_id}", "SK": "PROFILE"})
+    item = result.get("Item")
+    if not item:
+        logger.warning("user.banned received for missing profile: %s", user_id)
+        return _response(200, {"message": "Profile not found; nothing to ban.", "userId": user_id})
+
+    banned_at = detail.get("timestamp") or datetime.now(timezone.utc).isoformat()
+    reason = (detail.get("reason") or "").strip()
+    report_id = (detail.get("reportId") or "").strip()
+
+    if item.get("status") != "banned":
+        expr_names = {"#status": "status"}
+        expr_values: Dict[str, Any] = {
+            ":status": "banned",
+            ":updatedAt": banned_at,
+            ":bannedAt": banned_at,
+        }
+        set_parts = [
+            "#status = :status",
+            "updatedAt = :updatedAt",
+            "bannedAt = :bannedAt",
+        ]
+        if reason:
+            expr_values[":banReason"] = reason
+            set_parts.append("banReason = :banReason")
+        if report_id:
+            expr_values[":banReportId"] = report_id
+            set_parts.append("banReportId = :banReportId")
+
+        table.update_item(
+            Key={"PK": f"USER#{user_id}", "SK": "PROFILE"},
+            UpdateExpression=f"SET {', '.join(set_parts)}",
+            ExpressionAttributeNames=expr_names,
+            ExpressionAttributeValues=expr_values,
+        )
+        item = table.get_item(Key={"PK": f"USER#{user_id}", "SK": "PROFILE"}).get("Item", item)
+
+    events.put_events(Entries=[{
+        "Source": "kismet.profile-service",
+        "DetailType": "profile.banned",
+        "Detail": json.dumps({
+            "userId": user_id,
+            "reason": item.get("banReason") or reason,
+            "reportId": item.get("banReportId") or report_id,
+            "timestamp": item.get("bannedAt") or banned_at,
+        }),
+        "EventBusName": EVENT_BUS_NAME,
+    }])
+
+    return _response(200, {"userId": user_id, "status": "banned"})
+
+
+def _normalize_location(location) -> list:
+    if isinstance(location, dict):
+        latitude = location.get("latitude", 0)
+        longitude = location.get("longitude", 0)
+        try:
+            return [float(latitude), float(longitude)]
+        except (TypeError, ValueError):
+            return []
+    if isinstance(location, list):
+        if len(location) != 2:
+            return []
+        try:
+            return [float(location[0]), float(location[1])]
+        except (TypeError, ValueError):
+            return []
+    return []
+
+
 def _build_event_detail(item: Dict[str, Any]) -> Dict[str, Any]:
     """Build event payload with all fields D2 discovery-service needs."""
     return {
@@ -206,7 +288,7 @@ def _build_event_detail(item: Dict[str, Any]) -> Dict[str, Any]:
         "birthTime": item.get("birthTime", ""),
         "gender": item.get("gender", ""),
         "preferred_gender": item.get("interestedIn", ""),
-        "location_coordinates": [float(v) for v in (item.get("location", {}).values() if isinstance(item.get("location"), dict) else item.get("location", []))],
+        "location_coordinates": _normalize_location(item.get("location")),
         "city": item.get("city", ""),
         "avatarUrl": item.get("avatarUrl", ""),
         "bio": item.get("bio", ""),
@@ -218,6 +300,19 @@ def _build_event_detail(item: Dict[str, Any]) -> Dict[str, Any]:
 def _get_user_id(event: Dict[str, Any]) -> Optional[str]:
     claims = event.get("requestContext", {}).get("authorizer", {}).get("claims", {})
     return claims.get("sub") or claims.get("cognito:username")
+
+
+def _get_event_detail(event: Dict[str, Any]) -> Dict[str, Any]:
+    detail = event.get("detail") or {}
+    if isinstance(detail, dict):
+        return detail
+    if isinstance(detail, str):
+        try:
+            parsed = json.loads(detail)
+        except json.JSONDecodeError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
 
 
 def _get_method(event: Dict[str, Any]) -> str:

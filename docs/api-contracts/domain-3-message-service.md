@@ -59,7 +59,7 @@ Persist a new message in a conversation.
 
 ---
 
-### GET /messages/{matchId}
+### GET /messages/match/{matchId}
 
 Get conversation history, paginated, newest first.
 
@@ -68,7 +68,7 @@ Get conversation history, paginated, newest first.
 **Request:**
 
 ```
-GET /messages/{matchId}?limit=50&cursor=xxx
+GET /messages/match/{matchId}?limit=50&cursor=xxx
 ```
 
 | Param | Type | Required | Default | Description |
@@ -108,52 +108,6 @@ GET /messages/{matchId}?limit=50&cursor=xxx
 
 | Status | Code | Condition |
 |--------|------|-----------|
-| 401 | `UNAUTHORIZED` | Not logged in |
-| 403 | `FORBIDDEN` | User is not a participant of this match |
-| 404 | `NOT_FOUND` | matchId does not exist |
-
----
-
-### GET /messages/{matchId}/since/{timestamp}
-
-Get all messages after a given timestamp. Used by the polling approach in Chat Gateway.
-
-**Auth:** Required (JWT)
-
-**Request:**
-
-```
-GET /messages/match-123/since/2026-04-01T12:00:00Z
-```
-
-| Param | Type | Required | Description |
-|-------|------|----------|-------------|
-| `matchId` | string (path) | Yes | The match/conversation ID |
-| `timestamp` | string (path, ISO 8601) | Yes | Return messages after this time |
-
-**Response (200):**
-
-```json
-{
-  "items": [
-    {
-      "messageId": "msg-002",
-      "matchId": "match-123",
-      "senderId": "user-456",
-      "content": "Hi! How are you?",
-      "messageType": "text",
-      "timestamp": "2026-04-01T12:01:00Z"
-    }
-  ],
-  "count": 1
-}
-```
-
-**Errors:**
-
-| Status | Code | Condition |
-|--------|------|-----------|
-| 400 | `VALIDATION_ERROR` | timestamp is not valid ISO 8601 |
 | 401 | `UNAUTHORIZED` | Not logged in |
 | 403 | `FORBIDDEN` | User is not a participant of this match |
 | 404 | `NOT_FOUND` | matchId does not exist |

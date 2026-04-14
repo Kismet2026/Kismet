@@ -7,6 +7,7 @@ by downstream services across domain boundaries.
 Event chains tested:
   D1 auth    → user.created       → D5 email-service, D6 activity-logger
   D1 profile → profile.completed  → D2 discovery, D2 recommendation, D6 activity-logger
+  D4 report  → user.banned        → D1 profile-service → profile.banned → D2 discovery
   D1 photo   → photo.uploaded     → D4 image-moderation
   D2 swipe   → swipe.created      → D2 match, D6 activity-logger
   D2 match   → match.created      → D3 icebreaker, D5 notifications, D6 activity-logger
@@ -713,6 +714,90 @@ class TestUserReportedToD6(unittest.TestCase):
     def test_timestamp_not_createdAt(self):
         self.assertIn("timestamp", self.USER_REPORTED)
         self.assertNotIn("createdAt", self.USER_REPORTED)
+
+
+# ============================================================================
+# 10b. D4 → D1 → D2: user.banned → profile.banned
+# ============================================================================
+
+class TestUserBannedEventChain(unittest.TestCase):
+    """D4 report-service publishes user.banned; D1 profile-service republishes profile.banned; D2 discovery consumes it."""
+
+    USER_BANNED = {
+        "userId": "user-bob",
+        "reportId": "report-001",
+        "reason": "harassment",
+        "timestamp": "2026-04-01T14:05:00Z",
+    }
+
+    PROFILE_BANNED = {
+        "userId": "user-bob",
+        "reportId": "report-001",
+        "reason": "harassment",
+        "timestamp": "2026-04-01T14:05:00Z",
+    }
+
+    def test_user_banned_has_required_fields(self):
+        for field in ["userId", "reportId", "reason", "timestamp"]:
+            self.assertIn(field, self.USER_BANNED)
+
+    def test_profile_banned_has_required_fields(self):
+        for field in ["userId", "reportId", "reason", "timestamp"]:
+            self.assertIn(field, self.PROFILE_BANNED)
+
+    def test_profile_banned_preserves_user_id_for_discovery_cleanup(self):
+        self.assertEqual(self.USER_BANNED["userId"], self.PROFILE_BANNED["userId"])
+
+    def test_profile_service_emits_profile_banned(self):
+        with patch.dict("os.environ", {
+            "PROFILES_TABLE_NAME": "kismet-profiles",
+            "EVENT_BUS_NAME": "kismet-events",
+        }):
+            profile_mod = _load_module("d1_profile_banned_lambda_function", D1_PROFILE)
+
+            with patch.object(profile_mod, "dynamodb") as mock_dynamodb, \
+                 patch.object(profile_mod, "events") as mock_events:
+
+                mock_table = mock_dynamodb.Table.return_value
+                mock_table.get_item.side_effect = [
+                    {"Item": {"userId": "user-bob", "status": "active"}},
+                    {"Item": {
+                        "userId": "user-bob",
+                        "status": "banned",
+                        "banReason": "harassment",
+                        "banReportId": "report-001",
+                        "bannedAt": "2026-04-01T14:05:00Z",
+                    }},
+                ]
+                mock_table.update_item.return_value = {}
+                mock_events.put_events.return_value = {"FailedEntryCount": 0}
+
+                response = profile_mod.handler(
+                    eb_event("kismet.report-service", "user.banned", self.USER_BANNED),
+                    None,
+                )
+                self.assertEqual(response["statusCode"], 200)
+
+                mock_events.put_events.assert_called_once()
+                entry = mock_events.put_events.call_args[1]["Entries"][0]
+                self.assertEqual(entry["DetailType"], "profile.banned")
+                detail = json.loads(entry["Detail"])
+                self.assertEqual(detail["userId"], "user-bob")
+                self.assertEqual(detail["reason"], "harassment")
+
+    def test_discovery_service_deletes_banned_profile(self):
+        discovery_mod = _load_module("d2_discovery_profile_banned_lambda_function", D2_DISCOVERY)
+
+        with patch.object(discovery_mod, "table") as mock_table:
+            response = discovery_mod.handler(
+                eb_event("kismet.profile-service", "profile.banned", self.PROFILE_BANNED),
+                None,
+            )
+
+            self.assertEqual(response["statusCode"], 200)
+            mock_table.delete_item.assert_called_once_with(
+                Key={"PK": "PROFILE#user-bob", "SK": "META"}
+            )
 
 
 # ============================================================================

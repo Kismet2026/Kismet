@@ -129,7 +129,7 @@ def handle_send_message(body: dict, sender_id: str) -> Dict[str, Any]:
 
 
 def handle_get_messages(match_id: str, user_id: str, query_params: dict) -> Dict[str, Any]:
-    """GET /messages/{matchId} — Paginated conversation history, newest first."""
+    """GET /messages/match/{matchId} — Paginated conversation history, newest first."""
     _, match_error = get_match_for_user(match_id, user_id)
     if match_error:
         return match_error
