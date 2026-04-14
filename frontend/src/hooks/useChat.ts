@@ -80,19 +80,21 @@ export function useChat(matchId: string) {
       // WS unavailable — fall through to polling
     }
 
-    // HTTP polling fallback (every 5s)
+    // HTTP polling fallback (every 5s) — re-fetch all messages and merge
     pollRef.current = setInterval(async () => {
-      if (!lastTimestampRef.current) return;
       try {
         const data = await api.get<PaginatedResponse<Message>>(
-          `/messages/match/${matchId}/since/${encodeURIComponent(lastTimestampRef.current)}`
+          `/messages/match/${matchId}?limit=50`
         );
         if (data.items.length > 0) {
-          const newMsgs = data.items.filter((m) => m.senderId !== myId);
-          if (newMsgs.length > 0) {
-            setMessages((prev) => [...prev, ...newMsgs]);
-            lastTimestampRef.current = data.items[data.items.length - 1].timestamp;
-          }
+          const sorted = data.items.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+          setMessages((prev) => {
+            const existingIds = new Set(prev.map((m) => m.messageId));
+            const newMsgs = sorted.filter((m) => !existingIds.has(m.messageId));
+            if (newMsgs.length === 0) return prev;
+            return [...prev, ...newMsgs];
+          });
+          lastTimestampRef.current = sorted[sorted.length - 1].timestamp;
         }
       } catch {
         // silently fail
