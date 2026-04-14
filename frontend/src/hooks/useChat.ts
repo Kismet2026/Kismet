@@ -22,9 +22,16 @@ export function useChat(matchId: string) {
       const sorted = (data.items || []).sort((a, b) =>
         a.timestamp.localeCompare(b.timestamp)
       );
-      setMessages(sorted);
-    } catch {
-      // Keep existing messages on error
+      setMessages((prev) => {
+        // Merge: keep optimistic (temp-*) messages not yet confirmed
+        const serverIds = new Set(sorted.map((m) => m.messageId));
+        const pendingOptimistic = prev.filter(
+          (m) => m.messageId.startsWith("temp-") && !serverIds.has(m.messageId)
+        );
+        return [...sorted, ...pendingOptimistic];
+      });
+    } catch (err) {
+      console.error("[Chat] fetch failed:", err);
     }
   }, [matchId]);
 
