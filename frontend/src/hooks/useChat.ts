@@ -13,6 +13,7 @@ export function useChat(matchId: string) {
   const wsRef = useRef<KismetWebSocket | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Single source of truth: always fetch from server
   const fetchMessages = useCallback(async () => {
     try {
       const data = await api.get<PaginatedResponse<Message>>(
@@ -28,24 +29,19 @@ export function useChat(matchId: string) {
   }, [matchId]);
 
   useEffect(() => {
+    // 1. Load history
     fetchMessages().finally(() => setLoading(false));
 
+    // 2. WebSocket — only used to trigger immediate poll when new message arrives
     const ws = new KismetWebSocket(myId, matchId);
     wsRef.current = ws;
-
-    ws.onMessage((data: unknown) => {
-      const msg = data as { type?: string } & Partial<Message>;
-      // Only add messages from OTHER users — our own messages are already shown optimistically
-      if (msg.type === "newMessage" && msg.messageId && msg.senderId !== myId) {
-        setMessages((prev) => {
-          if (prev.some((m) => m.messageId === msg.messageId)) return prev;
-          return [...prev, msg as Message];
-        });
-      }
+    ws.onMessage(() => {
+      // Any WS event → immediately refresh from server
+      fetchMessages();
     });
-
     ws.connect();
 
+    // 3. Regular polling as backup
     pollRef.current = setInterval(fetchMessages, 5000);
 
     return () => {
@@ -54,30 +50,35 @@ export function useChat(matchId: string) {
     };
   }, [matchId, myId, fetchMessages]);
 
+  // Send message
   const sendMessage = useCallback(
     async (content: string) => {
-      const tempId = `temp-${Date.now()}`;
-      const optimistic: Message = {
-        messageId: tempId,
+      // Optimistic: add immediately for instant UX
+      const tempMsg: Message = {
+        messageId: `temp-${Date.now()}`,
         matchId,
         senderId: myId,
         content,
         messageType: "text",
         timestamp: new Date().toISOString(),
       };
-      setMessages((prev) => [...prev, optimistic]);
+      setMessages((prev) => [...prev, tempMsg]);
 
+      // Send via WebSocket or REST
       if (wsRef.current?.isConnected) {
         wsRef.current.send({ action: "sendMessage", content, messageType: "text" });
       } else {
         try {
           await api.post<Message>("/messages", { matchId, content, messageType: "text" });
         } catch {
-          // Next poll will pick up if persisted
+          // poll will pick up
         }
       }
+
+      // After a short delay, fetch from server to replace temp with real message
+      setTimeout(fetchMessages, 1000);
     },
-    [matchId, myId]
+    [matchId, myId, fetchMessages]
   );
 
   return { messages, loading, sendMessage, myId };
