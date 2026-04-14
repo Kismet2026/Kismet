@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { api } from "@/lib/api";
-import type { ChatPresence, TypingStatus } from "@/types";
 
 /** Send heartbeat every 30s to indicate online status */
 export function useHeartbeat() {
@@ -25,15 +24,17 @@ export function useOnlineStatus(userId: string | undefined) {
 
     const check = async () => {
       try {
-        const data = await api.get<ChatPresence>(`/presence/user/${userId}`);
-        setIsOnline(data.isOnline);
+        const data = await api.get<{ status?: string; userId?: string }>(
+          `/presence/user/${userId}`
+        );
+        setIsOnline(data.status === "online");
       } catch {
         setIsOnline(false);
       }
     };
 
     check();
-    const interval = setInterval(check, 15000);
+    const interval = setInterval(check, 10000);
     return () => clearInterval(interval);
   }, [userId]);
 
@@ -43,15 +44,17 @@ export function useOnlineStatus(userId: string | undefined) {
 /** Typing indicator — send signals and poll for other person's typing */
 export function useTyping(matchId: string, myId: string) {
   const [otherTyping, setOtherTyping] = useState(false);
-  const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSentRef = useRef(0);
 
   // Poll for other person's typing status
   useEffect(() => {
     const check = async () => {
       try {
-        const data = await api.get<TypingStatus>(`/presence/${matchId}/typing`);
-        setOtherTyping(data.isTyping && data.userId !== myId);
+        const data = await api.get<{
+          typingUsers?: { userId: string; since: string }[];
+        }>(`/presence/${matchId}/typing`);
+        const others = (data.typingUsers || []).filter((u) => u.userId !== myId);
+        setOtherTyping(others.length > 0);
       } catch {
         setOtherTyping(false);
       }
@@ -66,14 +69,7 @@ export function useTyping(matchId: string, myId: string) {
     const now = Date.now();
     if (now - lastSentRef.current < 2000) return;
     lastSentRef.current = now;
-
     api.post(`/presence/${matchId}/typing`).catch(() => {});
-
-    // Auto-clear after 3s of no typing
-    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-    typingTimeoutRef.current = setTimeout(() => {
-      lastSentRef.current = 0;
-    }, 3000);
   }, [matchId]);
 
   return { otherTyping, sendTyping };

@@ -41,7 +41,8 @@ export function useChat(matchId: string) {
 
     ws.onMessage((data: unknown) => {
       const msg = data as { type?: string } & Partial<Message>;
-      if (msg.type === "newMessage" && msg.messageId) {
+      // Only add messages from OTHER users — our own messages are already shown optimistically
+      if (msg.type === "newMessage" && msg.messageId && msg.senderId !== myId) {
         setMessages((prev) => {
           if (prev.some((m) => m.messageId === msg.messageId)) return prev;
           return [...prev, msg as Message];
