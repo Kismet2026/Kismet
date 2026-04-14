@@ -3,6 +3,7 @@ import boto3
 import os
 import logging
 from datetime import datetime
+from decimal import Decimal
 from urllib import request as urllib_request
 from urllib.error import URLError
 
@@ -71,7 +72,7 @@ def handle_profile_completed(event):
         'displayName': detail.get('name', ''),
         'gender': detail.get('gender', ''),
         'preferredGender': detail.get('preferred_gender', ''),
-        'location': location,
+        'location': [Decimal(str(v)) for v in location] if location else [],
         'city': detail.get('city', ''),
         'age': age,
         'birthDate': birth_date,
@@ -352,5 +353,5 @@ def _response(status_code, body):
     return {
         'statusCode': status_code,
         'headers': CORS_HEADERS,
-        'body': json.dumps(body),
+        'body': json.dumps(body, default=str),
     }

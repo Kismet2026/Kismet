@@ -174,9 +174,14 @@ class KismetService(Construct):
                         pass  # OPTIONS already exists on this resource
                     cors_added.add(resource_path)
 
+        # ── EventBridge: always expose bus name if event_bus is provided ─────
+        if event_bus:
+            self.function.add_environment("EVENT_BUS_NAME", event_bus.event_bus_name)
+
         # ── EventBridge: publish permission ──────────────────────────────────
         if publish_events and event_bus:
             event_bus.grant_put_events_to(self.function)
+            self.function.add_environment("EVENT_BUS_NAME", event_bus.event_bus_name)
 
         # ── EventBridge: consume (subscribe) ─────────────────────────────────
         for event_type in consume_events or []:

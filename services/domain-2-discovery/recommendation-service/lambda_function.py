@@ -216,7 +216,7 @@ def _compute_recommendations(user_id, limit):
         candidates.append(candidate)
 
         # Cache in DynamoDB
-        table.put_item(Item=json.loads(json.dumps(candidate), parse_float=Decimal, parse_int=Decimal))
+        table.put_item(Item=json.loads(json.dumps(candidate, default=str), parse_float=Decimal, parse_int=Decimal))
 
     # Sort by score descending
     candidates.sort(key=lambda x: x.get('score', 0), reverse=True)
