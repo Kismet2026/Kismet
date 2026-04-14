@@ -1,7 +1,8 @@
 import { getAccessToken, getRefreshToken, saveTokens, clearTokens } from "./auth";
 import type { AuthTokens } from "@/types";
 
-const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
+// Use proxy in browser (avoids iOS CORS/fetch issues), direct URL on server
+const BASE_URL = typeof window !== "undefined" ? "/api/proxy" : (process.env.NEXT_PUBLIC_API_BASE_URL ?? "");
 
 type RequestOptions = Omit<RequestInit, "body"> & {
   body?: unknown;
