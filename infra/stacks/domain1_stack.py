@@ -125,13 +125,22 @@ class Domain1Stack(cdk.Stack):
             environment={
                 "PHOTOS_TABLE_NAME": "kismet-photos",
                 "PHOTOS_BUCKET_NAME": shared.photos_bucket.bucket_name,
-                "PHOTOS_CDN_BASE_URL": "",  # TODO: add CloudFront URL when available
+                "PHOTOS_CDN_BASE_URL": f"https://{shared.photos_bucket.bucket_name}.s3.{self.region}.amazonaws.com",
+                "PROFILES_TABLE_NAME": "kismet-profiles",
             },
             extra_policies=[
                 # S3 for presigned URL generation and object deletion
                 iam.PolicyStatement(
                     actions=["s3:PutObject", "s3:GetObject", "s3:DeleteObject"],
                     resources=[f"{shared.photos_bucket.bucket_arn}/*"],
+                ),
+                # DynamoDB for updating profile + discovery avatarUrl
+                iam.PolicyStatement(
+                    actions=["dynamodb:UpdateItem"],
+                    resources=[
+                        self.format_arn(service="dynamodb", resource="table", resource_name="kismet-profiles"),
+                        self.format_arn(service="dynamodb", resource="table", resource_name="kismet-discovery"),
+                    ],
                 ),
             ],
             api=imported_api,

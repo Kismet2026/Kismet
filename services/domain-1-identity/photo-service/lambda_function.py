@@ -21,6 +21,7 @@ PHOTO_PRIMARY_PATTERN = re.compile(r"^/photos/(?P<photoId>[^/]+)/primary$")
 PHOTOS_TABLE_NAME = os.environ.get("PHOTOS_TABLE_NAME", "")
 PHOTOS_BUCKET_NAME = os.environ.get("PHOTOS_BUCKET_NAME", "")
 PHOTOS_CDN_BASE_URL = os.environ.get("PHOTOS_CDN_BASE_URL", "").rstrip("/")
+PROFILES_TABLE_NAME = os.environ.get("PROFILES_TABLE_NAME", "kismet-profiles")
 EVENT_BUS_NAME = os.environ.get("EVENT_BUS_NAME", "")
 
 PRESIGNED_URL_EXPIRY = 300  # seconds
@@ -131,6 +132,11 @@ def handle_upload(user_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
         "EventBusName": EVENT_BUS_NAME,
     }])
 
+    # Auto-update profile avatarUrl if this is the primary photo
+    if is_primary:
+        cdn_url = f"{PHOTOS_CDN_BASE_URL}/{s3_key}" if PHOTOS_CDN_BASE_URL else ""
+        _update_profile_avatar(user_id, cdn_url)
+
     return _response(200, {"photoId": photo_id, "uploadUrl": upload_url, "expiresIn": PRESIGNED_URL_EXPIRY})
 
 
@@ -204,7 +210,44 @@ def handle_set_primary(user_id: str, photo_id: str) -> Dict[str, Any]:
         ExpressionAttributeValues={":t": True},
     )
 
+    # Update profile avatarUrl with new primary photo
+    item = result["Item"]
+    s3_key = item.get("s3Key", "")
+    cdn_url = f"{PHOTOS_CDN_BASE_URL}/{s3_key}" if PHOTOS_CDN_BASE_URL and s3_key else ""
+    _update_profile_avatar(user_id, cdn_url)
+
     return _response(200, {"photoId": photo_id, "isPrimary": True})
+
+
+def _update_profile_avatar(user_id: str, avatar_url: str) -> None:
+    """Update avatarUrl in profiles table and discovery table."""
+    try:
+        profiles_table = dynamodb.Table(PROFILES_TABLE_NAME)
+        profiles_table.update_item(
+            Key={"PK": f"USER#{user_id}", "SK": "PROFILE"},
+            UpdateExpression="SET avatarUrl = :url",
+            ExpressionAttributeValues={":url": avatar_url},
+            ConditionExpression="attribute_exists(PK)",
+        )
+        logger.info("Updated profile avatarUrl for user %s", user_id)
+    except ClientError as e:
+        if e.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+            logger.info("No profile found for user %s, skipping avatar update", user_id)
+        else:
+            logger.warning("Failed to update profile avatarUrl: %s", e)
+
+    # Also update discovery table
+    try:
+        discovery_table = dynamodb.Table("kismet-discovery")
+        discovery_table.update_item(
+            Key={"PK": f"PROFILE#{user_id}", "SK": "META"},
+            UpdateExpression="SET avatarUrl = :url",
+            ExpressionAttributeValues={":url": avatar_url},
+            ConditionExpression="attribute_exists(PK)",
+        )
+        logger.info("Updated discovery avatarUrl for user %s", user_id)
+    except ClientError:
+        logger.info("No discovery entry for user %s, skipping", user_id)
 
 
 def _get_user_id(event: Dict[str, Any]) -> Optional[str]:
