@@ -77,8 +77,8 @@ def on_match_created(detail):
         notif = create_notification(
             user_id=user_id,
             notif_type="match",
-            title="You have a new match!",
-            body="You matched with someone new. Start a conversation!",
+            title="The feeling is mutual",
+            body="Someone you liked liked you back.",
             timestamp=timestamp,
             reference_id=match_id,
         )
@@ -102,7 +102,7 @@ def on_message_sent(detail):
     notif = create_notification(
         user_id=recipient_id,
         notif_type="message",
-        title="New message",
+        title="A message is waiting",
         body=preview,
         timestamp=timestamp,
         reference_id=match_id,
