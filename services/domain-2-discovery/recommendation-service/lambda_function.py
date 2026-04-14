@@ -199,6 +199,7 @@ def _compute_recommendations(user_id, limit):
         score_breakdown = _calculate_score(profile, bazi_scores)
         total_score = sum(score_breakdown.values())
 
+        raw_bazi = bazi_scores.get(profile.get('birthDate', ''))
         candidate = {
             'PK': f'USER#{user_id}',
             'SK': f'SCORE#{total_score:04d}#{candidate_id}',
@@ -209,6 +210,8 @@ def _compute_recommendations(user_id, limit):
             'location': profile.get('location', ''),
             'city': profile.get('city', ''),
             'avatarUrl': profile.get('avatarUrl', ''),
+            'bio': profile.get('bio', ''),
+            'baziScore': raw_bazi,
             'score': total_score,
             'scoreBreakdown': score_breakdown,
             'calculatedAt': timestamp,

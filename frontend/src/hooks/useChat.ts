@@ -24,7 +24,7 @@ export function useChat(matchId: string) {
         lastTimestampRef.current = data.items[data.items.length - 1].timestamp;
       }
     } catch {
-      setMessages([]);
+      // Don't wipe messages on fetch failure — keep any optimistic messages
     } finally {
       setLoading(false);
     }
