@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { api } from "@/lib/api";
 import { getUserIdFromToken } from "@/lib/auth";
-import type { Match, MatchDetail, UserProfile, PaginatedResponse } from "@/types";
+import type { Match, MatchDetail, UserProfile, Message, PaginatedResponse } from "@/types";
 
 export function useMatches() {
   const [matches, setMatches] = useState<MatchDetail[]>([]);
@@ -29,6 +29,8 @@ export function useMatches() {
           }
 
           const otherId = fullMatch.userAId === myId ? fullMatch.userBId : fullMatch.userAId;
+
+          // Fetch other user's profile
           let otherUser: MatchDetail["otherUser"];
           if (otherId) {
             try {
@@ -40,9 +42,36 @@ export function useMatches() {
           } else {
             otherUser = { userId: "unknown", name: "User" };
           }
-          return { ...fullMatch, otherUser } as MatchDetail;
+
+          // Fetch last message for this match
+          let lastMessage: MatchDetail["lastMessage"];
+          try {
+            const msgs = await api.get<PaginatedResponse<Message>>(
+              `/messages/match/${match.matchId}?limit=1`
+            );
+            if (msgs.items.length > 0) {
+              const m = msgs.items[0];
+              lastMessage = {
+                content: m.content,
+                timestamp: m.timestamp,
+                senderId: m.senderId,
+              };
+            }
+          } catch {
+            // no messages yet
+          }
+
+          return { ...fullMatch, otherUser, lastMessage } as MatchDetail;
         })
       );
+
+      // Sort: matches with recent messages first
+      enriched.sort((a, b) => {
+        const ta = a.lastMessage?.timestamp ?? a.matchedAt ?? "";
+        const tb = b.lastMessage?.timestamp ?? b.matchedAt ?? "";
+        return tb.localeCompare(ta);
+      });
+
       setMatches(enriched);
     } catch {
       setMatches([]);
