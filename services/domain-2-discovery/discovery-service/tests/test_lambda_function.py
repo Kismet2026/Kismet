@@ -89,7 +89,7 @@ class TestHandleProfileCompleted:
         assert item['displayName'] == 'Bob'
         assert item['age'] >= 27
         assert item['birthDate'] == '1998-03-15'
-        assert item['location'] == [42.36, -71.06]
+        assert item['location'] == [Decimal('42.36'), Decimal('-71.06')]
 
         # Verify BaZi cache was pre-warmed
         mock_cache.assert_called_once_with('1998-03-15')
