@@ -9,27 +9,11 @@ import type { Message, PaginatedResponse } from "@/types";
 export function useChat(matchId: string) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
-  const [debugInfo, setDebugInfo] = useState("");
   const myId = getUserIdFromToken() ?? "";
   const wsRef = useRef<KismetWebSocket | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const fetchMessages = useCallback(async () => {
-    // Debug: check token state
-    const token = typeof window !== "undefined" ? localStorage.getItem("kismet_id_token") : null;
-    const expiresAt = typeof window !== "undefined" ? localStorage.getItem("kismet_expires_at") : null;
-    const tokenOk = token && token !== "undefined" && token !== "null" && token.length > 20;
-    const expired = expiresAt ? Date.now() >= Number(expiresAt) - 30000 : true;
-
-    if (!tokenOk) {
-      setDebugInfo(`NO TOKEN: len=${token?.length} val=${token?.slice(0, 10)}`);
-      return;
-    }
-    if (expired) {
-      setDebugInfo(`TOKEN EXPIRED: expiresAt=${expiresAt} now=${Date.now()}`);
-      // Still try — api.ts will attempt refresh
-    }
-
     try {
       const data = await api.get<PaginatedResponse<Message>>(
         `/messages/match/${matchId}?limit=50`
@@ -44,13 +28,8 @@ export function useChat(matchId: string) {
         );
         return [...sorted, ...pendingOptimistic];
       });
-      setDebugInfo(`OK: ${sorted.length} msgs | ws:${wsRef.current?.isConnected ? 'Y' : 'N'}`);
-    } catch (err: unknown) {
-      const msg = err && typeof err === "object" && "message" in err
-        ? (err as { message: string }).message : String(err);
-      const statusCode = err && typeof err === "object" && "statusCode" in err
-        ? (err as { statusCode: number }).statusCode : "?";
-      setDebugInfo(`ERR(${statusCode}): ${msg}`);
+    } catch {
+      // Keep existing messages on error
     }
   }, [matchId]);
 
@@ -95,20 +74,16 @@ export function useChat(matchId: string) {
 
       if (wsRef.current?.isConnected) {
         wsRef.current.send({ action: "sendMessage", content, messageType: "text" });
-        setDebugInfo("Sent via WS");
       } else {
         try {
           await api.post<Message>("/messages", { matchId, content, messageType: "text" });
-          setDebugInfo("Sent via REST");
-        } catch (err: unknown) {
-          const msg = err && typeof err === "object" && "message" in err
-            ? (err as { message: string }).message : String(err);
-          setDebugInfo(`Send ERR: ${msg}`);
+        } catch {
+          // Next poll will pick up if persisted
         }
       }
     },
     [matchId, myId]
   );
 
-  return { messages, loading, sendMessage, myId, debugInfo };
+  return { messages, loading, sendMessage, myId };
 }
