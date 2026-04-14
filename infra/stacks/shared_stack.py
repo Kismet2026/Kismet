@@ -108,22 +108,6 @@ class SharedStack(cdk.Stack):
             auto_delete_objects=True,
         )
 
-        self.frontend_bucket = s3.Bucket(
-            self,
-            "FrontendBucket",
-            bucket_name=f"kismet-frontend-{self.account}-dev",
-            website_index_document="index.html",
-            public_read_access=True,
-            block_public_access=s3.BlockPublicAccess(
-                block_public_acls=False,
-                ignore_public_acls=False,
-                block_public_policy=False,
-                restrict_public_buckets=False,
-            ),
-            removal_policy=cdk.RemovalPolicy.DESTROY,
-            auto_delete_objects=True,
-        )
-
         # ── Kinesis Data Stream ───────────────────────────────────────────────
         # Activity Logger writes here; Analytics Pipeline reads via Firehose
         self.activity_stream = kinesis.Stream(
