@@ -59,6 +59,12 @@ export class KismetWebSocket {
     return () => this.handlers.delete(handler);
   }
 
+  send(data: Record<string, unknown>): void {
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify(data));
+    }
+  }
+
   disconnect(): void {
     this.intentionallyClosed = true;
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);

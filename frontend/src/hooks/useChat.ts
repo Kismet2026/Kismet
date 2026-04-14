@@ -9,32 +9,61 @@ import type { Message, PaginatedResponse } from "@/types";
 export function useChat(matchId: string) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
-  const myId = getUserIdFromToken() ?? "test-123";
+  const myId = getUserIdFromToken() ?? "";
   const wsRef = useRef<KismetWebSocket | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const lastTimestampRef = useRef<string>("");
 
-  // Fetch initial messages
-  const fetchHistory = useCallback(async () => {
-    setLoading(true);
+  // Fetch message history from REST API
+  const fetchMessages = useCallback(async () => {
     try {
-      const data = await api.get<PaginatedResponse<Message>>(`/messages/match/${matchId}?limit=50`);
-      setMessages(data.items.sort((a, b) => a.timestamp.localeCompare(b.timestamp)));
-      if (data.items.length > 0) {
-        lastTimestampRef.current = data.items[data.items.length - 1].timestamp;
-      }
+      const data = await api.get<PaginatedResponse<Message>>(
+        `/messages/match/${matchId}?limit=50`
+      );
+      const sorted = (data.items || []).sort((a, b) =>
+        a.timestamp.localeCompare(b.timestamp)
+      );
+      setMessages(sorted);
     } catch {
-      // Don't wipe messages on fetch failure — keep any optimistic messages
-    } finally {
-      setLoading(false);
+      // Keep existing messages on error
     }
   }, [matchId]);
 
-  // Send message
+  useEffect(() => {
+    // 1. Load history
+    fetchMessages().finally(() => setLoading(false));
+
+    // 2. Connect WebSocket for real-time
+    const ws = new KismetWebSocket(myId, matchId);
+    wsRef.current = ws;
+
+    ws.onMessage((data: unknown) => {
+      const msg = data as { type?: string } & Partial<Message>;
+      if (msg.type === "newMessage" && msg.messageId) {
+        setMessages((prev) => {
+          // Deduplicate
+          if (prev.some((m) => m.messageId === msg.messageId)) return prev;
+          return [...prev, msg as Message];
+        });
+      }
+    });
+
+    ws.connect();
+
+    // 3. Polling fallback every 5s (in case WS drops)
+    pollRef.current = setInterval(fetchMessages, 5000);
+
+    return () => {
+      ws.disconnect();
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, [matchId, myId, fetchMessages]);
+
+  // Send message via WebSocket (with REST fallback)
   const sendMessage = useCallback(
     async (content: string) => {
+      const tempId = `temp-${Date.now()}`;
       const optimistic: Message = {
-        messageId: `temp-${Date.now()}`,
+        messageId: tempId,
         matchId,
         senderId: myId,
         content,
@@ -43,69 +72,26 @@ export function useChat(matchId: string) {
       };
       setMessages((prev) => [...prev, optimistic]);
 
-      try {
-        const saved = await api.post<Message>("/messages", {
-          matchId,
-          content,
-          messageType: "text",
-        });
-        // Replace optimistic with saved
-        setMessages((prev) =>
-          prev.map((m) => (m.messageId === optimistic.messageId ? saved : m))
-        );
-      } catch {
-        // Keep optimistic message for demo
+      // Try WebSocket first (D3 architecture: WS → send_message.py → persist + broadcast)
+      if (wsRef.current?.isConnected) {
+        wsRef.current.send({ action: "sendMessage", content, messageType: "text" });
+      } else {
+        // Fallback to REST
+        try {
+          await api.post<Message>("/messages", {
+            matchId,
+            content,
+            messageType: "text",
+          });
+        } catch {
+          // Message will be picked up by next poll if it persisted
+        }
       }
+
+      // Next poll will replace temp message with real one
     },
     [matchId, myId]
   );
-
-  // WebSocket connection
-  useEffect(() => {
-    fetchHistory();
-
-    // Try WebSocket
-    try {
-      const ws = new KismetWebSocket(myId, matchId);
-      wsRef.current = ws;
-      ws.onMessage((data: unknown) => {
-        const msg = data as { type?: string } & Message;
-        if (msg.type === "newMessage" && msg.senderId !== myId) {
-          setMessages((prev) => [...prev, msg]);
-          lastTimestampRef.current = msg.timestamp;
-        }
-      });
-      ws.connect();
-    } catch {
-      // WS unavailable — fall through to polling
-    }
-
-    // HTTP polling fallback (every 5s) — re-fetch all messages and merge
-    pollRef.current = setInterval(async () => {
-      try {
-        const data = await api.get<PaginatedResponse<Message>>(
-          `/messages/match/${matchId}?limit=50`
-        );
-        if (data.items.length > 0) {
-          const sorted = data.items.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
-          setMessages((prev) => {
-            const existingIds = new Set(prev.map((m) => m.messageId));
-            const newMsgs = sorted.filter((m) => !existingIds.has(m.messageId));
-            if (newMsgs.length === 0) return prev;
-            return [...prev, ...newMsgs];
-          });
-          lastTimestampRef.current = sorted[sorted.length - 1].timestamp;
-        }
-      } catch {
-        // silently fail
-      }
-    }, 5000);
-
-    return () => {
-      wsRef.current?.disconnect();
-      if (pollRef.current) clearInterval(pollRef.current);
-    };
-  }, [matchId, myId, fetchHistory]);
 
   return { messages, loading, sendMessage, myId };
 }
