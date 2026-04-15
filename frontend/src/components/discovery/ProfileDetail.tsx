@@ -74,18 +74,26 @@ export function ProfileDetail({ candidate, isOpen, onClose, onSwipe }: ProfileDe
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
         >
-          {/* Blurred photo background — fills entire screen */}
-          <div className="absolute inset-0">
-            {currentPhoto ? (
-              <img
-                src={currentPhoto.url}
-                alt=""
-                className="w-full h-full object-cover blur-2xl scale-110 opacity-60"
-              />
-            ) : (
-              <div className="w-full h-full" style={{ background: placeholderBg }} />
-            )}
-            <div className="absolute inset-0 bg-gradient-to-b from-background/40 via-background/70 to-background/95" />
+          {/* Brand-palette background — plum gradient + ambient glows */}
+          <div className="absolute inset-0 bg-background">
+            {/* Amber ambient glow top-right */}
+            <div
+              className="absolute top-0 right-0 w-[70%] h-[50%] opacity-30 pointer-events-none"
+              style={{
+                background:
+                  "radial-gradient(ellipse at top right, rgba(212,160,86,0.35), transparent 60%)",
+              }}
+            />
+            {/* Mauve ambient glow bottom-left */}
+            <div
+              className="absolute bottom-0 left-0 w-[80%] h-[60%] opacity-40 pointer-events-none"
+              style={{
+                background:
+                  "radial-gradient(ellipse at bottom left, rgba(167,130,149,0.25), transparent 60%)",
+              }}
+            />
+            {/* Base tint overlay */}
+            <div className="absolute inset-0 bg-gradient-to-b from-[#2a1724] via-background to-[#1f1119]" />
           </div>
 
           <motion.div
