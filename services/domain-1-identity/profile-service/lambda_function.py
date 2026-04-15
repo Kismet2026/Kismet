@@ -217,12 +217,24 @@ def handle_delete(caller_id: str, user_id: str) -> Dict[str, Any]:
 
     # Publish user.deleted event so other domains can clean up their data
     now = datetime.now(timezone.utc).isoformat()
-    events.put_events(Entries=[{
+    event_response = events.put_events(Entries=[{
         "Source": "kismet.profile-service",
         "DetailType": "user.deleted",
         "Detail": json.dumps({"userId": user_id, "timestamp": now}),
         "EventBusName": EVENT_BUS_NAME,
     }])
+    event_entries = event_response.get("Entries", [])
+    event_entry = event_entries[0] if event_entries else {}
+    if event_response.get("FailedEntryCount", 0) > 0 or not event_entry.get("EventId"):
+        logger.error(
+            "Failed to publish user.deleted event for user %s: %s",
+            user_id,
+            json.dumps({
+                "failedEntryCount": event_response.get("FailedEntryCount", 0),
+                "entry": event_entry,
+            }),
+        )
+        return _response(500, {"code": "INTERNAL_ERROR", "message": "Failed to publish deletion event."})
 
     return _response(200, {"message": "Profile deleted successfully"})
 
