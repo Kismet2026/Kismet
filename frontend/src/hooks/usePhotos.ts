@@ -38,14 +38,12 @@ export function usePhotos(userId?: string) {
     async (file: File) => {
       setUploading(true);
       try {
-        // 1. Get presigned URL
         const { uploadUrl, photoId } = await api.post<PhotoUploadResponse>(
           "/photos/upload",
           { contentType: file.type, filename: file.name }
         );
-        // 2. Upload directly to S3
         await uploadToS3(uploadUrl, file);
-        // 3. Refresh photos list
+        await api.post(`/photos/${photoId}/confirm`);
         await fetchPhotos();
         return photoId;
       } finally {

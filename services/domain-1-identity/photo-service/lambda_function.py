@@ -17,6 +17,7 @@ SERVICE_NAME = "photo-service"
 USER_PHOTOS_PATTERN = re.compile(r"^/users/(?P<userId>[^/]+)/photos$")
 PHOTO_DETAIL_PATTERN = re.compile(r"^/photos/(?P<photoId>[^/]+)$")
 PHOTO_PRIMARY_PATTERN = re.compile(r"^/photos/(?P<photoId>[^/]+)/primary$")
+PHOTO_CONFIRM_PATTERN = re.compile(r"^/photos/(?P<photoId>[^/]+)/confirm$")
 
 PHOTOS_TABLE_NAME = os.environ.get("PHOTOS_TABLE_NAME", "")
 PHOTOS_BUCKET_NAME = os.environ.get("PHOTOS_BUCKET_NAME", "")
@@ -41,6 +42,7 @@ def handler(event, context):
     operation = None
     user_photos_match = USER_PHOTOS_PATTERN.match(path)
     primary_match = PHOTO_PRIMARY_PATTERN.match(path)
+    confirm_match = PHOTO_CONFIRM_PATTERN.match(path)
     detail_match = PHOTO_DETAIL_PATTERN.match(path)
 
     try:
@@ -54,6 +56,11 @@ def handler(event, context):
             if not user_id:
                 return _response(401, {"code": "UNAUTHORIZED", "message": "Authentication required."})
             return handle_upload(user_id, payload or {})
+        elif confirm_match and method == "POST":
+            operation = "confirmPhoto"
+            if not user_id:
+                return _response(401, {"code": "UNAUTHORIZED", "message": "Authentication required."})
+            return handle_confirm(user_id, confirm_match.group("photoId"))
         elif primary_match and method == "PUT":
             operation = "setPrimaryPhoto"
             if not user_id:
@@ -96,7 +103,7 @@ def handle_upload(user_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
     ext = "jpg" if content_type == "image/jpeg" else content_type.split("/")[-1]
     s3_key = f"{user_id}/{photo_id}.{ext}"
     uploaded_at = datetime.now(timezone.utc).isoformat()
-    is_primary = existing.get("Count", 0) == 0  # first photo is primary by default
+    is_primary = existing.get("Count", 0) == 0
 
     upload_url = s3.generate_presigned_url(
         "put_object",
@@ -113,8 +120,32 @@ def handle_upload(user_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
         "contentType": content_type,
         "filename": filename,
         "isPrimary": is_primary,
+        "status": "pending",
         "uploadedAt": uploaded_at,
     })
+
+    return _response(200, {"photoId": photo_id, "uploadUrl": upload_url, "expiresIn": PRESIGNED_URL_EXPIRY})
+
+
+def handle_confirm(user_id: str, photo_id: str) -> Dict[str, Any]:
+    table = dynamodb.Table(PHOTOS_TABLE_NAME)
+    result = table.get_item(Key={"PK": f"USER#{user_id}", "SK": f"PHOTO#{photo_id}"})
+    item = result.get("Item")
+
+    if not item:
+        return _response(404, {"code": "NOT_FOUND", "message": "Photo not found."})
+    if item.get("status") != "pending":
+        return _response(409, {"code": "CONFLICT", "message": "Photo already confirmed."})
+
+    table.update_item(
+        Key={"PK": f"USER#{user_id}", "SK": f"PHOTO#{photo_id}"},
+        UpdateExpression="SET #st = :active",
+        ExpressionAttributeNames={"#st": "status"},
+        ExpressionAttributeValues={":active": "active"},
+    )
+
+    s3_key = item["s3Key"]
+    is_primary = item.get("isPrimary", False)
 
     events.put_events(Entries=[{
         "Source": "kismet.photo-service",
@@ -124,20 +155,19 @@ def handle_upload(user_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
             "userId": user_id,
             "s3Key": s3_key,
             "s3Bucket": PHOTOS_BUCKET_NAME,
-            "contentType": content_type,
+            "contentType": item.get("contentType", ""),
             "cdnUrl": f"{PHOTOS_CDN_BASE_URL}/{s3_key}" if PHOTOS_CDN_BASE_URL else "",
             "isPrimary": is_primary,
-            "timestamp": uploaded_at,
+            "timestamp": item.get("uploadedAt", ""),
         }),
         "EventBusName": EVENT_BUS_NAME,
     }])
 
-    # Auto-update profile avatarUrl if this is the primary photo
     if is_primary:
         cdn_url = f"{PHOTOS_CDN_BASE_URL}/{s3_key}" if PHOTOS_CDN_BASE_URL else ""
         _update_profile_avatar(user_id, cdn_url)
 
-    return _response(200, {"photoId": photo_id, "uploadUrl": upload_url, "expiresIn": PRESIGNED_URL_EXPIRY})
+    return _response(200, {"photoId": photo_id, "status": "active"})
 
 
 def handle_list(user_id: str) -> Dict[str, Any]:
@@ -146,6 +176,9 @@ def handle_list(user_id: str) -> Dict[str, Any]:
 
     photos = []
     for item in result.get("Items", []):
+        status = item.get("status", "active")
+        if status == "rejected":
+            continue
         photos.append({
             "photoId": item["photoId"],
             "url": f"{PHOTOS_CDN_BASE_URL}/{item['s3Key']}",

@@ -29,7 +29,7 @@ class Domain4Stack(cdk.Stack):
 
         text_moderation_table = "kismet-text-moderation-dev"
         image_moderation_table = "kismet-image-moderation-dev"
-        photos_table_name = "kismet-photos-dev"
+        photos_table_name = "kismet-photos"
 
         imported_api = apigateway.RestApi.from_rest_api_attributes(
             self,
