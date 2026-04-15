@@ -14,21 +14,31 @@ import { calculateAge } from "@/lib/utils";
 function EmailPreferences() {
   const [matchEmails, setMatchEmails] = useState(true);
   const [messageEmails, setMessageEmails] = useState(true);
+  const [weeklyDigest, setWeeklyDigest] = useState(true);
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
-    api.get<{ matchNotifications?: boolean; messageNotifications?: boolean }>("/email/preferences")
+    api.get<{
+      matchNotifications?: boolean;
+      messageNotifications?: boolean;
+      weeklyDigest?: boolean;
+    }>("/email/preferences")
       .then((prefs) => {
         setMatchEmails(prefs.matchNotifications ?? true);
         setMessageEmails(prefs.messageNotifications ?? true);
+        setWeeklyDigest(prefs.weeklyDigest ?? true);
         setLoaded(true);
       })
       .catch(() => setLoaded(true));
   }, []);
 
-  async function toggle(key: "matchNotifications" | "messageNotifications", value: boolean) {
+  async function toggle(
+    key: "matchNotifications" | "messageNotifications" | "weeklyDigest",
+    value: boolean
+  ) {
     if (key === "matchNotifications") setMatchEmails(value);
-    else setMessageEmails(value);
+    else if (key === "messageNotifications") setMessageEmails(value);
+    else setWeeklyDigest(value);
     try {
       await api.put("/email/preferences", { [key]: value });
     } catch { /* silently fail */ }
@@ -56,6 +66,15 @@ function EmailPreferences() {
           type="checkbox"
           checked={messageEmails}
           onChange={(e) => toggle("messageNotifications", e.target.checked)}
+          className="w-4 h-4 accent-primary"
+        />
+      </label>
+      <label className="flex items-center justify-between text-sm cursor-pointer">
+        <span className="text-foreground">Weekly digest</span>
+        <input
+          type="checkbox"
+          checked={weeklyDigest}
+          onChange={(e) => toggle("weeklyDigest", e.target.checked)}
           className="w-4 h-4 accent-primary"
         />
       </label>
