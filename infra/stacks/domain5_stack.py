@@ -100,11 +100,10 @@ class Domain5Stack(cdk.Stack):
                 },
             ],
             routes=[
-                {"method": "POST", "path": "/email/send", "auth": True},
                 {"method": "GET", "path": "/email/preferences", "auth": True},
                 {"method": "PUT", "path": "/email/preferences", "auth": True},
             ],
-            consume_events=["user.created", "match.created", "user.reported"],
+            consume_events=["user.created", "match.created", "user.reported", "scheduler.weekly_digest"],
             publish_events=False,
             extra_policies=[
                 iam.PolicyStatement(

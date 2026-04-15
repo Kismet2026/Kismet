@@ -1,7 +1,7 @@
 import json
 import os
-import uuid
 import boto3
+from boto3.dynamodb.conditions import Attr
 from datetime import datetime, timezone
 
 dynamodb = boto3.resource("dynamodb")
@@ -15,21 +15,6 @@ ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "admin@kismet.app")
 # IAM least-privilege: In CDK stack, scope SES permissions to verified identities:
 #   ses:SendEmail → arn:aws:ses:{region}:{account}:identity/*
 # Do NOT use Resource: "*" for SES — restrict to verified sender domain/identity.
-
-VALID_TEMPLATES = [
-    "welcome",
-    "match_notification",
-    "message_notification",
-    "weekly_digest",
-    "report_alert",
-]
-
-# Maps template name to the preference field that controls it
-TEMPLATE_PREF_MAP = {
-    "match_notification": "matchNotifications",
-    "message_notification": "messageNotifications",
-    "weekly_digest": "weeklyDigest",
-}
 
 DEFAULT_PREFERENCES = {
     "matchNotifications": True,
@@ -53,9 +38,7 @@ def handler(event, context):
         .get("sub", "")
     )
 
-    if http_method == "POST" and path == "/email/send":
-        return send_email(event)
-    elif http_method == "GET" and path == "/email/preferences":
+    if http_method == "GET" and path == "/email/preferences":
         return get_preferences(user_id)
     elif http_method == "PUT" and path == "/email/preferences":
         return update_preferences(event, user_id)
@@ -77,6 +60,8 @@ def handle_event(event, context):
         return on_match_created(detail)
     elif detail_type == "user.reported":
         return on_user_reported(detail)
+    elif detail_type == "scheduler.weekly_digest":
+        return on_weekly_digest(detail)
     else:
         print(f"Unhandled event type: {detail_type}")
         return {"statusCode": 200}
@@ -167,61 +152,39 @@ def on_user_reported(detail):
     return {"statusCode": 200}
 
 
+def on_weekly_digest(detail):
+    """Send weekly digest email to all users with weeklyDigest enabled."""
+    result = prefs_table.scan(
+        FilterExpression=Attr("weeklyDigest").eq(True)
+    )
+    items = result.get("Items", [])
+    while "LastEvaluatedKey" in result:
+        result = prefs_table.scan(
+            FilterExpression=Attr("weeklyDigest").eq(True),
+            ExclusiveStartKey=result["LastEvaluatedKey"],
+        )
+        items.extend(result.get("Items", []))
+
+    sent = 0
+    for item in items:
+        email = item.get("email", "")
+        if not email:
+            continue
+        send_ses_email(
+            recipient=email,
+            subject=get_subject_for_template("weekly_digest"),
+            body_text="This week on Kismet. Matches made, messages exchanged, and conversations worth returning to.",
+            body_html=render_template("weekly_digest", {}),
+        )
+        sent += 1
+
+    print(f"Weekly digest sent to {sent} users")
+    return {"statusCode": 200}
+
+
 # ---------------------------------------------------------------------------
 # REST API handlers
 # ---------------------------------------------------------------------------
-
-def send_email(event):
-    """POST /email/send — internal endpoint for sending templated emails."""
-    body = json.loads(event.get("body", "{}"))
-    template_name = body.get("templateName")
-    recipient_user_id = body.get("recipientUserId")
-    template_data = body.get("templateData", {})
-
-    if template_name not in VALID_TEMPLATES:
-        return response(400, {
-            "error": {"code": "VALIDATION_ERROR", "message": f"Invalid templateName. Must be one of: {VALID_TEMPLATES}"}
-        })
-
-    if not recipient_user_id:
-        return response(400, {
-            "error": {"code": "VALIDATION_ERROR", "message": "Missing recipientUserId"}
-        })
-
-    # Single read for both preference check and email lookup
-    prefs = prefs_table.get_item(
-        Key={"PK": f"USER#{recipient_user_id}", "SK": "PREFS"}
-    ).get("Item", {})
-
-    pref_field = TEMPLATE_PREF_MAP.get(template_name)
-    if pref_field and not prefs.get(pref_field, True):
-        return response(422, {
-            "error": {"code": "EMAIL_OPTED_OUT", "message": f"User has opted out of {template_name} emails"}
-        })
-
-    recipient_email = prefs.get("email", "")
-    if not recipient_email:
-        return response(404, {
-            "error": {"code": "USER_NOT_FOUND", "message": "No email on record for recipient"}
-        })
-
-    now = datetime.now(timezone.utc).isoformat()
-    email_id = f"email-{uuid.uuid4().hex[:8]}"
-
-    send_ses_email(
-        recipient=recipient_email,
-        subject=get_subject_for_template(template_name),
-        body_text=json.dumps(template_data),
-        body_html=render_template(template_name, template_data),
-    )
-
-    return response(200, {
-        "emailId": email_id,
-        "templateName": template_name,
-        "recipientUserId": recipient_user_id,
-        "status": "sent",
-        "sentAt": now,
-    })
 
 
 def get_preferences(user_id):
