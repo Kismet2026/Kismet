@@ -144,7 +144,7 @@ class ListPhotosTests(unittest.TestCase):
             self.assertEqual(payload["count"], 0)
             self.assertEqual(payload["photos"], [])
 
-    def test_list_filters_out_rejected_photos(self):
+    def test_list_filters_out_rejected_and_pending_photos(self):
         with patch.dict("os.environ", ENV), \
              patch("lambda_function.PHOTOS_CDN_BASE_URL", ENV["PHOTOS_CDN_BASE_URL"]), \
              patch("lambda_function.dynamodb") as mock_dynamodb:
@@ -152,7 +152,8 @@ class ListPhotosTests(unittest.TestCase):
             mock_dynamodb.Table.return_value.query.return_value = {"Items": [
                 {"photoId": "photo-001", "s3Key": "user-123/photo-001.jpg", "isPrimary": True, "status": "active", "uploadedAt": "2026-04-01T12:00:00+00:00"},
                 {"photoId": "photo-002", "s3Key": "user-123/photo-002.jpg", "isPrimary": False, "status": "rejected", "uploadedAt": "2026-04-01T11:00:00+00:00"},
-                {"photoId": "photo-003", "s3Key": "user-123/photo-003.jpg", "isPrimary": False, "status": "active", "uploadedAt": "2026-04-01T10:00:00+00:00"},
+                {"photoId": "photo-003", "s3Key": "user-123/photo-003.jpg", "isPrimary": False, "status": "pending", "uploadedAt": "2026-04-01T10:30:00+00:00"},
+                {"photoId": "photo-004", "s3Key": "user-123/photo-004.jpg", "isPrimary": False, "status": "active", "uploadedAt": "2026-04-01T10:00:00+00:00"},
             ]}
 
             response = handler(make_event("/users/user-123/photos", "GET"), self.context)
@@ -163,7 +164,8 @@ class ListPhotosTests(unittest.TestCase):
             photo_ids = [p["photoId"] for p in payload["photos"]]
             self.assertIn("photo-001", photo_ids)
             self.assertNotIn("photo-002", photo_ids)
-            self.assertIn("photo-003", photo_ids)
+            self.assertNotIn("photo-003", photo_ids)
+            self.assertIn("photo-004", photo_ids)
 
     def test_get_route_extracts_user_id(self):
         with patch.dict("os.environ", ENV), \

@@ -177,7 +177,7 @@ def handle_list(user_id: str) -> Dict[str, Any]:
     photos = []
     for item in result.get("Items", []):
         status = item.get("status", "active")
-        if status == "rejected":
+        if status in ("rejected", "pending"):
             continue
         photos.append({
             "photoId": item["photoId"],
