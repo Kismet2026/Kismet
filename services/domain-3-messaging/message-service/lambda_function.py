@@ -66,33 +66,43 @@ def handle_user_deleted(detail: dict) -> Dict[str, Any]:
         print("[WARN] user.deleted event missing userId")
         return {"statusCode": 400, "body": "Missing userId"}
 
-    # Find all matches for this user so we know which conversations to clean up
-    result = matches_table.query(
-        KeyConditionExpression=Key("PK").eq(f"USER#{user_id}") & Key("SK").begins_with("MATCH#"),
-    )
-
     deleted_count = 0
-    for match_index_item in result.get("Items", []):
-        match_id = match_index_item.get("matchId")
-        if not match_id:
-            continue
-        # Delete all messages in this conversation, handling pagination
-        last_key = None
-        while True:
-            query_kwargs: Dict[str, Any] = {
-                "KeyConditionExpression": Key("PK").eq(f"CONV#{match_id}"),
-            }
-            if last_key:
-                query_kwargs["ExclusiveStartKey"] = last_key
-            msgs = table.query(**query_kwargs)
-            with table.batch_writer() as batch:
-                for msg in msgs.get("Items", []):
-                    batch.delete_item(Key={"PK": msg["PK"], "SK": msg["SK"]})
-                    deleted_count += 1
-            last_key = msgs.get("LastEvaluatedKey")
-            if not last_key:
-                break
 
+    # Find all matches for this user so we know which conversations to clean up
+    match_last_key = None
+    while True:
+        match_query_kwargs: Dict[str, Any] = {
+            "KeyConditionExpression": Key("PK").eq(f"USER#{user_id}") & Key("SK").begins_with("MATCH#"),
+        }
+        if match_last_key:
+            match_query_kwargs["ExclusiveStartKey"] = match_last_key
+
+        result = matches_table.query(**match_query_kwargs)
+
+        for match_index_item in result.get("Items", []):
+            match_id = match_index_item.get("matchId")
+            if not match_id:
+                continue
+            # Delete all messages in this conversation, handling pagination
+            last_key = None
+            while True:
+                query_kwargs: Dict[str, Any] = {
+                    "KeyConditionExpression": Key("PK").eq(f"CONV#{match_id}"),
+                }
+                if last_key:
+                    query_kwargs["ExclusiveStartKey"] = last_key
+                msgs = table.query(**query_kwargs)
+                with table.batch_writer() as batch:
+                    for msg in msgs.get("Items", []):
+                        batch.delete_item(Key={"PK": msg["PK"], "SK": msg["SK"]})
+                        deleted_count += 1
+                last_key = msgs.get("LastEvaluatedKey")
+                if not last_key:
+                    break
+
+        match_last_key = result.get("LastEvaluatedKey")
+        if not match_last_key:
+            break
     print(f"[INFO] Deleted {deleted_count} messages for user {user_id}")
     return {"statusCode": 200, "body": f"Deleted {deleted_count} messages"}
 
