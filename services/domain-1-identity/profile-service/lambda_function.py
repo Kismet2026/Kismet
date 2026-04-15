@@ -198,9 +198,10 @@ def handle_delete(caller_id: str, user_id: str) -> Dict[str, Any]:
         return _response(403, {"code": "FORBIDDEN", "message": "You can only delete your own profile."})
 
     table = dynamodb.Table(PROFILES_TABLE_NAME)
-    if not table.get_item(Key={"PK": f"USER#{user_id}", "SK": "PROFILE"}).get("Item"):
-        return _response(404, {"code": "NOT_FOUND", "message": "Profile not found."})
 
+    # Attempt to delete the profile row. delete_item is idempotent — it's a no-op
+    # if the row is already gone, which allows safe retries if a previous attempt
+    # partially succeeded (e.g., profile deleted but EventBridge publish failed).
     table.delete_item(Key={"PK": f"USER#{user_id}", "SK": "PROFILE"})
 
     # Delete Cognito user so the email address can be re-registered

@@ -981,7 +981,6 @@ class TestUserDeletedEventChain(unittest.TestCase):
                  patch.object(profile_mod, "cognito") as mock_cognito:
 
                 mock_table = mock_dynamodb.Table.return_value
-                mock_table.get_item.return_value = {"Item": {"userId": "user-alice"}}
                 mock_table.delete_item.return_value = {}
                 mock_events.put_events.return_value = {"FailedEntryCount": 0, "Entries": [{"EventId": "e1"}]}
                 mock_cognito.exceptions.UserNotFoundException = type("UserNotFoundException", (Exception,), {})
