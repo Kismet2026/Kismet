@@ -103,9 +103,20 @@ export function SwipeCard({ candidate, onSwipe, onTap, isTop }: SwipeCardProps) 
           </motion.div>
         )}
 
-        {/* BaZi score badge */}
-        <div className="absolute top-4 right-4">
-          <BaziScoreBadge score={candidate.baziScore} />
+        {/* BaZi score badges — forward (yours for them) + reverse (theirs for you) */}
+        <div className="absolute top-4 right-4 flex flex-col items-end gap-2">
+          {candidate.baziScore != null && (
+            <div className="flex flex-col items-center">
+              <BaziScoreBadge score={candidate.baziScore} />
+              <span className="text-[9px] text-white/70 mt-1 font-medium uppercase tracking-wide">For you</span>
+            </div>
+          )}
+          {candidate.reverseBaziScore != null && (
+            <div className="flex flex-col items-center">
+              <BaziScoreBadge score={candidate.reverseBaziScore} size="sm" />
+              <span className="text-[9px] text-white/60 mt-1 font-medium uppercase tracking-wide">For them</span>
+            </div>
+          )}
         </div>
 
         {/* Info overlay */}

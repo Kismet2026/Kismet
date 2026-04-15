@@ -122,6 +122,10 @@ def get_candidates(event):
     # Get current user's birthDate for BaZi scoring
     bazi_scores = _get_bazi_scores_for_user(user_id)
 
+    # Look up user's own birthDate (for reverse BaZi lookup)
+    user_profile_result = table.get_item(Key={'PK': f'PROFILE#{user_id}', 'SK': 'META'})
+    user_birth = user_profile_result.get('Item', {}).get('birthDate', '')
+
     # Scan all profiles (in production, use GSI or pre-computed candidate lists)
     scan_params = {
         'FilterExpression': Key('SK').eq('META') & Attr('userId').ne(user_id),
@@ -138,6 +142,15 @@ def get_candidates(event):
             return _response(400, {'code': 'VALIDATION_ERROR', 'message': 'Invalid cursor'})
 
     result = table.scan(**scan_params)
+
+    # Collect candidate birthdates for batch reverse BaZi lookup
+    candidate_births = set()
+    for item in result.get('Items', []):
+        if item.get('userId') not in swiped_ids:
+            b = item.get('birthDate', '')
+            if b:
+                candidate_births.add(b)
+    reverse_bazi = _fetch_reverse_bazi_scores(candidate_births, user_birth)
 
     candidates = []
     for item in result.get('Items', []):
@@ -159,6 +172,7 @@ def get_candidates(event):
         # Look up BaZi score by candidate's birthDate
         candidate_birth = item.get('birthDate', '')
         bazi_score = bazi_scores.get(candidate_birth)
+        reverse_score = reverse_bazi.get(candidate_birth)
 
         candidates.append({
             'userId': candidate_id,
@@ -170,6 +184,7 @@ def get_candidates(event):
             'avatarUrl': item.get('avatarUrl', ''),
             'bio': item.get('bio', ''),
             'baziScore': bazi_score,
+            'reverseBaziScore': reverse_score,
         })
 
         if len(candidates) >= limit:
@@ -225,6 +240,32 @@ def _get_bazi_scores_for_user(user_id):
 
     birth_date = user_profile['birthDate']
     return _ensure_bazi_cache(birth_date)
+
+
+def _fetch_reverse_bazi_scores(candidate_birth_dates, user_birth):
+    """For each candidate birthDate, look up user's score in that candidate's BaZi cache."""
+    if not user_birth or not candidate_birth_dates:
+        return {}
+
+    reverse = {}
+    birth_list = list(candidate_birth_dates)
+    for i in range(0, len(birth_list), 100):
+        batch = birth_list[i:i + 100]
+        keys = [{'PK': f'BAZI#{b}', 'SK': 'SCORES'} for b in batch]
+        try:
+            response = dynamodb.batch_get_item(
+                RequestItems={TABLE_NAME: {'Keys': keys}}
+            )
+            for item in response.get('Responses', {}).get(TABLE_NAME, []):
+                candidate_birth = item.get('birthDate', '')
+                scores = item.get('scores', {})
+                score = scores.get(user_birth)
+                if score is not None:
+                    reverse[candidate_birth] = int(score)
+        except Exception as e:
+            logger.warning('Reverse BaZi batch read failed: %s', e)
+
+    return reverse
 
 
 def _ensure_bazi_cache(birth_date):

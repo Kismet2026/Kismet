@@ -7,7 +7,8 @@ export interface Candidate {
   city?: string;
   avatarUrl?: string;
   bio?: string;
-  baziScore?: number | null; // 0-100, null if uncached
+  baziScore?: number | null; // your compatibility score for them (forward)
+  reverseBaziScore?: number | null; // their compatibility score for you (reverse)
 }
 
 export type SwipeAction = "like" | "pass";

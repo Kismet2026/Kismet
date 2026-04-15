@@ -81,19 +81,39 @@ export function ProfileDetail({ candidate, isOpen, onClose }: ProfileDetailProps
                 </p>
               )}
 
-              {candidate.baziScore != null && (
-                <div className="mt-4 bg-card rounded-xl p-4">
-                  <p className="text-xs text-muted-foreground mb-1">BaZi Compatibility</p>
-                  <div className="flex items-center gap-3">
-                    <BaziScoreBadge score={candidate.baziScore} size="sm" />
-                    <p className="text-sm text-foreground">
-                      {candidate.baziScore >= 90
-                        ? "Exceptional match — the stars truly align!"
-                        : candidate.baziScore >= 70
-                          ? "Strong compatibility — great potential here"
-                          : "Moderate compatibility — worth exploring"}
-                    </p>
-                  </div>
+              {(candidate.baziScore != null || candidate.reverseBaziScore != null) && (
+                <div className="mt-4 bg-card rounded-xl p-4 space-y-3">
+                  <p className="text-xs text-muted-foreground">BaZi Compatibility</p>
+                  {candidate.baziScore != null && (
+                    <div className="flex items-center gap-3">
+                      <BaziScoreBadge score={candidate.baziScore} size="sm" />
+                      <div className="flex-1">
+                        <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Your score for them</p>
+                        <p className="text-sm text-foreground">
+                          {candidate.baziScore >= 90
+                            ? "Exceptional match — the stars truly align!"
+                            : candidate.baziScore >= 70
+                              ? "Strong compatibility"
+                              : "Moderate compatibility"}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                  {candidate.reverseBaziScore != null && (
+                    <div className="flex items-center gap-3">
+                      <BaziScoreBadge score={candidate.reverseBaziScore} size="sm" />
+                      <div className="flex-1">
+                        <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Their score for you</p>
+                        <p className="text-sm text-foreground">
+                          {candidate.reverseBaziScore >= 90
+                            ? "They find you exceptional!"
+                            : candidate.reverseBaziScore >= 70
+                              ? "They see strong compatibility"
+                              : "They see moderate compatibility"}
+                        </p>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 

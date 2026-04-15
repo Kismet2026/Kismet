@@ -186,6 +186,17 @@ def _compute_recommendations(user_id, limit):
         Limit=200,
     )
 
+    # Collect unique candidate birth dates to batch-lookup reverse BaZi scores
+    candidate_birth_dates = set()
+    for profile in result.get('Items', []):
+        if profile.get('userId') not in swiped_ids:
+            b = profile.get('birthDate', '')
+            if b:
+                candidate_birth_dates.add(b)
+
+    # Reverse BaZi lookup: candidate's cache → user's score
+    reverse_bazi = _fetch_reverse_bazi_scores(candidate_birth_dates, user_birth)
+
     candidates = []
     timestamp = datetime.utcnow().isoformat() + 'Z'
 
@@ -199,7 +210,9 @@ def _compute_recommendations(user_id, limit):
         score_breakdown = _calculate_score(profile, bazi_scores)
         total_score = sum(score_breakdown.values())
 
-        raw_bazi = bazi_scores.get(profile.get('birthDate', ''))
+        candidate_birth = profile.get('birthDate', '')
+        raw_bazi = bazi_scores.get(candidate_birth)
+        reverse_score = reverse_bazi.get(candidate_birth)
         candidate = {
             'PK': f'USER#{user_id}',
             'SK': f'SCORE#{total_score:04d}#{candidate_id}',
@@ -212,6 +225,7 @@ def _compute_recommendations(user_id, limit):
             'avatarUrl': profile.get('avatarUrl', ''),
             'bio': profile.get('bio', ''),
             'baziScore': raw_bazi,
+            'reverseBaziScore': reverse_score,
             'score': total_score,
             'scoreBreakdown': score_breakdown,
             'calculatedAt': timestamp,
@@ -252,6 +266,36 @@ def _calculate_score(profile, bazi_scores):
         'profileCompleteness': completeness,
         'activityRecency': recency,
     }
+
+
+def _fetch_reverse_bazi_scores(candidate_birth_dates, user_birth):
+    """For each candidate birthDate, look up user's score in that candidate's BaZi cache.
+
+    Returns dict {candidate_birthDate: score_or_None}. Uses batch_get_item for efficiency.
+    """
+    if not user_birth or not candidate_birth_dates:
+        return {}
+
+    reverse = {}
+    birth_list = list(candidate_birth_dates)
+    # DynamoDB batch_get_item supports up to 100 keys per call
+    for i in range(0, len(birth_list), 100):
+        batch = birth_list[i:i + 100]
+        keys = [{'PK': f'BAZI#{b}', 'SK': 'SCORES'} for b in batch]
+        try:
+            response = dynamodb.batch_get_item(
+                RequestItems={DISCOVERY_TABLE: {'Keys': keys}}
+            )
+            for item in response.get('Responses', {}).get(DISCOVERY_TABLE, []):
+                candidate_birth = item.get('birthDate', '')
+                scores = item.get('scores', {})
+                score = scores.get(user_birth)
+                if score is not None:
+                    reverse[candidate_birth] = int(score)
+        except Exception as e:
+            logger.warning('Reverse BaZi batch read failed: %s', e)
+
+    return reverse
 
 
 def _get_swiped_user_ids(user_id):
