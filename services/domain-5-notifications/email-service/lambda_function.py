@@ -62,6 +62,8 @@ def handle_event(event, context):
         return on_user_reported(detail)
     elif detail_type == "scheduler.weekly_digest":
         return on_weekly_digest(detail)
+    elif detail_type == "message.sent":
+        return on_message_sent(detail)
     else:
         print(f"Unhandled event type: {detail_type}")
         return {"statusCode": 200}
@@ -147,6 +149,35 @@ def on_user_reported(detail):
             "reportedUserId": reported_user_id,
             "reason": reason,
         }),
+    )
+
+    return {"statusCode": 200}
+
+
+def on_message_sent(detail):
+    """Send message notification email to recipient (if opted in)."""
+    recipient_id = detail.get("recipientId", "")
+    if not recipient_id:
+        print("message.sent event missing recipientId, skipping email")
+        return {"statusCode": 200}
+
+    prefs = prefs_table.get_item(
+        Key={"PK": f"USER#{recipient_id}", "SK": "PREFS"}
+    ).get("Item", {})
+
+    if not prefs.get("messageNotifications", True):
+        return {"statusCode": 200}
+
+    email = prefs.get("email", "")
+    if not email:
+        print(f"No email on record for {recipient_id}, skipping message email")
+        return {"statusCode": 200}
+
+    send_ses_email(
+        recipient=email,
+        subject=get_subject_for_template("message_notification"),
+        body_text="Someone sent you a message on Kismet. Open the app to reply.",
+        body_html=render_template("message_notification", {}),
     )
 
     return {"statusCode": 200}
