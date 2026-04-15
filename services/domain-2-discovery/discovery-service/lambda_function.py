@@ -256,7 +256,55 @@ def _ensure_bazi_cache(birth_date):
             'cachedAt': datetime.utcnow().isoformat() + 'Z',
         })
 
+        # Reverse write: for each high-scoring match, also write `birth_date` into
+        # that match's cache. This ensures bidirectional visibility when the BaZi
+        # API returns asymmetric results (A's top matches include B but B's top
+        # matches may not include A).
+        _reverse_write_bazi_cache(birth_date, scores)
+
     return scores
+
+
+def _reverse_write_bazi_cache(source_birth_date, scores):
+    """For each score >= 80, ensure source_birth_date appears in that person's cache."""
+    now = datetime.utcnow().isoformat() + 'Z'
+    for match_date, score in scores.items():
+        if score < 80:
+            continue
+        reverse_key = {'PK': f'BAZI#{match_date}', 'SK': 'SCORES'}
+        try:
+            # Try to add the entry only if it doesn't already exist
+            table.update_item(
+                Key=reverse_key,
+                UpdateExpression='SET scores.#bd = if_not_exists(scores.#bd, :score), cachedAt = :now',
+                ExpressionAttributeNames={'#bd': source_birth_date},
+                ExpressionAttributeValues={
+                    ':score': int(score),
+                    ':now': now,
+                },
+                ConditionExpression='attribute_exists(PK)',
+            )
+            logger.info('Reverse cache: added %s=%d to BAZI#%s', source_birth_date, score, match_date)
+        except Exception as e:
+            # Cache entry doesn't exist yet — create a minimal one with just this entry
+            error_code = getattr(e, 'response', {}).get('Error', {}).get('Code', '')
+            if error_code == 'ConditionalCheckFailedException':
+                try:
+                    table.put_item(
+                        Item={
+                            **reverse_key,
+                            'birthDate': match_date,
+                            'scores': {source_birth_date: int(score)},
+                            'cachedAt': now,
+                            'partialCache': True,  # flag: this entry wasn't built from API
+                        },
+                        ConditionExpression='attribute_not_exists(PK)',
+                    )
+                    logger.info('Reverse cache: created partial BAZI#%s with %s=%d', match_date, source_birth_date, score)
+                except Exception:
+                    pass  # another concurrent write beat us, that's fine
+            else:
+                logger.warning('Reverse cache write failed for BAZI#%s: %s', match_date, e)
 
 
 def _call_bazi_api(birth_date):

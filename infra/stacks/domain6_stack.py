@@ -27,11 +27,12 @@ class Domain6Stack(cdk.Stack):
             "ImportedEventBus",
             "kismet-events",
         )
-        activity_stream = kinesis.Stream.from_stream_arn(
-            self,
-            "ImportedActivityStream",
-            f"arn:aws:kinesis:{self.region}:{self.account}:stream/kismet-activity-stream",
-        )
+        # TODO: re-enable when Kinesis is activated
+        # activity_stream = kinesis.Stream.from_stream_arn(
+        #     self,
+        #     "ImportedActivityStream",
+        #     f"arn:aws:kinesis:{self.region}:{self.account}:stream/kismet-activity-stream",
+        # )
         analytics_bucket = s3.Bucket.from_bucket_name(
             self,
             "ImportedAnalyticsBucket",
@@ -85,15 +86,10 @@ class Domain6Stack(cdk.Stack):
                 "user.reported",
             ],
             publish_events=False,
-            extra_policies=[
-                iam.PolicyStatement(
-                    actions=["kinesis:PutRecord", "kinesis:PutRecords"],
-                    resources=[activity_stream.stream_arn],
-                )
-            ],
+            extra_policies=[],
             environment={
                 "ACTIVITY_LOG_TABLE": "kismet-activity-log",
-                "KINESIS_STREAM_NAME": activity_stream.stream_name,
+                # "KINESIS_STREAM_NAME": activity_stream.stream_name,  # TODO: re-enable
             },
             api=imported_api,
             authorizer=shared.authorizer,
