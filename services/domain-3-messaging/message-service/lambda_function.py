@@ -22,6 +22,19 @@ events_client = boto3.client("events")
 
 def lambda_handler(event: Optional[Dict[str, Any]], context: Any) -> Dict[str, Any]:
     event = event or {}
+
+    # EventBridge: user.deleted → delete all messages for the user's conversations
+    if event.get("source") == "kismet.profile-service" and (
+        event.get("detail-type") or event.get("detailType")
+    ) == "user.deleted":
+        detail = event.get("detail") or {}
+        if isinstance(detail, str):
+            try:
+                detail = json.loads(detail)
+            except (json.JSONDecodeError, TypeError):
+                detail = {}
+        return handle_user_deleted(detail)
+
     method = get_http_method(event)
     path_params = event.get("pathParameters") or {}
     query_params = event.get("queryStringParameters") or {}
@@ -44,6 +57,43 @@ def lambda_handler(event: Optional[Dict[str, Any]], context: Any) -> Dict[str, A
         return handle_delete_message(path_params["messageId"], user_id)
 
     return json_response(404, {"code": "NOT_FOUND", "message": f"No route matches {method}"})
+
+
+def handle_user_deleted(detail: dict) -> Dict[str, Any]:
+    """Delete all messages in every conversation the deleted user participated in."""
+    user_id = (detail.get("userId") or "").strip()
+    if not user_id:
+        print("[WARN] user.deleted event missing userId")
+        return {"statusCode": 400, "body": "Missing userId"}
+
+    # Find all matches for this user so we know which conversations to clean up
+    result = matches_table.query(
+        KeyConditionExpression=Key("PK").eq(f"USER#{user_id}") & Key("SK").begins_with("MATCH#"),
+    )
+
+    deleted_count = 0
+    for match_index_item in result.get("Items", []):
+        match_id = match_index_item.get("matchId")
+        if not match_id:
+            continue
+        # Delete all messages in this conversation
+        msgs = table.query(KeyConditionExpression=Key("PK").eq(f"CONV#{match_id}"))
+        with table.batch_writer() as batch:
+            for msg in msgs.get("Items", []):
+                batch.delete_item(Key={"PK": msg["PK"], "SK": msg["SK"]})
+                deleted_count += 1
+        while "LastEvaluatedKey" in msgs:
+            msgs = table.query(
+                KeyConditionExpression=Key("PK").eq(f"CONV#{match_id}"),
+                ExclusiveStartKey=msgs["LastEvaluatedKey"],
+            )
+            with table.batch_writer() as batch:
+                for msg in msgs.get("Items", []):
+                    batch.delete_item(Key={"PK": msg["PK"], "SK": msg["SK"]})
+                    deleted_count += 1
+
+    print(f"[INFO] Deleted {deleted_count} messages for user {user_id}")
+    return {"statusCode": 200, "body": f"Deleted {deleted_count} messages"}
 
 
 # ── Handlers ──────────────────────────────────────────────────────────────────

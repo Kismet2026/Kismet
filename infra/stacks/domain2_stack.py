@@ -45,6 +45,7 @@ class Domain2Stack(cdk.Stack):
                 {"method": "POST", "path": "/swipe", "auth": True},
                 {"method": "GET", "path": "/swipe/history", "auth": True},
             ],
+            consume_events=["user.deleted"],
             publish_events=True,
             api=imported_api,
             authorizer=shared.authorizer,
@@ -69,7 +70,7 @@ class Domain2Stack(cdk.Stack):
                 {"method": "GET", "path": "/matches/{matchId}", "auth": True},
                 {"method": "DELETE", "path": "/matches/{matchId}", "auth": True},
             ],
-            consume_events=["swipe.created"],
+            consume_events=["swipe.created", "user.deleted"],
             publish_events=True,
             environment={
                 "SWIPE_TABLE_NAME": swipe_svc.tables[0].table_name,
@@ -102,7 +103,7 @@ class Domain2Stack(cdk.Stack):
             routes=[
                 {"method": "GET", "path": "/discovery", "auth": True},
             ],
-            consume_events=["profile.completed", "profile.banned"],
+            consume_events=["profile.completed", "profile.banned", "user.deleted"],
             environment={
                 "SWIPE_TABLE_NAME": swipe_svc.tables[0].table_name,
                 "BAZI_API_URL": "https://match-date-nu.vercel.app/api/match",
@@ -137,7 +138,7 @@ class Domain2Stack(cdk.Stack):
                 {"method": "GET", "path": "/recommend", "auth": True},
                 {"method": "POST", "path": "/recommend/refresh", "auth": True},
             ],
-            consume_events=["profile.completed", "swipe.created"],
+            consume_events=["profile.completed", "swipe.created", "user.deleted"],
             environment={
                 "DISCOVERY_TABLE_NAME": discovery_svc.tables[0].table_name,
                 "SWIPE_TABLE_NAME": swipe_svc.tables[0].table_name,

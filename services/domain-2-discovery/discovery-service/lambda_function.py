@@ -34,6 +34,9 @@ def handler(event, context):
         if detail_type == 'profile.banned':
             logger.info('EventBridge: profile.banned')
             return handle_profile_banned(event)
+        if detail_type == 'user.deleted':
+            logger.info('EventBridge: user.deleted')
+            return handle_user_deleted(event)
         logger.info('Ignoring profile-service event: %s', detail_type)
         return {'statusCode': 200, 'body': 'Ignored event'}
 
@@ -90,6 +93,20 @@ def handle_profile_completed(event):
 
 def handle_profile_banned(event):
     """Remove a banned user from the discovery pool."""
+    detail = _get_event_detail(event)
+    user_id = detail.get('userId')
+    if not user_id:
+        return {'statusCode': 400, 'body': 'Missing userId'}
+
+    table.delete_item(Key={
+        'PK': f'PROFILE#{user_id}',
+        'SK': 'META',
+    })
+    return {'statusCode': 200, 'body': 'Profile removed from discovery'}
+
+
+def handle_user_deleted(event):
+    """Remove a deleted user from the discovery pool."""
     detail = _get_event_detail(event)
     user_id = detail.get('userId')
     if not user_id:

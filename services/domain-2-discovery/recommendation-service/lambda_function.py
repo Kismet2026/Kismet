@@ -30,8 +30,13 @@ class DecimalEncoder(json.JSONEncoder):
 def handler(event, context):
     # EventBridge: profile.completed → add to recommendation pool
     if event.get('source') == 'kismet.profile-service':
-        logger.info('EventBridge: profile.completed')
-        return handle_profile_completed(event)
+        detail_type = event.get('detail-type') or event.get('detailType')
+        if detail_type == 'profile.completed':
+            logger.info('EventBridge: profile.completed')
+            return handle_profile_completed(event)
+        if detail_type == 'user.deleted':
+            logger.info('EventBridge: user.deleted')
+            return handle_user_deleted(event)
 
     # EventBridge: swipe.created → remove swiped candidate
     if event.get('source') == 'kismet.swipe-service':
@@ -48,6 +53,39 @@ def handler(event, context):
         return refresh_recommendations(event)
     else:
         return _response(404, {'code': 'NOT_FOUND', 'message': f'No route: {method} {path}'})
+
+
+def handle_user_deleted(event):
+    """Delete all recommendation cache entries for a deleted user."""
+    detail = event.get('detail') or {}
+    if isinstance(detail, str):
+        try:
+            detail = json.loads(detail)
+        except (json.JSONDecodeError, TypeError):
+            detail = {}
+    user_id = detail.get('userId')
+    if not user_id:
+        logger.warning('user.deleted event missing userId')
+        return {'statusCode': 400, 'body': 'Missing userId'}
+
+    from boto3.dynamodb.conditions import Key
+    result = table.query(
+        KeyConditionExpression=Key('PK').eq(f'USER#{user_id}'),
+    )
+    with table.batch_writer() as batch:
+        for item in result.get('Items', []):
+            batch.delete_item(Key={'PK': item['PK'], 'SK': item['SK']})
+    while 'LastEvaluatedKey' in result:
+        result = table.query(
+            KeyConditionExpression=Key('PK').eq(f'USER#{user_id}'),
+            ExclusiveStartKey=result['LastEvaluatedKey'],
+        )
+        with table.batch_writer() as batch:
+            for item in result.get('Items', []):
+                batch.delete_item(Key={'PK': item['PK'], 'SK': item['SK']})
+
+    logger.info('Deleted recommendation cache for user %s', user_id)
+    return {'statusCode': 200, 'body': 'Recommendation cache deleted'}
 
 
 def handle_profile_completed(event):

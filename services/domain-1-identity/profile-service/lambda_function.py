@@ -17,9 +17,11 @@ PROFILE_DETAIL_PATTERN = re.compile(r"^/profiles/(?P<userId>[^/]+)$")
 
 PROFILES_TABLE_NAME = os.environ.get("PROFILES_TABLE_NAME", "")
 EVENT_BUS_NAME = os.environ.get("EVENT_BUS_NAME", "")
+COGNITO_USER_POOL_ID = os.environ.get("COGNITO_USER_POOL_ID", "")
 
 dynamodb = boto3.resource("dynamodb")
 events = boto3.client("events")
+cognito = boto3.client("cognito-idp")
 
 UPDATABLE_FIELDS = frozenset({"name", "bio", "gender", "interestedIn", "birthDate", "birthTime", "location", "interests", "city", "avatarUrl"})
 VALID_GENDERS = {"male", "female", "non-binary"}
@@ -200,6 +202,28 @@ def handle_delete(caller_id: str, user_id: str) -> Dict[str, Any]:
         return _response(404, {"code": "NOT_FOUND", "message": "Profile not found."})
 
     table.delete_item(Key={"PK": f"USER#{user_id}", "SK": "PROFILE"})
+
+    # Delete Cognito user so the email address can be re-registered
+    if COGNITO_USER_POOL_ID:
+        try:
+            cognito.admin_delete_user(
+                UserPoolId=COGNITO_USER_POOL_ID,
+                Username=user_id,
+            )
+        except cognito.exceptions.UserNotFoundException:
+            logger.warning("Cognito user not found during deletion: %s", user_id)
+        except ClientError:
+            logger.exception("Failed to delete Cognito user %s", user_id)
+
+    # Publish user.deleted event so other domains can clean up their data
+    now = datetime.now(timezone.utc).isoformat()
+    events.put_events(Entries=[{
+        "Source": "kismet.profile-service",
+        "DetailType": "user.deleted",
+        "Detail": json.dumps({"userId": user_id, "timestamp": now}),
+        "EventBusName": EVENT_BUS_NAME,
+    }])
+
     return _response(200, {"message": "Profile deleted successfully"})
 
 

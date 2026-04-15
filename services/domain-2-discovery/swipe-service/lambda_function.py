@@ -22,12 +22,50 @@ def handler(event, context):
     path = _get_path(event)
     logger.info('Request: %s %s', method, path)
 
+    if event.get('source') == 'kismet.profile-service' and (
+        event.get('detail-type') or event.get('detailType')
+    ) == 'user.deleted':
+        logger.info('EventBridge: user.deleted')
+        return handle_user_deleted(event)
+
     if method == 'POST' and path == '/swipe':
         return create_swipe(event)
     elif method == 'GET' and path == '/swipe/history':
         return get_swipe_history(event)
     else:
         return _response(404, {'code': 'NOT_FOUND', 'message': f'No route: {method} {path}'})
+
+
+def handle_user_deleted(event):
+    """Delete all swipes made by the deleted user."""
+    detail = event.get('detail') or {}
+    if isinstance(detail, str):
+        try:
+            detail = json.loads(detail)
+        except (json.JSONDecodeError, TypeError):
+            detail = {}
+    user_id = detail.get('userId')
+    if not user_id:
+        logger.warning('user.deleted event missing userId')
+        return {'statusCode': 400, 'body': 'Missing userId'}
+
+    result = table.query(
+        KeyConditionExpression=boto3.dynamodb.conditions.Key('userId').eq(user_id),
+    )
+    with table.batch_writer() as batch:
+        for item in result.get('Items', []):
+            batch.delete_item(Key={'userId': item['userId'], 'targetUserId': item['targetUserId']})
+    while 'LastEvaluatedKey' in result:
+        result = table.query(
+            KeyConditionExpression=boto3.dynamodb.conditions.Key('userId').eq(user_id),
+            ExclusiveStartKey=result['LastEvaluatedKey'],
+        )
+        with table.batch_writer() as batch:
+            for item in result.get('Items', []):
+                batch.delete_item(Key={'userId': item['userId'], 'targetUserId': item['targetUserId']})
+
+    logger.info('Deleted swipes for user %s', user_id)
+    return {'statusCode': 200, 'body': 'Swipes deleted'}
 
 
 def create_swipe(event):

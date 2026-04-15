@@ -289,10 +289,30 @@ Published when a user updates their profile.
 
 ---
 
+### Published: `user.deleted`
+
+Published when a user permanently deletes their account.
+
+```json
+{
+  "source": "kismet.profile-service",
+  "detail-type": "user.deleted",
+  "detail": {
+    "userId": "user-123",
+    "timestamp": "2026-04-15T10:00:00Z"
+  }
+}
+```
+
+**Consumed by:** Photo Service (delete photos + S3), Discovery Service (remove META), Swipe Service (delete swipes), Match Service (delete matches), Recommendation Service (delete cache), Message Service (delete messages), Email Service (delete preferences)
+
+---
+
 ## Dependencies
 
 | Direction | Service | How |
 |-----------|---------|-----|
 | **Called by** | Frontend (React) | HTTP via API Gateway |
 | **Publishes to** | Discovery Service, Recommendation Service, Activity Logger | EventBridge `profile.completed`, `profile.updated` |
-| **Depends on** | Auth (Cognito) | JWT validation via API Gateway Authorizer |
+| **Publishes to** | Photo Service, Discovery Service, Swipe Service, Match Service, Recommendation Service, Message Service, Email Service | EventBridge `user.deleted` |
+| **Depends on** | Auth (Cognito) | JWT validation via API Gateway Authorizer; `AdminDeleteUser` on account deletion |

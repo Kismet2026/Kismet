@@ -44,7 +44,12 @@ def handler(event, context):
     detail_match = PHOTO_DETAIL_PATTERN.match(path)
 
     try:
-        if path == "/photos/upload":
+        if event.get("source") == "kismet.profile-service" and (
+            event.get("detail-type") or event.get("detailType")
+        ) == "user.deleted":
+            operation = "handleUserDeleted"
+            return handle_user_deleted(_get_event_detail(event))
+        elif path == "/photos/upload":
             if method != "POST":
                 return _response(404, {"code": "NOT_FOUND", "message": f"No route matches {method} {path}."})
             operation = "uploadPhoto"
@@ -75,6 +80,30 @@ def handler(event, context):
     except Exception:
         logger.exception("Unexpected error in %s", operation or f"{method} {path}")
         return _response(500, {"code": "INTERNAL_ERROR", "message": "An unexpected error occurred."})
+
+
+def handle_user_deleted(detail: Dict[str, Any]) -> Dict[str, Any]:
+    """Delete all photos for a deleted user from DynamoDB and S3."""
+    user_id = (detail.get("userId") or "").strip()
+    if not user_id:
+        logger.warning("user.deleted received without userId")
+        return {"statusCode": 400, "body": "Missing userId"}
+
+    table = dynamodb.Table(PHOTOS_TABLE_NAME)
+    from boto3.dynamodb.conditions import Key as BotoKey
+    result = table.query(KeyConditionExpression=BotoKey("PK").eq(f"USER#{user_id}"))
+
+    deleted_count = 0
+    for item in result.get("Items", []):
+        try:
+            s3.delete_object(Bucket=PHOTOS_BUCKET_NAME, Key=item["s3Key"])
+        except ClientError:
+            logger.warning("Failed to delete S3 object %s for user %s", item.get("s3Key"), user_id)
+        table.delete_item(Key={"PK": f"USER#{user_id}", "SK": f"PHOTO#{item['photoId']}"})
+        deleted_count += 1
+
+    logger.info("Deleted %d photos for user %s", deleted_count, user_id)
+    return {"statusCode": 200, "body": f"Deleted {deleted_count} photos"}
 
 
 def handle_upload(user_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -253,6 +282,19 @@ def _update_profile_avatar(user_id: str, avatar_url: str) -> None:
 def _get_user_id(event: Dict[str, Any]) -> Optional[str]:
     claims = event.get("requestContext", {}).get("authorizer", {}).get("claims", {})
     return claims.get("sub") or claims.get("cognito:username")
+
+
+def _get_event_detail(event: Dict[str, Any]) -> Dict[str, Any]:
+    detail = event.get("detail") or {}
+    if isinstance(detail, dict):
+        return detail
+    if isinstance(detail, str):
+        try:
+            parsed = json.loads(detail)
+        except json.JSONDecodeError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
 
 
 def _get_method(event: Dict[str, Any]) -> str:

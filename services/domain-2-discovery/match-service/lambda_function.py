@@ -26,6 +26,13 @@ def handler(event, context):
         logger.info('EventBridge: swipe.created')
         return handle_swipe_event(event)
 
+    # EventBridge event (user.deleted)
+    if event.get('source') == 'kismet.profile-service' and (
+        event.get('detail-type') or event.get('detailType')
+    ) == 'user.deleted':
+        logger.info('EventBridge: user.deleted')
+        return handle_user_deleted(event)
+
     # API Gateway request
     method = _get_method(event)
     path = _get_path(event)
@@ -44,6 +51,52 @@ def handler(event, context):
         return unmatch(event, match_id)
     else:
         return _response(404, {'code': 'NOT_FOUND', 'message': f'No route: {method} {path}'})
+
+
+def handle_user_deleted(event):
+    """Delete all matches involving the deleted user."""
+    detail = event.get('detail') or {}
+    if isinstance(detail, str):
+        try:
+            detail = json.loads(detail)
+        except (json.JSONDecodeError, TypeError):
+            detail = {}
+    user_id = detail.get('userId')
+    if not user_id:
+        logger.warning('user.deleted event missing userId')
+        return {'statusCode': 400, 'body': 'Missing userId'}
+
+    from boto3.dynamodb.conditions import Key
+    result = match_table.query(
+        KeyConditionExpression=Key('PK').eq(f'USER#{user_id}') & Key('SK').begins_with('MATCH#'),
+    )
+
+    deleted_count = 0
+    for index_item in result.get('Items', []):
+        match_id = index_item.get('matchId')
+        if not match_id:
+            continue
+        meta = match_table.get_item(Key={'PK': f'MATCH#{match_id}', 'SK': 'META'}).get('Item')
+        if not meta:
+            continue
+        user_a = meta.get('userAId', '')
+        user_b = meta.get('userBId', '')
+        matched_at = meta.get('matchedAt', '')
+        pair_key = meta.get('pairKey', '')
+        user_index_sk = f'MATCH#{matched_at}#{match_id}'
+
+        # Delete all records for this match
+        match_table.delete_item(Key={'PK': f'MATCH#{match_id}', 'SK': 'META'})
+        if pair_key:
+            match_table.delete_item(Key={'PK': pair_key, 'SK': 'META'})
+        if user_a:
+            match_table.delete_item(Key={'PK': f'USER#{user_a}', 'SK': user_index_sk})
+        if user_b:
+            match_table.delete_item(Key={'PK': f'USER#{user_b}', 'SK': user_index_sk})
+        deleted_count += 1
+
+    logger.info('Deleted %d matches for user %s', deleted_count, user_id)
+    return {'statusCode': 200, 'body': f'Deleted {deleted_count} matches'}
 
 
 def handle_swipe_event(event):
