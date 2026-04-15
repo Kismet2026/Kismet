@@ -76,21 +76,22 @@ def handle_user_deleted(detail: dict) -> Dict[str, Any]:
         match_id = match_index_item.get("matchId")
         if not match_id:
             continue
-        # Delete all messages in this conversation
-        msgs = table.query(KeyConditionExpression=Key("PK").eq(f"CONV#{match_id}"))
-        with table.batch_writer() as batch:
-            for msg in msgs.get("Items", []):
-                batch.delete_item(Key={"PK": msg["PK"], "SK": msg["SK"]})
-                deleted_count += 1
-        while "LastEvaluatedKey" in msgs:
-            msgs = table.query(
-                KeyConditionExpression=Key("PK").eq(f"CONV#{match_id}"),
-                ExclusiveStartKey=msgs["LastEvaluatedKey"],
-            )
+        # Delete all messages in this conversation, handling pagination
+        last_key = None
+        while True:
+            query_kwargs: Dict[str, Any] = {
+                "KeyConditionExpression": Key("PK").eq(f"CONV#{match_id}"),
+            }
+            if last_key:
+                query_kwargs["ExclusiveStartKey"] = last_key
+            msgs = table.query(**query_kwargs)
             with table.batch_writer() as batch:
                 for msg in msgs.get("Items", []):
                     batch.delete_item(Key={"PK": msg["PK"], "SK": msg["SK"]})
                     deleted_count += 1
+            last_key = msgs.get("LastEvaluatedKey")
+            if not last_key:
+                break
 
     print(f"[INFO] Deleted {deleted_count} messages for user {user_id}")
     return {"statusCode": 200, "body": f"Deleted {deleted_count} messages"}

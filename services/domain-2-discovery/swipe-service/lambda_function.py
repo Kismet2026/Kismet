@@ -49,22 +49,24 @@ def handle_user_deleted(event):
         logger.warning('user.deleted event missing userId')
         return {'statusCode': 400, 'body': 'Missing userId'}
 
-    result = table.query(
-        KeyConditionExpression=boto3.dynamodb.conditions.Key('userId').eq(user_id),
-    )
-    with table.batch_writer() as batch:
-        for item in result.get('Items', []):
-            batch.delete_item(Key={'userId': item['userId'], 'targetUserId': item['targetUserId']})
-    while 'LastEvaluatedKey' in result:
-        result = table.query(
-            KeyConditionExpression=boto3.dynamodb.conditions.Key('userId').eq(user_id),
-            ExclusiveStartKey=result['LastEvaluatedKey'],
-        )
+    last_key = None
+    deleted_count = 0
+    while True:
+        query_kwargs = {
+            'KeyConditionExpression': boto3.dynamodb.conditions.Key('userId').eq(user_id),
+        }
+        if last_key:
+            query_kwargs['ExclusiveStartKey'] = last_key
+        result = table.query(**query_kwargs)
         with table.batch_writer() as batch:
             for item in result.get('Items', []):
                 batch.delete_item(Key={'userId': item['userId'], 'targetUserId': item['targetUserId']})
+                deleted_count += 1
+        last_key = result.get('LastEvaluatedKey')
+        if not last_key:
+            break
 
-    logger.info('Deleted swipes for user %s', user_id)
+    logger.info('Deleted %d swipes for user %s', deleted_count, user_id)
     return {'statusCode': 200, 'body': 'Swipes deleted'}
 
 

@@ -69,22 +69,24 @@ def handle_user_deleted(event):
         return {'statusCode': 400, 'body': 'Missing userId'}
 
     from boto3.dynamodb.conditions import Key
-    result = table.query(
-        KeyConditionExpression=Key('PK').eq(f'USER#{user_id}'),
-    )
-    with table.batch_writer() as batch:
-        for item in result.get('Items', []):
-            batch.delete_item(Key={'PK': item['PK'], 'SK': item['SK']})
-    while 'LastEvaluatedKey' in result:
-        result = table.query(
-            KeyConditionExpression=Key('PK').eq(f'USER#{user_id}'),
-            ExclusiveStartKey=result['LastEvaluatedKey'],
-        )
+    last_key = None
+    deleted_count = 0
+    while True:
+        query_kwargs = {
+            'KeyConditionExpression': Key('PK').eq(f'USER#{user_id}'),
+        }
+        if last_key:
+            query_kwargs['ExclusiveStartKey'] = last_key
+        result = table.query(**query_kwargs)
         with table.batch_writer() as batch:
             for item in result.get('Items', []):
                 batch.delete_item(Key={'PK': item['PK'], 'SK': item['SK']})
+                deleted_count += 1
+        last_key = result.get('LastEvaluatedKey')
+        if not last_key:
+            break
 
-    logger.info('Deleted recommendation cache for user %s', user_id)
+    logger.info('Deleted %d recommendation cache entries for user %s', deleted_count, user_id)
     return {'statusCode': 200, 'body': 'Recommendation cache deleted'}
 
 
