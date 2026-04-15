@@ -125,6 +125,10 @@ def get_recommendations(event):
         'gender': item.get('gender', ''),
         'location': item.get('location', ''),
         'avatarUrl': item.get('avatarUrl', ''),
+        'bio': item.get('bio', ''),
+        'city': item.get('city', ''),
+        'baziScore': item.get('baziScore'),
+        'reverseBaziScore': item.get('reverseBaziScore'),
         'score': item.get('score', 0),
         'scoreBreakdown': item.get('scoreBreakdown', {}),
     } for item in items]

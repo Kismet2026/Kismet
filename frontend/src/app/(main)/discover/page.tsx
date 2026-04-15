@@ -73,6 +73,14 @@ export default function DiscoverPage() {
         candidate={profileDetail.candidate}
         isOpen={profileDetail.isOpen}
         onClose={() => setProfileDetail({ isOpen: false, candidate: null })}
+        onSwipe={async (action) => {
+          const target = profileDetail.candidate;
+          if (!target) return;
+          const result = await swipe(target.userId, action);
+          if (result.matched && result.matchId) {
+            handleMatch(result.matchId, target);
+          }
+        }}
       />
 
       <MatchModal

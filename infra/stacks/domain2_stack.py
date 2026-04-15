@@ -145,7 +145,7 @@ class Domain2Stack(cdk.Stack):
             extra_policies=[
                 # Recommendation needs to read discovery table for candidate profiles + BaZi cache
                 iam.PolicyStatement(
-                    actions=["dynamodb:Scan", "dynamodb:Query", "dynamodb:GetItem"],
+                    actions=["dynamodb:Scan", "dynamodb:Query", "dynamodb:GetItem", "dynamodb:BatchGetItem"],
                     resources=[discovery_svc.tables[0].table_arn],
                 ),
                 # Recommendation needs to read swipe table to exclude already-swiped candidates

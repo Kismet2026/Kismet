@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import { X, MapPin, CaretLeft, CaretRight } from "@phosphor-icons/react";
-import { BaziScoreBadge } from "./BaziScoreBadge";
+import { motion, AnimatePresence, type PanInfo } from "framer-motion";
+import { X, MapPin, Heart } from "@phosphor-icons/react";
+import { YinYangScore } from "./YinYangScore";
 import { api } from "@/lib/api";
 import type { Candidate, Photo, UserProfile } from "@/types";
 
@@ -11,19 +11,18 @@ interface ProfileDetailProps {
   candidate: Candidate | null;
   isOpen: boolean;
   onClose: () => void;
+  onSwipe?: (action: "like" | "pass") => void;
 }
 
-export function ProfileDetail({ candidate, isOpen, onClose }: ProfileDetailProps) {
+export function ProfileDetail({ candidate, isOpen, onClose, onSwipe }: ProfileDetailProps) {
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [interests, setInterests] = useState<string[]>([]);
   const [photoIndex, setPhotoIndex] = useState(0);
 
-  // Fetch full profile + photos when opened
   useEffect(() => {
     if (!isOpen || !candidate) return;
     setPhotoIndex(0);
 
-    // Fetch photos
     api.get<{ photos: Photo[] }>(`/users/${candidate.userId}/photos`)
       .then((data) => {
         const sorted = (data.photos || []).sort((a, b) =>
@@ -33,7 +32,6 @@ export function ProfileDetail({ candidate, isOpen, onClose }: ProfileDetailProps
       })
       .catch(() => setPhotos([]));
 
-    // Fetch full profile for interests (candidate may not have them)
     if (candidate.interests && candidate.interests.length > 0) {
       setInterests(candidate.interests);
     } else {
@@ -52,153 +50,194 @@ export function ProfileDetail({ candidate, isOpen, onClose }: ProfileDetailProps
       ? [{ photoId: "primary", url: candidate.avatarUrl, isPrimary: true, uploadedAt: "" }]
       : [];
   const currentPhoto = displayPhotos[photoIndex];
+  const photoCount = displayPhotos.length;
+
+  function handlePhotoDragEnd(_: unknown, info: PanInfo) {
+    if (info.offset.x < -50 && photoIndex < photoCount - 1) {
+      setPhotoIndex((i) => i + 1);
+    } else if (info.offset.x > 50 && photoIndex > 0) {
+      setPhotoIndex((i) => i - 1);
+    }
+  }
+
+  function handleTapZone(side: "left" | "right") {
+    if (side === "left" && photoIndex > 0) setPhotoIndex((i) => i - 1);
+    if (side === "right" && photoIndex < photoCount - 1) setPhotoIndex((i) => i + 1);
+  }
 
   return (
     <AnimatePresence>
       {isOpen && (
         <motion.div
-          className="fixed inset-0 z-50 flex flex-col"
+          className="fixed inset-0 z-50"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
         >
-          <div className="absolute inset-0 bg-black/80 backdrop-blur-sm" onClick={onClose} />
+          {/* Blurred photo background — fills entire screen */}
+          <div className="absolute inset-0">
+            {currentPhoto ? (
+              <img
+                src={currentPhoto.url}
+                alt=""
+                className="w-full h-full object-cover blur-2xl scale-110 opacity-60"
+              />
+            ) : (
+              <div className="w-full h-full" style={{ background: placeholderBg }} />
+            )}
+            <div className="absolute inset-0 bg-gradient-to-b from-background/40 via-background/70 to-background/95" />
+          </div>
 
           <motion.div
-            className="relative z-10 flex-1 overflow-y-auto"
+            className="relative z-10 h-full flex flex-col overflow-y-auto"
             initial={{ y: "100%" }}
             animate={{ y: 0 }}
             exit={{ y: "100%" }}
-            transition={{ type: "spring", damping: 25, stiffness: 300 }}
+            transition={{ type: "spring", damping: 28, stiffness: 300 }}
           >
-            {/* Photo gallery header */}
-            <div className="relative h-[55dvh] bg-card">
-              {currentPhoto ? (
-                <img
-                  src={currentPhoto.url}
-                  alt={candidate.displayName}
-                  className="w-full h-full object-cover"
-                />
-              ) : (
-                <div
-                  className="w-full h-full flex items-center justify-center text-8xl font-bold text-foreground/20"
-                  style={{ background: placeholderBg }}
-                >
-                  {candidate.displayName.charAt(0).toUpperCase()}
-                </div>
-              )}
-              <div className="absolute inset-0 bg-gradient-to-t from-background via-transparent to-transparent pointer-events-none" />
-
-              {/* Photo navigation */}
-              {displayPhotos.length > 1 && (
-                <>
-                  {/* Dots indicator at top */}
-                  <div className="absolute top-4 left-0 right-0 flex justify-center gap-1.5 px-16">
-                    {displayPhotos.map((_, i) => (
+            {/* Photo hero — swipeable */}
+            <div className="relative h-[62dvh] flex-shrink-0 overflow-hidden">
+              <motion.div
+                className="absolute inset-0 touch-pan-y"
+                drag={photoCount > 1 ? "x" : false}
+                dragConstraints={{ left: 0, right: 0 }}
+                dragElastic={0.15}
+                onDragEnd={handlePhotoDragEnd}
+              >
+                <AnimatePresence mode="wait" initial={false}>
+                  <motion.div
+                    key={photoIndex}
+                    className="absolute inset-0"
+                    initial={{ opacity: 0.4 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0.4 }}
+                    transition={{ duration: 0.2 }}
+                  >
+                    {currentPhoto ? (
+                      <img
+                        src={currentPhoto.url}
+                        alt={candidate.displayName}
+                        className="w-full h-full object-cover"
+                        draggable={false}
+                      />
+                    ) : (
                       <div
-                        key={i}
-                        className={`h-1 flex-1 rounded-full transition-colors ${
-                          i === photoIndex ? "bg-white" : "bg-white/30"
+                        className="w-full h-full flex items-center justify-center text-9xl font-bold text-foreground/20"
+                        style={{ background: placeholderBg }}
+                      >
+                        {candidate.displayName.charAt(0).toUpperCase()}
+                      </div>
+                    )}
+                  </motion.div>
+                </AnimatePresence>
+              </motion.div>
+
+              {/* Tap zones (only when multiple photos) */}
+              {photoCount > 1 && (
+                <>
+                  <button
+                    onClick={() => handleTapZone("left")}
+                    className="absolute left-0 top-0 bottom-0 w-1/3 z-10"
+                    aria-label="Previous photo"
+                  />
+                  <button
+                    onClick={() => handleTapZone("right")}
+                    className="absolute right-0 top-0 bottom-0 w-1/3 z-10"
+                    aria-label="Next photo"
+                  />
+                </>
+              )}
+
+              {/* Progress bars (Instagram Story style) */}
+              {photoCount > 1 && (
+                <div className="absolute top-3 left-4 right-4 flex gap-1.5 z-20">
+                  {displayPhotos.map((_, i) => (
+                    <div
+                      key={i}
+                      className="h-[3px] flex-1 rounded-full bg-white/25 overflow-hidden"
+                    >
+                      <div
+                        className={`h-full bg-white transition-all duration-300 ${
+                          i < photoIndex ? "w-full" : i === photoIndex ? "w-full" : "w-0"
                         }`}
                       />
-                    ))}
-                  </div>
-
-                  {/* Prev/next buttons */}
-                  {photoIndex > 0 && (
-                    <button
-                      onClick={() => setPhotoIndex((i) => i - 1)}
-                      className="absolute left-2 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-black/40 flex items-center justify-center text-white"
-                    >
-                      <CaretLeft size={20} weight="bold" />
-                    </button>
-                  )}
-                  {photoIndex < displayPhotos.length - 1 && (
-                    <button
-                      onClick={() => setPhotoIndex((i) => i + 1)}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-black/40 flex items-center justify-center text-white"
-                    >
-                      <CaretRight size={20} weight="bold" />
-                    </button>
-                  )}
-                </>
+                    </div>
+                  ))}
+                </div>
               )}
 
               {/* Close button */}
               <button
                 onClick={onClose}
-                className="absolute top-4 right-4 w-10 h-10 rounded-full bg-black/50 flex items-center justify-center text-white"
+                className="absolute top-4 right-4 w-10 h-10 rounded-full bg-black/50 backdrop-blur-md flex items-center justify-center text-white z-20"
               >
                 <X size={20} weight="bold" />
               </button>
+
+              {/* Seamless fade into content */}
+              <div className="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-background to-transparent pointer-events-none" />
             </div>
 
-            {/* Info */}
-            <div className="px-5 pb-8 -mt-8 relative">
-              <h2 className="text-3xl font-bold text-foreground">
-                {candidate.displayName}
-                {candidate.age && (
-                  <span className="font-normal text-muted-foreground">, {candidate.age}</span>
+            {/* Content (overlaps hero via -mt for seamless feel) */}
+            <div className="relative -mt-10 px-5 pb-32 space-y-4">
+              {/* Name card */}
+              <div>
+                <h2 className="text-3xl font-bold text-foreground">
+                  {candidate.displayName}
+                  {candidate.age && (
+                    <span className="font-normal text-muted-foreground">, {candidate.age}</span>
+                  )}
+                </h2>
+                {candidate.city && (
+                  <p className="text-sm text-muted-foreground flex items-center gap-1 mt-1">
+                    <MapPin size={14} /> {candidate.city}
+                  </p>
                 )}
-              </h2>
+              </div>
 
-              {candidate.city && (
-                <p className="text-sm text-muted-foreground flex items-center gap-1 mt-1">
-                  <MapPin size={14} /> {candidate.city}
-                </p>
-              )}
-
+              {/* BaZi compatibility — big yin-yang + breakdown */}
               {(candidate.baziScore != null || candidate.reverseBaziScore != null) && (
-                <div className="mt-4 bg-card rounded-xl p-4 space-y-3">
-                  <p className="text-xs text-muted-foreground">BaZi Compatibility</p>
-                  {candidate.baziScore != null && (
-                    <div className="flex items-center gap-3">
-                      <BaziScoreBadge score={candidate.baziScore} size="sm" />
-                      <div className="flex-1">
-                        <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Your score for them</p>
-                        <p className="text-sm text-foreground">
-                          {candidate.baziScore >= 90
-                            ? "Exceptional match — the stars truly align!"
-                            : candidate.baziScore >= 70
-                              ? "Strong compatibility"
-                              : "Moderate compatibility"}
-                        </p>
+                <div className="rounded-2xl p-5 bg-card/60 backdrop-blur-md border border-border/30 flex items-center gap-4">
+                  <YinYangScore
+                    forward={candidate.baziScore}
+                    reverse={candidate.reverseBaziScore}
+                    size="lg"
+                  />
+                  <div className="flex-1 space-y-2">
+                    <p className="text-[10px] text-muted-foreground uppercase tracking-widest">BaZi Compatibility</p>
+                    {candidate.baziScore != null && (
+                      <div className="flex items-baseline gap-2">
+                        <span className="text-lg font-semibold text-[#D4A056]">{candidate.baziScore}</span>
+                        <span className="text-xs text-muted-foreground">you → them</span>
                       </div>
-                    </div>
-                  )}
-                  {candidate.reverseBaziScore != null && (
-                    <div className="flex items-center gap-3">
-                      <BaziScoreBadge score={candidate.reverseBaziScore} size="sm" />
-                      <div className="flex-1">
-                        <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Their score for you</p>
-                        <p className="text-sm text-foreground">
-                          {candidate.reverseBaziScore >= 90
-                            ? "They find you exceptional!"
-                            : candidate.reverseBaziScore >= 70
-                              ? "They see strong compatibility"
-                              : "They see moderate compatibility"}
-                        </p>
+                    )}
+                    {candidate.reverseBaziScore != null && (
+                      <div className="flex items-baseline gap-2">
+                        <span className="text-lg font-semibold text-foreground/80">{candidate.reverseBaziScore}</span>
+                        <span className="text-xs text-muted-foreground">them → you</span>
                       </div>
-                    </div>
-                  )}
+                    )}
+                  </div>
                 </div>
               )}
 
+              {/* Bio */}
               {candidate.bio && (
-                <div className="mt-4 bg-card rounded-xl p-4">
-                  <p className="text-xs text-muted-foreground mb-1">About</p>
-                  <p className="text-sm text-foreground leading-relaxed">{candidate.bio}</p>
+                <div className="rounded-2xl p-5 bg-card/60 backdrop-blur-md border border-border/30">
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-widest mb-2">About</p>
+                  <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap">{candidate.bio}</p>
                 </div>
               )}
 
+              {/* Interests */}
               {interests.length > 0 && (
-                <div className="mt-4 bg-card rounded-xl p-4">
-                  <p className="text-xs text-muted-foreground mb-2">Interests</p>
+                <div className="rounded-2xl p-5 bg-card/60 backdrop-blur-md border border-border/30">
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-widest mb-3">Interests</p>
                   <div className="flex flex-wrap gap-2">
                     {interests.map((interest) => (
                       <span
                         key={interest}
-                        className="rounded-full bg-primary/10 text-primary px-3 py-1 text-xs"
+                        className="rounded-full bg-primary/15 text-primary px-3 py-1.5 text-xs font-medium"
                       >
                         {interest}
                       </span>
@@ -207,10 +246,10 @@ export function ProfileDetail({ candidate, isOpen, onClose }: ProfileDetailProps
                 </div>
               )}
 
-              {/* Photo thumbnails grid */}
-              {displayPhotos.length > 1 && (
-                <div className="mt-4 bg-card rounded-xl p-4">
-                  <p className="text-xs text-muted-foreground mb-2">Photos</p>
+              {/* Photo thumbs */}
+              {photoCount > 1 && (
+                <div className="rounded-2xl p-5 bg-card/60 backdrop-blur-md border border-border/30">
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-widest mb-3">Photos</p>
                   <div className="grid grid-cols-3 gap-2">
                     {displayPhotos.map((photo, i) => (
                       <button
@@ -231,6 +270,28 @@ export function ProfileDetail({ candidate, isOpen, onClose }: ProfileDetailProps
                 </div>
               )}
             </div>
+
+            {/* Fixed bottom action bar */}
+            {onSwipe && (
+              <div className="fixed bottom-0 left-0 right-0 z-20 px-5 pt-3 pb-6 bg-gradient-to-t from-background via-background/95 to-transparent">
+                <div className="flex gap-3 max-w-md mx-auto">
+                  <button
+                    onClick={() => { onSwipe("pass"); onClose(); }}
+                    className="flex-1 h-13 py-3.5 rounded-2xl bg-card/80 backdrop-blur-md border border-border flex items-center justify-center gap-2 text-foreground/80 hover:bg-card active:scale-95 transition-all"
+                  >
+                    <X size={20} weight="bold" />
+                    <span className="text-sm font-medium">Pass</span>
+                  </button>
+                  <button
+                    onClick={() => { onSwipe("like"); onClose(); }}
+                    className="flex-1 h-13 py-3.5 rounded-2xl bg-primary flex items-center justify-center gap-2 text-primary-foreground hover:bg-primary/90 active:scale-95 transition-all shadow-lg shadow-primary/30"
+                  >
+                    <Heart size={20} weight="fill" />
+                    <span className="text-sm font-medium">Like</span>
+                  </button>
+                </div>
+              </div>
+            )}
           </motion.div>
         </motion.div>
       )}
