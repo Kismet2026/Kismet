@@ -216,13 +216,13 @@ export function ProfileDetail({ candidate, isOpen, onClose, onSwipe }: ProfileDe
                     {candidate.baziScore != null && (
                       <div className="flex items-baseline gap-2">
                         <span className="text-lg font-semibold text-[#D4A056]">{candidate.baziScore}</span>
-                        <span className="text-xs text-muted-foreground">you → them</span>
+                        <span className="text-xs text-muted-foreground">them → you</span>
                       </div>
                     )}
                     {candidate.reverseBaziScore != null && (
                       <div className="flex items-baseline gap-2">
                         <span className="text-lg font-semibold text-foreground/80">{candidate.reverseBaziScore}</span>
-                        <span className="text-xs text-muted-foreground">them → you</span>
+                        <span className="text-xs text-muted-foreground">you → them</span>
                       </div>
                     )}
                   </div>

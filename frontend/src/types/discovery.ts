@@ -8,8 +8,8 @@ export interface Candidate {
   avatarUrl?: string;
   bio?: string;
   interests?: string[];
-  baziScore?: number | null; // your compatibility score for them (forward)
-  reverseBaziScore?: number | null; // their compatibility score for you (reverse)
+  baziScore?: number | null; // them→you: outer amber ring
+  reverseBaziScore?: number | null; // you→them: inner cream ring
 }
 
 export type SwipeAction = "like" | "pass";

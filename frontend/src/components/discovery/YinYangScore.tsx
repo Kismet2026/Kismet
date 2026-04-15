@@ -18,13 +18,14 @@ interface YinYangScoreProps {
 export function YinYangScore({ forward, reverse, size = "md", showLabels = false }: YinYangScoreProps) {
   if (forward == null && reverse == null) return null;
 
+  // pad = half stroke so arcs never clip the container edge
   const dimensions = {
-    sm: { box: 48, outer: 22, inner: 15, stroke: 3, fontCenter: "text-[10px]" },
-    md: { box: 64, outer: 30, inner: 21, stroke: 4, fontCenter: "text-sm" },
-    lg: { box: 88, outer: 42, inner: 30, stroke: 5, fontCenter: "text-lg" },
+    sm: { box: 48, outer: 19, inner: 12, stroke: 3, pad: 2, fontCenter: "text-[10px]" },
+    md: { box: 64, outer: 25, inner: 16, stroke: 4, pad: 3, fontCenter: "text-sm" },
+    lg: { box: 88, outer: 35, inner: 24, stroke: 5, pad: 4, fontCenter: "text-lg" },
   }[size];
 
-  const { box, outer, inner, stroke, fontCenter } = dimensions;
+  const { box, outer, inner, stroke, pad, fontCenter } = dimensions;
   const center = box / 2;
 
   const outerCirc = 2 * Math.PI * outer;
@@ -58,9 +59,9 @@ export function YinYangScore({ forward, reverse, size = "md", showLabels = false
         />
 
         <svg
-          width={box}
-          height={box}
-          viewBox={`0 0 ${box} ${box}`}
+          width={box + pad * 2}
+          height={box + pad * 2}
+          viewBox={`${-pad} ${-pad} ${box + pad * 2} ${box + pad * 2}`}
           className="relative -rotate-90"
         >
           {/* Outer track */}
