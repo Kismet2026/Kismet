@@ -7,6 +7,7 @@ export interface Candidate {
   city?: string;
   avatarUrl?: string;
   bio?: string;
+  interests?: string[];
   baziScore?: number | null; // your compatibility score for them (forward)
   reverseBaziScore?: number | null; // their compatibility score for you (reverse)
 }
