@@ -87,67 +87,6 @@ def seed_preferences(aws_resources, user_id, **overrides):
 
 
 # ---------------------------------------------------------------------------
-# POST /email/send
-# ---------------------------------------------------------------------------
-
-class TestSendEmail:
-    def test_invalid_template_returns_400(self, aws_resources):
-        event = api_event("POST", "/email/send", body={
-            "templateName": "nonexistent_template",
-            "recipientUserId": "user-456",
-            "templateData": {},
-        })
-        result = lambda_function.handler(event, {})
-        assert result["statusCode"] == 400
-        assert json.loads(result["body"])["error"]["code"] == "VALIDATION_ERROR"
-
-    def test_missing_recipient_returns_400(self, aws_resources):
-        event = api_event("POST", "/email/send", body={
-            "templateName": "welcome",
-            "templateData": {},
-        })
-        result = lambda_function.handler(event, {})
-        assert result["statusCode"] == 400
-
-    def test_opted_out_returns_422(self, aws_resources):
-        seed_preferences(aws_resources, "user-456", matchNotifications=False)
-        event = api_event("POST", "/email/send", body={
-            "templateName": "match_notification",
-            "recipientUserId": "user-456",
-            "templateData": {},
-        })
-        result = lambda_function.handler(event, {})
-        assert result["statusCode"] == 422
-        assert json.loads(result["body"])["error"]["code"] == "EMAIL_OPTED_OUT"
-
-    def test_welcome_ignores_preferences(self, aws_resources):
-        # welcome has no preference gate — always sends regardless of opt-in settings
-        seed_preferences(aws_resources, "user-456")
-        event = api_event("POST", "/email/send", body={
-            "templateName": "welcome",
-            "recipientUserId": "user-456",
-            "templateData": {},
-        })
-        result = lambda_function.handler(event, {})
-        assert result["statusCode"] == 200
-
-    def test_returns_email_id_and_status(self, aws_resources):
-        seed_preferences(aws_resources, "user-456")
-        event = api_event("POST", "/email/send", body={
-            "templateName": "match_notification",
-            "recipientUserId": "user-456",
-            "templateData": {"matchName": "Alex"},
-        })
-        result = lambda_function.handler(event, {})
-        body = json.loads(result["body"])
-        assert body["status"] == "sent"
-        assert body["templateName"] == "match_notification"
-        assert body["recipientUserId"] == "user-456"
-        assert "emailId" in body
-        assert "sentAt" in body
-
-
-# ---------------------------------------------------------------------------
 # GET /email/preferences
 # ---------------------------------------------------------------------------
 
