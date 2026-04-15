@@ -123,10 +123,15 @@ export function YinYangScore({ forward, reverse, size = "md", showLabels = false
         </svg>
 
         {/* Center content */}
-        <div className="absolute inset-0 flex items-center justify-center">
+        <div className="absolute inset-0 flex flex-col items-center justify-center">
           <span className={cn("font-bold text-foreground leading-none", fontCenter)}>
             {avg}
           </span>
+          {size === "lg" && (
+            <span className="text-[7px] text-foreground/50 uppercase tracking-widest mt-0.5">
+              ✦ 合 ✦
+            </span>
+          )}
         </div>
       </div>
 
