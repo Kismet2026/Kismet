@@ -43,7 +43,7 @@ export function YinYangScore({ forward, reverse, size = "md", showLabels = false
     <div className="inline-flex flex-col items-center gap-1">
       <div
         className="relative"
-        style={{ width: box, height: box }}
+        style={{ width: box + pad * 2, height: box + pad * 2 }}
       >
         {/* Glow background */}
         <div
