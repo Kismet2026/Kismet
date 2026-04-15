@@ -67,34 +67,40 @@ def handle_user_deleted(event):
         return {'statusCode': 400, 'body': 'Missing userId'}
 
     from boto3.dynamodb.conditions import Key
-    result = match_table.query(
-        KeyConditionExpression=Key('PK').eq(f'USER#{user_id}') & Key('SK').begins_with('MATCH#'),
-    )
+    query_kwargs = {
+        'KeyConditionExpression': Key('PK').eq(f'USER#{user_id}') & Key('SK').begins_with('MATCH#'),
+    }
 
     deleted_count = 0
-    for index_item in result.get('Items', []):
-        match_id = index_item.get('matchId')
-        if not match_id:
-            continue
-        meta = match_table.get_item(Key={'PK': f'MATCH#{match_id}', 'SK': 'META'}).get('Item')
-        if not meta:
-            continue
-        user_a = meta.get('userAId', '')
-        user_b = meta.get('userBId', '')
-        matched_at = meta.get('matchedAt', '')
-        pair_key = meta.get('pairKey', '')
-        user_index_sk = f'MATCH#{matched_at}#{match_id}'
+    while True:
+        result = match_table.query(**query_kwargs)
+        for index_item in result.get('Items', []):
+            match_id = index_item.get('matchId')
+            if not match_id:
+                continue
+            meta = match_table.get_item(Key={'PK': f'MATCH#{match_id}', 'SK': 'META'}).get('Item')
+            if not meta:
+                continue
+            user_a = meta.get('userAId', '')
+            user_b = meta.get('userBId', '')
+            matched_at = meta.get('matchedAt', '')
+            pair_key = meta.get('pairKey', '')
+            user_index_sk = f'MATCH#{matched_at}#{match_id}'
 
-        # Delete all records for this match
-        match_table.delete_item(Key={'PK': f'MATCH#{match_id}', 'SK': 'META'})
-        if pair_key:
-            match_table.delete_item(Key={'PK': pair_key, 'SK': 'META'})
-        if user_a:
-            match_table.delete_item(Key={'PK': f'USER#{user_a}', 'SK': user_index_sk})
-        if user_b:
-            match_table.delete_item(Key={'PK': f'USER#{user_b}', 'SK': user_index_sk})
-        deleted_count += 1
+            # Delete all records for this match
+            match_table.delete_item(Key={'PK': f'MATCH#{match_id}', 'SK': 'META'})
+            if pair_key:
+                match_table.delete_item(Key={'PK': pair_key, 'SK': 'META'})
+            if user_a:
+                match_table.delete_item(Key={'PK': f'USER#{user_a}', 'SK': user_index_sk})
+            if user_b:
+                match_table.delete_item(Key={'PK': f'USER#{user_b}', 'SK': user_index_sk})
+            deleted_count += 1
 
+        last_evaluated_key = result.get('LastEvaluatedKey')
+        if not last_evaluated_key:
+            break
+        query_kwargs['ExclusiveStartKey'] = last_evaluated_key
     logger.info('Deleted %d matches for user %s', deleted_count, user_id)
     return {'statusCode': 200, 'body': f'Deleted {deleted_count} matches'}
 
