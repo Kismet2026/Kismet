@@ -37,6 +37,7 @@ D1_PHOTO = SERVICES / "domain-1-identity" / "photo-service"
 D2_DISCOVERY = SERVICES / "domain-2-discovery" / "discovery-service"
 D2_SWIPE = SERVICES / "domain-2-discovery" / "swipe-service"
 D2_MATCH = SERVICES / "domain-2-discovery" / "match-service"
+D2_RECOMMENDATION = SERVICES / "domain-2-discovery" / "recommendation-service"
 D3_ICEBREAKER = SERVICES / "domain-3-messaging" / "icebreaker-service"
 D3_MESSAGE = SERVICES / "domain-3-messaging" / "message-service"
 D5_EMAIL = SERVICES / "domain-5-notifications" / "email-service"
@@ -944,6 +945,231 @@ class TestModerationToAnalyticsFlow(unittest.TestCase):
         # admin-dashboard uses reportedUserId to find the profile
         self.assertIn("reportedUserId", user_reported)
         self.assertNotEqual(user_reported["reporterId"], user_reported["reportedUserId"])
+
+
+# ============================================================================
+# 13. user.deleted event chain
+#     D1 profile-service publishes user.deleted →
+#       D1 photo-service, D2 discovery, D2 swipe, D2 match,
+#       D2 recommendation, D3 message, D5 email all clean up
+# ============================================================================
+
+
+class TestUserDeletedEventChain(unittest.TestCase):
+    """D1 profile-service publishes user.deleted; downstream services clean up their data."""
+
+    USER_DELETED_DETAIL = {
+        "userId": "user-alice",
+        "timestamp": "2026-04-15T10:00:00Z",
+    }
+
+    def _make_deleted_event(self):
+        return eb_event("kismet.profile-service", "user.deleted", self.USER_DELETED_DETAIL)
+
+    # ── Profile service publishes the event ──────────────────────────────────
+
+    def test_profile_service_publishes_user_deleted_on_delete(self):
+        with patch.dict("os.environ", {
+            "PROFILES_TABLE_NAME": "kismet-profiles",
+            "EVENT_BUS_NAME": "kismet-events",
+            "COGNITO_USER_POOL_ID": "",
+        }):
+            profile_mod = _load_module("d1_profile_deleted_lambda_function", D1_PROFILE)
+
+            with patch.object(profile_mod, "dynamodb") as mock_dynamodb, \
+                 patch.object(profile_mod, "events") as mock_events, \
+                 patch.object(profile_mod, "cognito") as mock_cognito:
+
+                mock_table = mock_dynamodb.Table.return_value
+                mock_table.delete_item.return_value = {}
+                mock_events.put_events.return_value = {"FailedEntryCount": 0, "Entries": [{"EventId": "e1"}]}
+                mock_cognito.exceptions.UserNotFoundException = type("UserNotFoundException", (Exception,), {})
+
+                response = profile_mod.handler(
+                    authed_http_event("DELETE", "/profiles/user-alice", user_id="user-alice"),
+                    None,
+                )
+                self.assertEqual(response["statusCode"], 200)
+
+                mock_events.put_events.assert_called_once()
+                entry = mock_events.put_events.call_args[1]["Entries"][0]
+                self.assertEqual(entry["Source"], "kismet.profile-service")
+                self.assertEqual(entry["DetailType"], "user.deleted")
+                detail = json.loads(entry["Detail"])
+                self.assertEqual(detail["userId"], "user-alice")
+                self.assertIn("timestamp", detail)
+
+    def test_user_deleted_event_has_required_fields(self):
+        for field in ["userId", "timestamp"]:
+            self.assertIn(field, self.USER_DELETED_DETAIL)
+
+    # ── Discovery service removes META entry ─────────────────────────────────
+
+    def test_discovery_service_removes_profile_on_user_deleted(self):
+        discovery_mod = _load_module("d2_discovery_user_deleted_lambda_function", D2_DISCOVERY)
+
+        with patch.object(discovery_mod, "table") as mock_table:
+            response = discovery_mod.handler(self._make_deleted_event(), None)
+
+            self.assertEqual(response["statusCode"], 200)
+            mock_table.delete_item.assert_called_once_with(
+                Key={"PK": "PROFILE#user-alice", "SK": "META"}
+            )
+
+    # ── Photo service deletes photos ──────────────────────────────────────────
+
+    def test_photo_service_deletes_photos_on_user_deleted(self):
+        with patch.dict("os.environ", {
+            "PHOTOS_TABLE_NAME": "kismet-photos",
+            "PHOTOS_BUCKET_NAME": "kismet-photos-bucket",
+            "PHOTOS_CDN_BASE_URL": "",
+            "PROFILES_TABLE_NAME": "kismet-profiles",
+            "EVENT_BUS_NAME": "kismet-events",
+        }):
+            photo_mod = _load_module("d1_photo_user_deleted_lambda_function", D1_PHOTO)
+
+            with patch.object(photo_mod, "dynamodb") as mock_dynamodb, \
+                 patch.object(photo_mod, "s3") as mock_s3:
+
+                mock_table = mock_dynamodb.Table.return_value
+                mock_table.query.return_value = {
+                    "Items": [
+                        {"PK": "USER#user-alice", "SK": "PHOTO#p1", "photoId": "p1", "s3Key": "user-alice/p1.jpg"},
+                        {"PK": "USER#user-alice", "SK": "PHOTO#p2", "photoId": "p2", "s3Key": "user-alice/p2.jpg"},
+                    ]
+                }
+
+                response = photo_mod.handler(self._make_deleted_event(), None)
+
+                self.assertEqual(response["statusCode"], 200)
+                self.assertEqual(mock_s3.delete_object.call_count, 2)
+                self.assertEqual(mock_table.delete_item.call_count, 2)
+
+    # ── Swipe service deletes swipes ──────────────────────────────────────────
+
+    def test_swipe_service_deletes_swipes_on_user_deleted(self):
+        swipe_mod = _load_module("d2_swipe_user_deleted_lambda_function", D2_SWIPE)
+
+        with patch.object(swipe_mod, "table") as mock_table:
+            mock_table.query.return_value = {
+                "Items": [
+                    {"userId": "user-alice", "targetUserId": "user-bob"},
+                    {"userId": "user-alice", "targetUserId": "user-charlie"},
+                ]
+            }
+            mock_batch = MagicMock()
+            mock_table.batch_writer.return_value.__enter__ = MagicMock(return_value=mock_batch)
+            mock_table.batch_writer.return_value.__exit__ = MagicMock(return_value=False)
+
+            response = swipe_mod.handler(self._make_deleted_event(), None)
+
+            self.assertEqual(response["statusCode"], 200)
+            mock_table.query.assert_called_once()
+
+    # ── Match service cleans up matches ───────────────────────────────────────
+
+    def test_match_service_cleans_up_matches_on_user_deleted(self):
+        match_mod = _load_module("d2_match_user_deleted_lambda_function", D2_MATCH)
+
+        with patch.object(match_mod, "match_table") as mock_match_table:
+            mock_match_table.query.return_value = {
+                "Items": [
+                    {"matchId": "match-001", "PK": "USER#user-alice", "SK": "MATCH#2026-04-01T10:00:00Z#match-001"},
+                ]
+            }
+            mock_match_table.get_item.return_value = {
+                "Item": {
+                    "matchId": "match-001",
+                    "userAId": "user-alice",
+                    "userBId": "user-bob",
+                    "matchedAt": "2026-04-01T10:00:00Z",
+                    "pairKey": "PAIR#user-alice#user-bob",
+                    "status": "active",
+                }
+            }
+            mock_match_table.delete_item.return_value = {}
+
+            response = match_mod.handler(self._make_deleted_event(), None)
+
+            self.assertEqual(response["statusCode"], 200)
+            # Should delete MATCH META, PAIR META, and both user index entries
+            self.assertGreaterEqual(mock_match_table.delete_item.call_count, 3)
+
+    # ── Recommendation service deletes cache ──────────────────────────────────
+
+    def test_recommendation_service_deletes_cache_on_user_deleted(self):
+        with patch.dict("os.environ", {
+            "TABLE_NAME": "kismet-recommendations",
+            "DISCOVERY_TABLE_NAME": "kismet-discovery",
+            "SWIPE_TABLE_NAME": "kismet-swipes",
+            "EVENT_BUS_NAME": "kismet-events",
+        }):
+            rec_mod = _load_module("d2_rec_user_deleted_lambda_function", D2_RECOMMENDATION)
+
+            with patch.object(rec_mod, "table") as mock_table:
+                mock_table.query.return_value = {
+                    "Items": [
+                        {"PK": "USER#user-alice", "SK": "SCORE#0090#user-bob"},
+                        {"PK": "USER#user-alice", "SK": "SCORE#0080#user-charlie"},
+                    ]
+                }
+                mock_batch = MagicMock()
+                mock_table.batch_writer.return_value.__enter__ = MagicMock(return_value=mock_batch)
+                mock_table.batch_writer.return_value.__exit__ = MagicMock(return_value=False)
+
+                response = rec_mod.handler(self._make_deleted_event(), None)
+
+                self.assertEqual(response["statusCode"], 200)
+                mock_table.query.assert_called_once()
+
+    # ── Message service deletes conversation messages ─────────────────────────
+
+    def test_message_service_deletes_messages_on_user_deleted(self):
+        with patch.dict("os.environ", {
+            "TABLE_NAME": "kismet-messages",
+            "MATCHES_TABLE": "kismet-matches",
+            "EVENT_BUS_NAME": "kismet-events",
+        }):
+            msg_mod = _load_module("d3_message_user_deleted_lambda_function", D3_MESSAGE)
+
+            with patch.object(msg_mod, "matches_table") as mock_matches, \
+                 patch.object(msg_mod, "table") as mock_table:
+
+                mock_matches.query.return_value = {
+                    "Items": [
+                        {"matchId": "match-001", "PK": "USER#user-alice", "SK": "MATCH#2026-04-01T10:00:00Z#match-001"},
+                    ]
+                }
+                mock_table.query.return_value = {
+                    "Items": [
+                        {"PK": "CONV#match-001", "SK": "MSG#2026-04-01T10:01:00Z#msg-001"},
+                    ]
+                }
+                mock_batch = MagicMock()
+                mock_table.batch_writer.return_value.__enter__ = MagicMock(return_value=mock_batch)
+                mock_table.batch_writer.return_value.__exit__ = MagicMock(return_value=False)
+
+                response = msg_mod.handler(self._make_deleted_event(), None)
+
+                self.assertEqual(response["statusCode"], 200)
+
+    # ── Email service deletes preferences ─────────────────────────────────────
+
+    def test_email_service_deletes_preferences_on_user_deleted(self):
+        with patch.dict("os.environ", {
+            "PREFERENCES_TABLE": "kismet-email-preferences",
+            "SENDER_EMAIL": "noreply@kismet.app",
+            "ADMIN_EMAIL": "admin@kismet.app",
+        }):
+            email_mod = _load_module("d5_email_user_deleted_lambda_function", D5_EMAIL)
+
+            with patch.object(email_mod, "prefs_table") as mock_prefs:
+                response = email_mod.handler(self._make_deleted_event(), None)
+
+                self.assertEqual(response["statusCode"], 200)
+                mock_prefs.delete_item.assert_called_once_with(
+                    Key={"PK": "USER#user-alice", "SK": "PREFS"}
+                )
 
 
 if __name__ == "__main__":

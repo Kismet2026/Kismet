@@ -182,7 +182,7 @@ Update an existing profile. Supports partial updates. Users can only update thei
 
 ### DELETE /profiles/{userId}
 
-Delete a user's profile. Users can only delete their own profile.
+Delete a user's profile. Users can only delete their own profile. This operation is idempotent — if the profile row has already been removed (e.g., retrying after a transient EventBridge failure), the Cognito user deletion and `user.deleted` event are still attempted so downstream cleanup always completes.
 
 **Auth:** Required (JWT)
 
@@ -206,7 +206,7 @@ DELETE /profiles/user-123
 |--------|------|-----------|
 | 401 | `UNAUTHORIZED` | Not logged in |
 | 403 | `FORBIDDEN` | Attempting to delete another user's profile |
-| 404 | `NOT_FOUND` | Profile does not exist |
+| 500 | `INTERNAL_ERROR` | EventBridge publish failed; safe to retry |
 
 ---
 
@@ -289,10 +289,30 @@ Published when a user updates their profile.
 
 ---
 
+### Published: `user.deleted`
+
+Published when a user permanently deletes their account.
+
+```json
+{
+  "source": "kismet.profile-service",
+  "detail-type": "user.deleted",
+  "detail": {
+    "userId": "user-123",
+    "timestamp": "2026-04-15T10:00:00+00:00"
+  }
+}
+```
+
+**Consumed by:** Photo Service (delete photos + S3), Discovery Service (remove META), Swipe Service (delete swipes), Match Service (delete matches), Recommendation Service (delete cache), Message Service (delete messages), Email Service (delete preferences)
+
+---
+
 ## Dependencies
 
 | Direction | Service | How |
 |-----------|---------|-----|
 | **Called by** | Frontend (React) | HTTP via API Gateway |
 | **Publishes to** | Discovery Service, Recommendation Service, Activity Logger | EventBridge `profile.completed`, `profile.updated` |
-| **Depends on** | Auth (Cognito) | JWT validation via API Gateway Authorizer |
+| **Publishes to** | Photo Service, Discovery Service, Swipe Service, Match Service, Recommendation Service, Message Service, Email Service | EventBridge `user.deleted` |
+| **Depends on** | Auth (Cognito) | JWT validation via API Gateway Authorizer; `AdminDeleteUser` on account deletion |

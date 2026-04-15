@@ -60,6 +60,8 @@ def handle_event(event, context):
         return on_match_created(detail)
     elif detail_type == "user.reported":
         return on_user_reported(detail)
+    elif detail_type == "user.deleted":
+        return on_user_deleted(detail)
     elif detail_type == "scheduler.weekly_digest":
         return on_weekly_digest(detail)
     elif detail_type == "message.sent":
@@ -98,6 +100,18 @@ def on_user_created(detail):
         body_html=render_template("welcome", {"email": email}),
     )
 
+    return {"statusCode": 200}
+
+
+def on_user_deleted(detail):
+    """Delete email preferences when a user deletes their account."""
+    user_id = detail.get("userId", "")
+    if not user_id:
+        print("[WARN] user.deleted event missing userId")
+        return {"statusCode": 400}
+
+    prefs_table.delete_item(Key={"PK": f"USER#{user_id}", "SK": "PREFS"})
+    print(f"[INFO] Deleted email preferences for user {user_id}")
     return {"statusCode": 200}
 
 

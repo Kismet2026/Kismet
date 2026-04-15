@@ -97,7 +97,15 @@ class Domain1Stack(cdk.Stack):
             publish_events=True,
             environment={
                 "PROFILES_TABLE_NAME": "kismet-profiles",
+                "COGNITO_USER_POOL_ID": shared.user_pool.user_pool_id,
             },
+            extra_policies=[
+                # Profile delete needs to remove the Cognito user
+                iam.PolicyStatement(
+                    actions=["cognito-idp:AdminDeleteUser"],
+                    resources=[shared.user_pool.user_pool_arn],
+                ),
+            ],
             api=imported_api,
             authorizer=shared.authorizer,
             event_bus=event_bus,
@@ -122,6 +130,7 @@ class Domain1Stack(cdk.Stack):
                 {"method": "DELETE", "path": "/photos/{photoId}", "auth": True},
                 {"method": "PUT", "path": "/photos/{photoId}/primary", "auth": True},
             ],
+            consume_events=["user.deleted"],
             publish_events=True,
             environment={
                 "PHOTOS_TABLE_NAME": "kismet-photos",
