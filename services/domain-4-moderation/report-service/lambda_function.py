@@ -253,7 +253,7 @@ def _count_pending_reports_for_user(reported_user_id: str) -> int:
     from boto3.dynamodb.conditions import Key, Attr
     table = dynamodb.Table(TABLE_NAME)
     response = table.query(
-        IndexName='reportedUserId',
+        IndexName='reportedUserId-index',
         KeyConditionExpression=Key('reportedUserId').eq(reported_user_id),
         FilterExpression=Attr('status').eq('PENDING'),
         Select='COUNT',
@@ -261,7 +261,7 @@ def _count_pending_reports_for_user(reported_user_id: str) -> int:
     count = response.get('Count', 0)
     while 'LastEvaluatedKey' in response:
         response = table.query(
-            IndexName='reportedUserId',
+            IndexName='reportedUserId-index',
             KeyConditionExpression=Key('reportedUserId').eq(reported_user_id),
             FilterExpression=Attr('status').eq('PENDING'),
             Select='COUNT',
@@ -278,7 +278,7 @@ def _auto_ban_user(reported_user_id: str, trigger_report_id: str, reason: str, n
     # Resolve all outstanding PENDING reports for this user (via GSI)
     from boto3.dynamodb.conditions import Key, Attr
     pending = table.query(
-        IndexName='reportedUserId',
+        IndexName='reportedUserId-index',
         KeyConditionExpression=Key('reportedUserId').eq(reported_user_id),
         FilterExpression=Attr('status').eq('PENDING'),
     )
