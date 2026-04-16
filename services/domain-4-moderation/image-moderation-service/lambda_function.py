@@ -294,21 +294,35 @@ def detect_moderation_labels(
     *,
     bucket: str,
 ) -> Tuple[List[Dict[str, Any]], float, bool, Optional[str]]:
-    try:
-        resp = rekognition.detect_moderation_labels(
-            Image={
-                "S3Object": {
-                    "Bucket": bucket,
-                    "Name": s3_key,
-                }
-            },
-            MinConfidence=REKOGNITION_MIN_CONFIDENCE,
-        )
-    except ClientError as e:
-        code = e.response.get("Error", {}).get("Code", "RekognitionError")
-        if code in ("InvalidS3ObjectException", "S3ObjectNotFoundException"):
-            raise RuntimeError(f"IMAGE_NOT_FOUND:{code}") from e
-        raise RuntimeError(f"REKOGNITION:{code}") from e
+    # S3 PutObject is strongly consistent, but Rekognition occasionally can't
+    # see a freshly uploaded object on its first read. Retry in-process so we
+    # don't fall through to EventBridge's ~60s retry window.
+    last_err: Optional[ClientError] = None
+    resp = None
+    for attempt in range(4):
+        try:
+            resp = rekognition.detect_moderation_labels(
+                Image={
+                    "S3Object": {
+                        "Bucket": bucket,
+                        "Name": s3_key,
+                    }
+                },
+                MinConfidence=REKOGNITION_MIN_CONFIDENCE,
+            )
+            break
+        except ClientError as e:
+            code = e.response.get("Error", {}).get("Code", "RekognitionError")
+            if code in ("InvalidS3ObjectException", "S3ObjectNotFoundException") and attempt < 3:
+                # eventual-consistency retry: 0.5s, 1s, 2s
+                time.sleep(0.5 * (2 ** attempt))
+                last_err = e
+                continue
+            if code in ("InvalidS3ObjectException", "S3ObjectNotFoundException"):
+                raise RuntimeError(f"IMAGE_NOT_FOUND:{code}") from e
+            raise RuntimeError(f"REKOGNITION:{code}") from e
+    if resp is None:
+        raise RuntimeError("IMAGE_NOT_FOUND:InvalidS3ObjectException") from last_err
 
     labels_out: List[Dict[str, Any]] = []
     max_conf = 0.0

@@ -49,22 +49,41 @@ export function usePhotos(userId?: string) {
         await uploadToS3(uploadUrl, normalized);
         await api.post(`/photos/${photoId}/confirm`);
 
-        // D4 moderation is async (Rekognition typically ~1-3s). Wait long
-        // enough for the scan to settle, then check whether the photo is
-        // still in the list — the backend filters out rejected photos so
-        // missing == flagged.
-        await new Promise((r) => setTimeout(r, 5000));
+        // D4 moderation is async. Rekognition itself runs in 1-3s, but S3
+        // eventual-consistency can force an in-Lambda retry (~3s extra), and
+        // cold starts add ~500ms. Poll for up to ~15s, checking every 2s.
+        // The backend hides rejected photos from GET /photos, so "missing
+        // after settle" == flagged. We seed rejected=true and only flip it
+        // once we've seen the photo appear *and* the terminal delay has
+        // elapsed.
         let rejected = true;
-        if (targetId) {
+        const pollIntervalMs = 2000;
+        const maxAttempts = 8; // 8 × 2s ≈ 16s total
+        for (let attempt = 0; attempt < maxAttempts; attempt++) {
+          await new Promise((r) => setTimeout(r, pollIntervalMs));
+          if (!targetId) break;
           try {
             const data = await api.get<{ photos: Photo[]; count: number }>(
               `/users/${targetId}/photos`
             );
             setPhotos(data.photos);
-            rejected = !data.photos.some((p) => p.photoId === photoId);
+            const visible = data.photos.some((p) => p.photoId === photoId);
+            if (visible) {
+              // On the last attempt, photo is still there → approved.
+              // Earlier attempts could still be mid-moderation (status=active
+              // but not yet reviewed), so we keep polling to be sure.
+              if (attempt >= maxAttempts - 1) {
+                rejected = false;
+                break;
+              }
+              // heuristic: if photo has survived ~6s it's very likely approved
+              if (attempt >= 3) {
+                rejected = false;
+                break;
+              }
+            }
           } catch {
-            // network failure — assume not rejected rather than lie to user
-            rejected = false;
+            // keep polling; single network blip shouldn't trigger the modal
           }
         }
 
