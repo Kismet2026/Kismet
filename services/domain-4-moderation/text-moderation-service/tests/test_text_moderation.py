@@ -105,7 +105,7 @@ def mock_comprehend_clean(monkeypatch):
 class TestPostModerateText:
     def test_returns_moderation_result(self, aws_resources, monkeypatch):
         mock_comprehend_clean(monkeypatch)
-        result = lambda_function.lambda_handler(
+        result = lambda_function.handler(
             api_event("POST", "/moderate/text", body={
                 "content": "hi", "contentId": "m1", "contentType": "message",
             }), {}
@@ -120,7 +120,7 @@ class TestPostModerateText:
 
     def test_result_written_to_dynamodb(self, aws_resources, monkeypatch):
         mock_comprehend_clean(monkeypatch)
-        lambda_function.lambda_handler(
+        lambda_function.handler(
             api_event("POST", "/moderate/text", body={
                 "content": "hi", "contentId": "m1", "contentType": "message",
             }), {}
@@ -132,7 +132,7 @@ class TestPostModerateText:
 
     def test_optional_user_id_stored(self, aws_resources, monkeypatch):
         mock_comprehend_clean(monkeypatch)
-        lambda_function.lambda_handler(
+        lambda_function.handler(
             api_event("POST", "/moderate/text", body={
                 "content": "hi", "contentId": "m2", "contentType": "message", "userId": "u-99",
             }), {}
@@ -141,7 +141,7 @@ class TestPostModerateText:
         assert item["userId"] == "u-99"
 
     def test_empty_content_returns_400(self, aws_resources):
-        result = lambda_function.lambda_handler(
+        result = lambda_function.handler(
             api_event("POST", "/moderate/text", body={
                 "content": "", "contentId": "m1", "contentType": "message",
             }), {}
@@ -150,7 +150,7 @@ class TestPostModerateText:
         assert json.loads(result["body"])["error"]["code"] == "VALIDATION_ERROR"
 
     def test_content_exceeds_max_bytes_returns_400(self, aws_resources):
-        result = lambda_function.lambda_handler(
+        result = lambda_function.handler(
             api_event("POST", "/moderate/text", body={
                 "content": "a" * 4501, "contentId": "m1", "contentType": "message",
             }), {}
@@ -170,7 +170,7 @@ class TestPostModerateText:
                 )
             ),
         )
-        result = lambda_function.lambda_handler(
+        result = lambda_function.handler(
             api_event("POST", "/moderate/text", body={
                 "content": "x", "contentId": "m1", "contentType": "message",
             }), {}
@@ -184,12 +184,12 @@ class TestPostModerateText:
             "path": "/moderate/text",
             "body": '{"broken":',
         }
-        result = lambda_function.lambda_handler(event, {})
+        result = lambda_function.handler(event, {})
         assert result["statusCode"] == 400
         assert json.loads(result["body"])["error"]["code"] == "VALIDATION_ERROR"
 
     def test_missing_content_id_returns_400(self, aws_resources):
-        result = lambda_function.lambda_handler(
+        result = lambda_function.handler(
             api_event("POST", "/moderate/text", body={
                 "content": "hi", "contentType": "message",
             }), {}
@@ -205,7 +205,7 @@ class TestPostModerateText:
                 "content": "ok", "contentId": "api2", "contentType": "message",
             }),
         }
-        result = lambda_function.lambda_handler(event, {})
+        result = lambda_function.handler(event, {})
         assert result["statusCode"] == 200
         assert json.loads(result["body"])["contentId"] == "api2"
 
@@ -251,7 +251,7 @@ class TestValidatePostBody:
 # GET /moderate/text/history
 class TestGetHistory:
     def test_admin_returns_200_with_expected_shape(self, aws_resources):
-        result = lambda_function.lambda_handler(
+        result = lambda_function.handler(
             {
                 "httpMethod": "GET",
                 "path": "/moderate/text/history",
@@ -266,12 +266,12 @@ class TestGetHistory:
 
     def test_history_reflects_moderated_content(self, aws_resources, monkeypatch):
         mock_comprehend_clean(monkeypatch)
-        lambda_function.lambda_handler(
+        lambda_function.handler(
             api_event("POST", "/moderate/text", body={
                 "content": "hello", "contentId": "m1", "contentType": "message",
             }), {}
         )
-        result = lambda_function.lambda_handler(
+        result = lambda_function.handler(
             {
                 "httpMethod": "GET",
                 "path": "/moderate/text/history",
@@ -283,7 +283,7 @@ class TestGetHistory:
         assert body["items"][0]["contentId"] == "m1"
 
     def test_invalid_cursor_returns_400(self, aws_resources):
-        result = lambda_function.lambda_handler(
+        result = lambda_function.handler(
             {
                 "httpMethod": "GET",
                 "path": "/moderate/text/history",
@@ -300,7 +300,7 @@ class TestGetHistory:
             lambda_function, "query_history_page",
             lambda **kw: (_ for _ in ()).throw(RuntimeError("dynamo down")),
         )
-        result = lambda_function.lambda_handler(
+        result = lambda_function.handler(
             {
                 "httpMethod": "GET",
                 "path": "/moderate/text/history",
@@ -311,13 +311,13 @@ class TestGetHistory:
         assert json.loads(result["body"])["error"]["code"] == "INTERNAL_ERROR"
 
     def test_no_auth_returns_401(self, aws_resources):
-        result = lambda_function.lambda_handler(
+        result = lambda_function.handler(
             {"httpMethod": "GET", "path": "/moderate/text/history"}, {}
         )
         assert result["statusCode"] == 401
 
     def test_non_admin_returns_403(self, aws_resources):
-        result = lambda_function.lambda_handler(
+        result = lambda_function.handler(
             {
                 "httpMethod": "GET",
                 "path": "/moderate/text/history",
@@ -330,7 +330,7 @@ class TestGetHistory:
 # Routing
 class TestRouting:
     def test_unknown_path_returns_404(self, aws_resources):
-        result = lambda_function.lambda_handler(
+        result = lambda_function.handler(
             {"httpMethod": "GET", "path": "/moderate/text/unknown"}, {}
         )
         assert result["statusCode"] == 404
@@ -340,7 +340,7 @@ class TestRouting:
 class TestEventBridge:
     def test_message_sent_writes_to_dynamodb(self, aws_resources, monkeypatch):
         mock_comprehend_clean(monkeypatch)
-        result = lambda_function.lambda_handler(
+        result = lambda_function.handler(
             eb_event("kismet.message-service", "message.sent", {
                 "messageId": "m1", "senderId": "u1", "content": "hello",
             }), {}
@@ -352,7 +352,7 @@ class TestEventBridge:
 
     def test_detail_as_json_string(self, aws_resources, monkeypatch):
         mock_comprehend_clean(monkeypatch)
-        result = lambda_function.lambda_handler(
+        result = lambda_function.handler(
             eb_event(
                 "kismet.message-service",
                 "message.sent",
@@ -364,7 +364,7 @@ class TestEventBridge:
 
     def test_no_sender_id_still_writes_row(self, aws_resources, monkeypatch):
         mock_comprehend_clean(monkeypatch)
-        lambda_function.lambda_handler(
+        lambda_function.handler(
             eb_event("kismet.message-service", "message.sent", {
                 "messageId": "m3", "content": "hello",
             }), {}
@@ -374,7 +374,7 @@ class TestEventBridge:
         assert "userId" not in item
 
     def test_wrong_source_is_skipped(self, aws_resources):
-        result = lambda_function.lambda_handler(
+        result = lambda_function.handler(
             eb_event("other.service", "message.sent", {
                 "messageId": "m1", "content": "x",
             }), {}
@@ -382,7 +382,7 @@ class TestEventBridge:
         assert json.loads(result["body"]).get("skipped") is True
 
     def test_wrong_detail_type_is_skipped(self, aws_resources):
-        result = lambda_function.lambda_handler(
+        result = lambda_function.handler(
             eb_event("kismet.message-service", "message.delivered", {
                 "messageId": "m1", "content": "x",
             }), {}

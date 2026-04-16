@@ -166,7 +166,7 @@ class TestPostModerateImage:
         event = api_event("POST", "/moderate/image", body={
             "photoId": "p1", "userId": "u1",
         })
-        result = lambda_function.lambda_handler(event, {})
+        result = lambda_function.handler(event, {})
         assert result["statusCode"] == 400
         assert json.loads(result["body"])["error"]["code"] == "VALIDATION_ERROR"
 
@@ -174,14 +174,14 @@ class TestPostModerateImage:
         event = api_event("POST", "/moderate/image", body={
             "s3Key": "u1/p1.jpg", "userId": "u1",
         })
-        result = lambda_function.lambda_handler(event, {})
+        result = lambda_function.handler(event, {})
         assert result["statusCode"] == 400
 
     def test_missing_user_id_returns_400(self, aws_resources):
         event = api_event("POST", "/moderate/image", body={
             "s3Key": "u1/p1.jpg", "photoId": "p1",
         })
-        result = lambda_function.lambda_handler(event, {})
+        result = lambda_function.handler(event, {})
         assert result["statusCode"] == 400
 
     def test_clean_image_returns_not_flagged(self, aws_resources, monkeypatch):
@@ -191,7 +191,7 @@ class TestPostModerateImage:
         event = api_event("POST", "/moderate/image", body={
             "s3Key": "u1/p1.jpg", "photoId": "p1", "userId": "u1",
         })
-        result = lambda_function.lambda_handler(event, {})
+        result = lambda_function.handler(event, {})
 
         assert result["statusCode"] == 200
         body = json.loads(result["body"])
@@ -203,7 +203,7 @@ class TestPostModerateImage:
         upload_photo(aws_resources, "u1/p1.jpg")
         mock_rekognition_clean(monkeypatch)
 
-        lambda_function.lambda_handler(
+        lambda_function.handler(
             api_event("POST", "/moderate/image", body={
                 "s3Key": "u1/p1.jpg", "photoId": "p1", "userId": "u1",
             }), {}
@@ -222,7 +222,7 @@ class TestPostModerateImage:
         event = api_event("POST", "/moderate/image", body={
             "s3Key": "u1/p1.jpg", "photoId": "p1", "userId": "u1",
         })
-        result = lambda_function.lambda_handler(event, {})
+        result = lambda_function.handler(event, {})
 
         assert result["statusCode"] == 200
         body = json.loads(result["body"])
@@ -234,7 +234,7 @@ class TestPostModerateImage:
         seed_photo_record(aws_resources, "u1", "p1")
         mock_rekognition_flagged(monkeypatch)
 
-        lambda_function.lambda_handler(
+        lambda_function.handler(
             api_event("POST", "/moderate/image", body={
                 "s3Key": "u1/p1.jpg", "photoId": "p1", "userId": "u1",
             }), {}
@@ -259,7 +259,7 @@ class TestPostModerateImage:
         event = api_event("POST", "/moderate/image", body={
             "s3Key": "missing.jpg", "photoId": "p_missing", "userId": "u1",
         })
-        result = lambda_function.lambda_handler(event, {})
+        result = lambda_function.handler(event, {})
         assert result["statusCode"] == 404
         assert json.loads(result["body"])["error"]["code"] == "IMAGE_NOT_FOUND"
 
@@ -277,7 +277,7 @@ class TestPostModerateImage:
         event = api_event("POST", "/moderate/image", body={
             "s3Key": "u1/p1.jpg", "photoId": "p1", "userId": "u1",
         })
-        result = lambda_function.lambda_handler(event, {})
+        result = lambda_function.handler(event, {})
         assert result["statusCode"] == 500
         assert json.loads(result["body"])["error"]["code"] == "REKOGNITION_ERROR"
 
@@ -287,7 +287,7 @@ class TestPostModerateImage:
             "path": "/moderate/image",
             "body": '{"not":',
         }
-        result = lambda_function.lambda_handler(event, {})
+        result = lambda_function.handler(event, {})
         assert result["statusCode"] == 400
         assert json.loads(result["body"])["error"]["code"] == "VALIDATION_ERROR"
 
@@ -300,7 +300,7 @@ class TestPostModerateImage:
                 "s3Key": "u9/p9.jpg", "photoId": "p9", "userId": "u9",
             }),
         }
-        result = lambda_function.lambda_handler(event, {})
+        result = lambda_function.handler(event, {})
         assert result["statusCode"] == 200
         assert json.loads(result["body"])["photoId"] == "p9"
 
@@ -333,7 +333,7 @@ class TestValidatePostBody:
 # GET /moderate/image/history
 class TestGetHistory:
     def test_admin_returns_200_with_expected_shape(self, aws_resources):
-        result = lambda_function.lambda_handler(
+        result = lambda_function.handler(
             admin_api_event("GET", "/moderate/image/history"), {}
         )
         assert result["statusCode"] == 200
@@ -344,13 +344,13 @@ class TestGetHistory:
     def test_history_reflects_moderated_photos(self, aws_resources, monkeypatch):
         upload_photo(aws_resources, "u1/p1.jpg")
         mock_rekognition_clean(monkeypatch)
-        lambda_function.lambda_handler(
+        lambda_function.handler(
             api_event("POST", "/moderate/image", body={
                 "s3Key": "u1/p1.jpg", "photoId": "p1", "userId": "u1",
             }), {}
         )
 
-        result = lambda_function.lambda_handler(
+        result = lambda_function.handler(
             admin_api_event("GET", "/moderate/image/history"), {}
         )
         body = json.loads(result["body"])
@@ -358,7 +358,7 @@ class TestGetHistory:
         assert body["items"][0]["photoId"] == "p1"
 
     def test_no_auth_returns_401(self, aws_resources):
-        result = lambda_function.lambda_handler(
+        result = lambda_function.handler(
             {"httpMethod": "GET", "path": "/moderate/image/history"}, {}
         )
         assert result["statusCode"] == 401
@@ -369,11 +369,11 @@ class TestGetHistory:
             "path": "/moderate/image/history",
             "requestContext": {"authorizer": {"claims": {"cognito:groups": "users"}}},
         }
-        result = lambda_function.lambda_handler(event, {})
+        result = lambda_function.handler(event, {})
         assert result["statusCode"] == 403
 
     def test_invalid_cursor_returns_400(self, aws_resources):
-        result = lambda_function.lambda_handler(
+        result = lambda_function.handler(
             admin_api_event("GET", "/moderate/image/history", query_params={"cursor": "!!!bad!!!"}),
             {},
         )
@@ -386,7 +386,7 @@ class TestGetHistory:
             "query_history_page",
             lambda **kw: (_ for _ in ()).throw(RuntimeError("dynamo down")),
         )
-        result = lambda_function.lambda_handler(
+        result = lambda_function.handler(
             admin_api_event("GET", "/moderate/image/history"), {}
         )
         assert result["statusCode"] == 500
@@ -399,7 +399,7 @@ class TestEventBridge:
         upload_photo(aws_resources, "u1/p1.jpg")
         mock_rekognition_clean(monkeypatch)
 
-        result = lambda_function.lambda_handler(
+        result = lambda_function.handler(
             eb_event("kismet.photo-service", "photo.uploaded", _eb_photo_detail()),
             {},
         )
@@ -413,7 +413,7 @@ class TestEventBridge:
         upload_photo(aws_resources, "u2/p2.png")
         mock_rekognition_clean(monkeypatch)
 
-        result = lambda_function.lambda_handler(
+        result = lambda_function.handler(
             eb_event(
                 "kismet.photo-service",
                 "photo.uploaded",
@@ -433,7 +433,7 @@ class TestEventBridge:
     def test_missing_s3_bucket_skipped(self, aws_resources, monkeypatch):
         upload_photo(aws_resources, "u1/p1.jpg")
         mock_rekognition_clean(monkeypatch)
-        result = lambda_function.lambda_handler(
+        result = lambda_function.handler(
             eb_event(
                 "kismet.photo-service",
                 "photo.uploaded",
@@ -457,7 +457,7 @@ class TestEventBridge:
         monkeypatch.setattr(
             lambda_function.rekognition, "detect_moderation_labels", capture
         )
-        lambda_function.lambda_handler(
+        lambda_function.handler(
             eb_event(
                 "kismet.photo-service",
                 "photo.uploaded",
@@ -474,7 +474,7 @@ class TestEventBridge:
         assert captured["Image"]["S3Object"]["Name"] == "path/img.jpg"
 
     def test_wrong_source_is_skipped(self, aws_resources):
-        result = lambda_function.lambda_handler(
+        result = lambda_function.handler(
             eb_event(
                 "other.service",
                 "photo.uploaded",
@@ -485,7 +485,7 @@ class TestEventBridge:
         assert json.loads(result["body"]).get("skipped") is True
 
     def test_wrong_detail_type_is_skipped(self, aws_resources):
-        result = lambda_function.lambda_handler(
+        result = lambda_function.handler(
             eb_event(
                 "kismet.photo-service",
                 "photo.deleted",
@@ -509,7 +509,7 @@ class TestEventBridge:
 
         monkeypatch.setattr(lambda_function.events, "put_events", capture)
 
-        lambda_function.lambda_handler(
+        lambda_function.handler(
             eb_event(
                 "kismet.photo-service",
                 "photo.uploaded",
@@ -530,7 +530,7 @@ class TestEventBridge:
 # Routing
 class TestRouting:
     def test_unknown_path_returns_404(self, aws_resources):
-        result = lambda_function.lambda_handler(
+        result = lambda_function.handler(
             {"httpMethod": "GET", "path": "/moderate/image/unknown"}, {}
         )
         assert result["statusCode"] == 404
