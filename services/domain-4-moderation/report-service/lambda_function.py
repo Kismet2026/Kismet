@@ -13,6 +13,9 @@ TABLE_NAME = "kismet-reports"
 VALID_REASONS = ["harassment", "inappropriate_content", "spam", "fake_profile", "other"]
 VALID_RESOLUTIONS = ["warning", "ban", "dismiss"]
 
+# Number of distinct PENDING reports against a user that triggers an automatic ban.
+AUTO_BAN_THRESHOLD = int(os.environ.get('AUTO_BAN_THRESHOLD', '2'))
+
 def handler(event, context):
     method = event.get('httpMethod')
     path = event.get('resource', event.get('path', ''))
@@ -86,6 +89,12 @@ def create_report(event, reporter_id):
     
     table.put_item(Item=item)
 
+    # Auto-ban: count distinct PENDING reports against this user across all reporters
+    pending_count = _count_pending_reports_for_user(reported_user_id)
+    if pending_count >= AUTO_BAN_THRESHOLD:
+        print(f"Auto-ban triggered for {reported_user_id} ({pending_count} pending reports)")
+        _auto_ban_user(reported_user_id, report_id, reason, now)
+
     # EventBridge
     events.put_events(
         Entries=[{
@@ -121,15 +130,21 @@ def create_report(event, reporter_id):
 def list_reports(event):
     qs = event.get('queryStringParameters') or {}
     limit = min(int(qs.get('limit', 20)), 50)
-    
+    status_filter = (qs.get('status') or '').upper() or None  # e.g. PENDING, RESOLVED, DISMISSED
+
     table = dynamodb.Table(TABLE_NAME)
     scan_kwargs = {"Limit": limit}
-    
+
+    if status_filter:
+        scan_kwargs['FilterExpression'] = '#status = :s'
+        scan_kwargs['ExpressionAttributeNames'] = {'#status': 'status'}
+        scan_kwargs['ExpressionAttributeValues'] = {':s': status_filter}
+
     cursor = qs.get('cursor')
     if cursor:
         import base64
         scan_kwargs["ExclusiveStartKey"] = json.loads(base64.b64decode(cursor).decode('utf-8'))
-        
+
     response = table.scan(**scan_kwargs)
     items = []
     for i in response.get('Items', []):
@@ -226,3 +241,69 @@ def resolve_report(event):
             if not check.get('Item'): return {"statusCode": 404, "body": json.dumps({"error": "NOT_FOUND"})}
             return {"statusCode": 409, "body": json.dumps({"error": "CONFLICT"})}
         raise e
+
+
+# ── Auto-ban helpers ──────────────────────────────────────────────────────────
+
+def _count_pending_reports_for_user(reported_user_id: str) -> int:
+    """Return the number of distinct PENDING reports filed against reported_user_id.
+
+    Uses the reportedUserId GSI for an efficient key-based query instead of a full scan.
+    """
+    from boto3.dynamodb.conditions import Key, Attr
+    table = dynamodb.Table(TABLE_NAME)
+    response = table.query(
+        IndexName='reportedUserId-index',
+        KeyConditionExpression=Key('reportedUserId').eq(reported_user_id),
+        FilterExpression=Attr('status').eq('PENDING'),
+        Select='COUNT',
+    )
+    count = response.get('Count', 0)
+    while 'LastEvaluatedKey' in response:
+        response = table.query(
+            IndexName='reportedUserId-index',
+            KeyConditionExpression=Key('reportedUserId').eq(reported_user_id),
+            FilterExpression=Attr('status').eq('PENDING'),
+            Select='COUNT',
+            ExclusiveStartKey=response['LastEvaluatedKey'],
+        )
+        count += response.get('Count', 0)
+    return count
+
+
+def _auto_ban_user(reported_user_id: str, trigger_report_id: str, reason: str, now: str) -> None:
+    """Mark all PENDING reports for reported_user_id as RESOLVED/ban and fire user.banned."""
+    table = dynamodb.Table(TABLE_NAME)
+
+    # Resolve all outstanding PENDING reports for this user (via GSI)
+    from boto3.dynamodb.conditions import Key, Attr
+    pending = table.query(
+        IndexName='reportedUserId-index',
+        KeyConditionExpression=Key('reportedUserId').eq(reported_user_id),
+        FilterExpression=Attr('status').eq('PENDING'),
+    )
+    for item in pending.get('Items', []):
+        try:
+            table.update_item(
+                Key={'pk': item['pk'], 'sk': item['sk']},
+                UpdateExpression='SET #status = :s, resolution = :r, resolvedAt = :t',
+                ExpressionAttributeNames={'#status': 'status'},
+                ExpressionAttributeValues={':s': 'RESOLVED', ':r': 'ban', ':t': now},
+            )
+        except Exception as e:
+            print(f"Auto-ban: failed to resolve report {item.get('reportId')}: {e}")
+
+    # Fire user.banned event — downstream services handle cleanup
+    events.put_events(Entries=[{
+        'Source': 'kismet.report-service',
+        'DetailType': 'user.banned',
+        'Detail': json.dumps({
+            'userId': reported_user_id,
+            'reportId': trigger_report_id,
+            'reason': reason,
+            'autoBanned': True,
+            'threshold': AUTO_BAN_THRESHOLD,
+            'timestamp': now,
+        }),
+        'EventBusName': 'kismet-events',
+    }])
