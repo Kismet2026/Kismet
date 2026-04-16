@@ -27,14 +27,12 @@ class UploadPhotoTests(unittest.TestCase):
     def test_upload_success(self):
         with patch.dict("os.environ", ENV), \
              patch("lambda_function.dynamodb") as mock_dynamodb, \
-             patch("lambda_function.s3") as mock_s3, \
-             patch("lambda_function.events") as mock_events:
+             patch("lambda_function.s3") as mock_s3:
 
             mock_table = mock_dynamodb.Table.return_value
             mock_table.query.return_value = {"Count": 0, "Items": []}
             mock_table.put_item.return_value = {}
             mock_s3.generate_presigned_url.return_value = "https://s3.example.com/presigned"
-            mock_events.put_events.return_value = {"FailedEntryCount": 0, "Entries": [{"EventId": "e1"}]}
 
             event = {**make_event("/photos/upload", "POST", body={"contentType": "image/jpeg", "filename": "profile.jpg"}), **AUTHED_EVENT_CONTEXT}
             response = handler(event, self.context)
@@ -44,6 +42,39 @@ class UploadPhotoTests(unittest.TestCase):
             self.assertIn("photoId", payload)
             self.assertEqual(payload["uploadUrl"], "https://s3.example.com/presigned")
             self.assertEqual(payload["expiresIn"], 300)
+
+    def test_upload_writes_pending_status(self):
+        with patch.dict("os.environ", ENV), \
+             patch("lambda_function.dynamodb") as mock_dynamodb, \
+             patch("lambda_function.s3") as mock_s3:
+
+            mock_table = mock_dynamodb.Table.return_value
+            mock_table.query.return_value = {"Count": 0, "Items": []}
+            mock_table.put_item.return_value = {}
+            mock_s3.generate_presigned_url.return_value = "https://s3.example.com/presigned"
+
+            event = {**make_event("/photos/upload", "POST", body={"contentType": "image/jpeg"}), **AUTHED_EVENT_CONTEXT}
+            handler(event, self.context)
+
+            put_call = mock_table.put_item.call_args
+            item = put_call[1]["Item"]
+            self.assertEqual(item["status"], "pending")
+
+    def test_upload_does_not_fire_event(self):
+        with patch.dict("os.environ", ENV), \
+             patch("lambda_function.dynamodb") as mock_dynamodb, \
+             patch("lambda_function.s3") as mock_s3, \
+             patch("lambda_function.events") as mock_events:
+
+            mock_table = mock_dynamodb.Table.return_value
+            mock_table.query.return_value = {"Count": 0, "Items": []}
+            mock_table.put_item.return_value = {}
+            mock_s3.generate_presigned_url.return_value = "https://s3.example.com/presigned"
+
+            event = {**make_event("/photos/upload", "POST", body={"contentType": "image/jpeg"}), **AUTHED_EVENT_CONTEXT}
+            handler(event, self.context)
+
+            mock_events.put_events.assert_not_called()
 
     def test_upload_unauthenticated_returns_401(self):
         with patch.dict("os.environ", ENV):
@@ -112,6 +143,29 @@ class ListPhotosTests(unittest.TestCase):
             self.assertEqual(response["statusCode"], 200)
             self.assertEqual(payload["count"], 0)
             self.assertEqual(payload["photos"], [])
+
+    def test_list_filters_out_rejected_and_pending_photos(self):
+        with patch.dict("os.environ", ENV), \
+             patch("lambda_function.PHOTOS_CDN_BASE_URL", ENV["PHOTOS_CDN_BASE_URL"]), \
+             patch("lambda_function.dynamodb") as mock_dynamodb:
+
+            mock_dynamodb.Table.return_value.query.return_value = {"Items": [
+                {"photoId": "photo-001", "s3Key": "user-123/photo-001.jpg", "isPrimary": True, "status": "active", "uploadedAt": "2026-04-01T12:00:00+00:00"},
+                {"photoId": "photo-002", "s3Key": "user-123/photo-002.jpg", "isPrimary": False, "status": "rejected", "uploadedAt": "2026-04-01T11:00:00+00:00"},
+                {"photoId": "photo-003", "s3Key": "user-123/photo-003.jpg", "isPrimary": False, "status": "pending", "uploadedAt": "2026-04-01T10:30:00+00:00"},
+                {"photoId": "photo-004", "s3Key": "user-123/photo-004.jpg", "isPrimary": False, "status": "active", "uploadedAt": "2026-04-01T10:00:00+00:00"},
+            ]}
+
+            response = handler(make_event("/users/user-123/photos", "GET"), self.context)
+            payload = json.loads(response["body"])
+
+            self.assertEqual(response["statusCode"], 200)
+            self.assertEqual(payload["count"], 2)
+            photo_ids = [p["photoId"] for p in payload["photos"]]
+            self.assertIn("photo-001", photo_ids)
+            self.assertNotIn("photo-002", photo_ids)
+            self.assertNotIn("photo-003", photo_ids)
+            self.assertIn("photo-004", photo_ids)
 
     def test_get_route_extracts_user_id(self):
         with patch.dict("os.environ", ENV), \
@@ -237,24 +291,50 @@ class CorsTests(unittest.TestCase):
             self.assertIn("Authorization", response["headers"]["Access-Control-Allow-Headers"])
 
 
-class PhotoEventTests(unittest.TestCase):
+class ConfirmPhotoTests(unittest.TestCase):
     def setUp(self):
         self.context = SimpleNamespace(aws_request_id="req-photo-456")
 
-    def test_upload_event_includes_cdn_url(self):
+    def _pending_item(self, photo_id="photo-001"):
+        return {
+            "PK": "USER#user-123", "SK": f"PHOTO#{photo_id}",
+            "photoId": photo_id, "userId": "user-123",
+            "s3Key": f"user-123/{photo_id}.jpg", "contentType": "image/jpeg",
+            "isPrimary": True, "status": "pending",
+            "uploadedAt": "2026-04-01T12:00:00+00:00",
+        }
+
+    def test_confirm_success(self):
         with patch.dict("os.environ", ENV), \
              patch("lambda_function.PHOTOS_CDN_BASE_URL", "https://photos.kismet.dev"), \
              patch("lambda_function.dynamodb") as mock_dynamodb, \
-             patch("lambda_function.s3") as mock_s3, \
              patch("lambda_function.events") as mock_events:
 
             mock_table = mock_dynamodb.Table.return_value
-            mock_table.query.return_value = {"Count": 0, "Items": []}
-            mock_table.put_item.return_value = {}
-            mock_s3.generate_presigned_url.return_value = "https://s3.example.com/presigned"
+            mock_table.get_item.return_value = {"Item": self._pending_item()}
+            mock_table.update_item.return_value = {}
             mock_events.put_events.return_value = {"FailedEntryCount": 0, "Entries": [{"EventId": "e1"}]}
 
-            event = {**make_event("/photos/upload", "POST", body={"contentType": "image/jpeg"}), **AUTHED_EVENT_CONTEXT}
+            event = {**make_event("/photos/photo-001/confirm", "POST"), **AUTHED_EVENT_CONTEXT}
+            response = handler(event, self.context)
+            payload = json.loads(response["body"])
+
+            self.assertEqual(response["statusCode"], 200)
+            self.assertEqual(payload["photoId"], "photo-001")
+            self.assertEqual(payload["status"], "active")
+
+    def test_confirm_fires_event_with_cdn_url(self):
+        with patch.dict("os.environ", ENV), \
+             patch("lambda_function.PHOTOS_CDN_BASE_URL", "https://photos.kismet.dev"), \
+             patch("lambda_function.dynamodb") as mock_dynamodb, \
+             patch("lambda_function.events") as mock_events:
+
+            mock_table = mock_dynamodb.Table.return_value
+            mock_table.get_item.return_value = {"Item": self._pending_item()}
+            mock_table.update_item.return_value = {}
+            mock_events.put_events.return_value = {"FailedEntryCount": 0, "Entries": [{"EventId": "e1"}]}
+
+            event = {**make_event("/photos/photo-001/confirm", "POST"), **AUTHED_EVENT_CONTEXT}
             handler(event, self.context)
 
             call_args = mock_events.put_events.call_args
@@ -262,6 +342,37 @@ class PhotoEventTests(unittest.TestCase):
             self.assertIn("cdnUrl", detail)
             self.assertTrue(detail["cdnUrl"].startswith("https://photos.kismet.dev/"))
             self.assertIn("isPrimary", detail)
+
+    def test_confirm_not_found_returns_404(self):
+        with patch.dict("os.environ", ENV), \
+             patch("lambda_function.dynamodb") as mock_dynamodb:
+
+            mock_dynamodb.Table.return_value.get_item.return_value = {}
+
+            event = {**make_event("/photos/nonexistent/confirm", "POST"), **AUTHED_EVENT_CONTEXT}
+            response = handler(event, self.context)
+
+            self.assertEqual(response["statusCode"], 404)
+
+    def test_confirm_already_active_returns_409(self):
+        with patch.dict("os.environ", ENV), \
+             patch("lambda_function.dynamodb") as mock_dynamodb:
+
+            item = self._pending_item()
+            item["status"] = "active"
+            mock_dynamodb.Table.return_value.get_item.return_value = {"Item": item}
+
+            event = {**make_event("/photos/photo-001/confirm", "POST"), **AUTHED_EVENT_CONTEXT}
+            response = handler(event, self.context)
+            payload = json.loads(response["body"])
+
+            self.assertEqual(response["statusCode"], 409)
+            self.assertEqual(payload["code"], "CONFLICT")
+
+    def test_confirm_unauthenticated_returns_401(self):
+        with patch.dict("os.environ", ENV):
+            response = handler(make_event("/photos/photo-001/confirm", "POST"), self.context)
+            self.assertEqual(response["statusCode"], 401)
 
 
 class RoutingTests(unittest.TestCase):
