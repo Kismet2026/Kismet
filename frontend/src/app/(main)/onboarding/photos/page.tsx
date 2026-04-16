@@ -1,14 +1,17 @@
 "use client";
 
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { usePhotos } from "@/hooks/usePhotos";
 import { PhotoUploader } from "@/components/profile/PhotoUploader";
+import { PhotoRejectedDialog } from "@/components/profile/PhotoRejectedDialog";
 import { Button } from "@/components/ui/button";
 import { Camera } from "@phosphor-icons/react";
 
 export default function OnboardingPhotosPage() {
   const router = useRouter();
   const { photos, uploading, uploadPhoto, deletePhoto, setPrimary } = usePhotos();
+  const [rejectedOpen, setRejectedOpen] = useState(false);
 
   const canContinue = photos.length >= 1;
 
@@ -28,11 +31,16 @@ export default function OnboardingPhotosPage() {
         <PhotoUploader
           photos={photos}
           uploading={uploading}
-          onUpload={async (file) => { await uploadPhoto(file); }}
+          onUpload={async (file) => {
+            const { rejected } = await uploadPhoto(file);
+            if (rejected) setRejectedOpen(true);
+          }}
           onDelete={async (id) => { await deletePhoto(id); }}
           onSetPrimary={async (id) => { await setPrimary(id); }}
         />
       </div>
+
+      <PhotoRejectedDialog open={rejectedOpen} onClose={() => setRejectedOpen(false)} />
 
       <div className="mt-6 space-y-3">
         <Button

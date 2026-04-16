@@ -1,10 +1,12 @@
 "use client";
 
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useProfile } from "@/hooks/useProfile";
 import { usePhotos } from "@/hooks/usePhotos";
 import { ProfileForm } from "@/components/profile/ProfileForm";
 import { PhotoUploader } from "@/components/profile/PhotoUploader";
+import { PhotoRejectedDialog } from "@/components/profile/PhotoRejectedDialog";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { ArrowLeft } from "@phosphor-icons/react";
 
@@ -12,6 +14,7 @@ export default function ProfileEditPage() {
   const router = useRouter();
   const { profile, loading, updateProfile } = useProfile();
   const { photos, uploading, uploadPhoto, deletePhoto, setPrimary } = usePhotos();
+  const [rejectedOpen, setRejectedOpen] = useState(false);
 
   if (loading) return <LoadingSpinner size={48} className="flex-1 py-20" />;
 
@@ -33,11 +36,16 @@ export default function ProfileEditPage() {
         <PhotoUploader
           photos={photos}
           uploading={uploading}
-          onUpload={async (file) => { await uploadPhoto(file); }}
+          onUpload={async (file) => {
+            const { rejected } = await uploadPhoto(file);
+            if (rejected) setRejectedOpen(true);
+          }}
           onDelete={async (id) => { await deletePhoto(id); }}
           onSetPrimary={async (id) => { await setPrimary(id); }}
         />
       </div>
+
+      <PhotoRejectedDialog open={rejectedOpen} onClose={() => setRejectedOpen(false)} />
 
       {/* Profile form */}
       <ProfileForm
