@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { api, uploadToS3 } from "@/lib/api";
 import { getUserIdFromToken } from "@/lib/auth";
+import { normalizeImageFile } from "@/lib/imageUtils";
 import type { Photo, PhotoUploadResponse } from "@/types";
 
 export function usePhotos(userId?: string) {
@@ -38,11 +39,14 @@ export function usePhotos(userId?: string) {
     async (file: File) => {
       setUploading(true);
       try {
+        // Rekognition only accepts JPEG/PNG — convert WebP/HEIC/etc. so
+        // D4 image-moderation can actually scan the upload.
+        const normalized = await normalizeImageFile(file);
         const { uploadUrl, photoId } = await api.post<PhotoUploadResponse>(
           "/photos/upload",
-          { contentType: file.type, filename: file.name }
+          { contentType: normalized.type, filename: normalized.name }
         );
-        await uploadToS3(uploadUrl, file);
+        await uploadToS3(uploadUrl, normalized);
         await api.post(`/photos/${photoId}/confirm`);
         await fetchPhotos();
         return photoId;
