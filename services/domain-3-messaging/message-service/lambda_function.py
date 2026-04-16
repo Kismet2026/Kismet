@@ -23,10 +23,10 @@ events_client = boto3.client("events")
 def lambda_handler(event: Optional[Dict[str, Any]], context: Any) -> Dict[str, Any]:
     event = event or {}
 
-    # EventBridge: user.deleted → delete all messages for the user's conversations
+    # EventBridge: user.deleted or profile.banned → purge messages for the user
     if event.get("source") == "kismet.profile-service" and (
         event.get("detail-type") or event.get("detailType")
-    ) == "user.deleted":
+    ) in ("user.deleted", "profile.banned"):
         detail = event.get("detail") or {}
         if isinstance(detail, str):
             try:

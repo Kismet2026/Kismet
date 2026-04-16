@@ -73,7 +73,7 @@ class Domain3Stack(cdk.Stack):
                 {"method": "GET", "path": "/messages/match/{matchId}", "auth": True},
                 {"method": "DELETE", "path": "/messages/{messageId}", "auth": True},
             ],
-            consume_events=["user.deleted"],   # cleans up messages for deleted users
+            consume_events=["user.deleted", "profile.banned"],   # cleans up messages for deleted/banned users
             publish_events=True, # publishes message.sent
             environment={
                 "EVENT_BUS_NAME": event_bus.event_bus_name,

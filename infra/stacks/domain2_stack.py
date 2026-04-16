@@ -70,7 +70,7 @@ class Domain2Stack(cdk.Stack):
                 {"method": "GET", "path": "/matches/{matchId}", "auth": True},
                 {"method": "DELETE", "path": "/matches/{matchId}", "auth": True},
             ],
-            consume_events=["swipe.created", "user.deleted"],
+            consume_events=["swipe.created", "user.deleted", "profile.banned"],
             publish_events=True,
             environment={
                 "SWIPE_TABLE_NAME": swipe_svc.tables[0].table_name,
@@ -138,7 +138,7 @@ class Domain2Stack(cdk.Stack):
                 {"method": "GET", "path": "/recommend", "auth": True},
                 {"method": "POST", "path": "/recommend/refresh", "auth": True},
             ],
-            consume_events=["profile.completed", "swipe.created", "user.deleted"],
+            consume_events=["profile.completed", "swipe.created", "user.deleted", "profile.banned"],
             environment={
                 "DISCOVERY_TABLE_NAME": discovery_svc.tables[0].table_name,
                 "SWIPE_TABLE_NAME": swipe_svc.tables[0].table_name,

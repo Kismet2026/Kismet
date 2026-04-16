@@ -26,11 +26,12 @@ def handler(event, context):
         logger.info('EventBridge: swipe.created')
         return handle_swipe_event(event)
 
-    # EventBridge event (user.deleted)
+    # EventBridge event (user.deleted or profile.banned — both purge matches)
     if event.get('source') == 'kismet.profile-service' and (
         event.get('detail-type') or event.get('detailType')
-    ) == 'user.deleted':
-        logger.info('EventBridge: user.deleted')
+    ) in ('user.deleted', 'profile.banned'):
+        detail_type = event.get('detail-type') or event.get('detailType')
+        logger.info('EventBridge: %s', detail_type)
         return handle_user_deleted(event)
 
     # API Gateway request

@@ -34,8 +34,8 @@ def handler(event, context):
         if detail_type == 'profile.completed':
             logger.info('EventBridge: profile.completed')
             return handle_profile_completed(event)
-        if detail_type == 'user.deleted':
-            logger.info('EventBridge: user.deleted')
+        if detail_type in ('user.deleted', 'profile.banned'):
+            logger.info('EventBridge: %s', detail_type)
             return handle_user_deleted(event)
 
     # EventBridge: swipe.created → remove swiped candidate
