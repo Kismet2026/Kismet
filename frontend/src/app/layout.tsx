@@ -29,6 +29,7 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Kismet",
   description: "Find your destined match through the wisdom of BaZi",
+  robots: { index: false, follow: false },
 };
 
 export default function RootLayout({
