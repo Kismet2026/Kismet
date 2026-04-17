@@ -224,6 +224,18 @@ class TestPostHealthCheck:
         assert len(published) == 1
         assert "unhealthy" in published[0]["Subject"]
 
+    def test_unknown_does_not_trigger_sns_alert(self, aws, monkeypatch):
+        _mock_cw_unknown(monkeypatch)
+        published = []
+        monkeypatch.setattr(
+            lambda_function.sns, "publish",
+            lambda **kw: published.append(kw),
+        )
+        r = lambda_function.handler(http_event("POST", "/health/check"), {})
+        assert r["statusCode"] == 200
+        assert json.loads(r["body"])["status"] == "unknown"
+        assert len(published) == 0
+
 
 # ── Status logic ─────────────────────────────────────────────────────────────
 

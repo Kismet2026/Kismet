@@ -152,7 +152,7 @@ def post_health_check():
 
         _save_health_history(service_results, overall, checked_at)
 
-        if overall != "healthy":
+        if overall in ("degraded", "unhealthy"):
             _publish_health_alert(service_results, overall, checked_at)
 
         return _response(200, {
