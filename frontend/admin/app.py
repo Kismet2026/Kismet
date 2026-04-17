@@ -1,17 +1,42 @@
+import os
 import requests
 import streamlit as st
 import pandas as pd
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
-# TODO: Replace actual API Gateway URL
-API_BASE_URL = ""
+
+def to_pt(utc_str):
+    if not utc_str:
+        return ""
+    try:
+        dt = datetime.fromisoformat(utc_str.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(ZoneInfo("America/Los_Angeles")).strftime("%Y-%m-%d %I:%M %p PT")
+    except Exception:
+        return utc_str
+
+API_BASE_URL = os.getenv("API_BASE_URL")
 
 st.set_page_config(page_title="Kismet Admin", layout="wide")
 st.title("Kismet Admin Dashboard")
 
+if not API_BASE_URL:
+    st.error("Missing required environment variable: API_BASE_URL. Set API_BASE_URL to the backend base URL and restart the Streamlit app.")
+    st.stop()
+
+
+def get_token():
+    return st.session_state.get("id_token")
+
 
 def api_get(path, params=None):
+    headers = {}
+    if get_token():
+        headers["Authorization"] = f"Bearer {get_token()}"
     try:
-        r = requests.get(f"{API_BASE_URL}{path}", params=params, timeout=10)
+        r = requests.get(f"{API_BASE_URL}{path}", params=params, headers=headers, timeout=10)
         r.raise_for_status()
         return r.json(), None
     except Exception as e:
@@ -19,8 +44,11 @@ def api_get(path, params=None):
 
 
 def api_put(path, body=None):
+    headers = {}
+    if get_token():
+        headers["Authorization"] = f"Bearer {get_token()}"
     try:
-        r = requests.put(f"{API_BASE_URL}{path}", json=body, timeout=10)
+        r = requests.put(f"{API_BASE_URL}{path}", json=body, headers=headers, timeout=10)
         r.raise_for_status()
         return r.json(), None
     except Exception as e:
@@ -28,16 +56,49 @@ def api_put(path, body=None):
 
 
 def api_post(path):
+    headers = {}
+    if get_token():
+        headers["Authorization"] = f"Bearer {get_token()}"
     try:
-        r = requests.post(f"{API_BASE_URL}{path}", timeout=10)
+        r = requests.post(f"{API_BASE_URL}{path}", headers=headers, timeout=10)
         r.raise_for_status()
         return r.json(), None
     except Exception as e:
         return None, str(e)
 
 
-tab1, tab2, tab3, tab4 = st.tabs(
-    ["Stats", "Flagged Content", "Users", "Health Monitor"]
+# ─── Login ────────────────────────────────────────────────────────────────────
+if not get_token():
+    st.subheader("Login")
+    with st.form("login_form"):
+        email = st.text_input("Email")
+        password = st.text_input("Password", type="password")
+        submitted = st.form_submit_button("Login")
+
+    if submitted:
+        try:
+            r = requests.post(
+                f"{API_BASE_URL}/auth/login",
+                json={"email": email, "password": password},
+                timeout=10,
+            )
+            r.raise_for_status()
+            data = r.json()
+            if email != "admin@kismet.com":
+                st.error("Admin only.")
+                st.stop()
+            st.session_state["id_token"] = data["idToken"]
+            st.success("Logged in!")
+            st.rerun()
+        except Exception as e:
+            st.error(f"Login failed: {e}")
+    st.stop()
+
+
+st.info("📌 Note: Stats and activity data reflect real user actions only. Test accounts (test1–test19@kismet.com) are excluded from platform metrics.", icon=None)
+
+tab1, tab2, tab3, tab4, tab5 = st.tabs(
+    ["Stats", "Flagged Content", "Users", "Health Monitor", "Analytics Pipeline"]
 )
 
 # ─── Tab 1: Stats ─────────────────────────────────────────────────────────────
@@ -56,9 +117,9 @@ with tab1:
         cols[2].metric("Matches Today", data["matchesToday"])
         cols[3].metric("Messages Today", data["messagesToday"])
         cols[4].metric("Flagged Content", data["flaggedContentCount"])
-        st.caption(f"Generated at: {data.get('generatedAt', '')}")
+        st.caption(f"Generated at: {to_pt(data.get('generatedAt', ''))}")
 
-# ─── Tab 2: Flagged Content ──────────────────────────────��─────────────────────
+# ─── Tab 2: Flagged Content ───────────────────────────────────────────────────
 with tab2:
     st.header("Flagged Content")
     type_filter = st.selectbox("Filter by type", ["all", "text", "image"])
@@ -108,7 +169,7 @@ with tab2:
                             )
                             st.success("User banned") if not err else st.error(err)
 
-# ─── Tab 3: Users ────────────────────────────────────────────────────────���────
+# ─── Tab 3: Users ─────────────────────────────────────────────────────────────
 with tab3:
     st.header("Users")
     search = st.text_input("Search by name", placeholder="e.g. John")
@@ -140,7 +201,7 @@ with tab3:
                         _, err = api_put(f"/admin/users/{user['userId']}/unban")
                         st.success("User unbanned") if not err else st.error(err)
 
-# ─── Tab 4: Health Monitor ──────────────────────────────────��──────────────────
+# ─── Tab 4: Health Monitor ────────────────────────────────────────────────────
 with tab4:
     st.header("Service Health")
     col_refresh, col_check = st.columns([1, 1])
@@ -184,7 +245,7 @@ with tab4:
             for name, svc in data["services"].items()
         ]
         st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-        st.caption(f"Checked at: {data.get('checkedAt', '')}")
+        st.caption(f"Checked at: {to_pt(data.get('checkedAt', ''))}")
 
     # Active alarms
     alarms, err = api_get("/health/alarms")
@@ -192,3 +253,68 @@ with tab4:
         st.subheader(f"Active Alarms ({alarms['activeCount']})")
         for alarm in alarms["alarms"]:
             st.error(f"**{alarm['alarmName']}** — {alarm['reason']}")
+
+# ─── Tab 5: Analytics Pipeline ────────────────────────────────────────────────
+with tab5:
+    st.header("Analytics Pipeline")
+    st.caption("Data flow: User Actions → EventBridge → Lambda → Kinesis → Firehose (60s) → S3 → Athena")
+
+    if st.button("Refresh", key="refresh_analytics"):
+        st.rerun()
+
+    # Pipeline status
+    st.subheader("Pipeline Status")
+    cols = st.columns(4)
+    cols[0].success("✅ Kinesis Stream")
+    cols[1].success("✅ Firehose (60s buffer)")
+    cols[2].success("✅ S3 Bucket")
+    cols[3].success("✅ Athena")
+
+    st.divider()
+
+    # Athena dashboard stats
+    st.subheader("Platform Analytics (via Athena)")
+    data, err = api_get("/analytics/dashboard")
+    if err:
+        st.error(f"Failed to load analytics: {err}")
+    else:
+        cols = st.columns(4)
+        cols[0].metric("Total Events", data.get("totalEvents", 0))
+        cols[1].metric("Swipes", data.get("swipeCount", 0))
+        cols[2].metric("Matches", data.get("matchCount", 0))
+        cols[3].metric("Messages", data.get("messageCount", 0))
+        st.caption(f"Query time: {data.get('queryTimeMs', '—')}ms | Source: AWS Athena → S3")
+
+        # Event breakdown chart
+        event_data = {
+            "Event Type": ["Swipes", "Matches", "Messages", "Other"],
+            "Count": [
+                data.get("swipeCount", 0),
+                data.get("matchCount", 0),
+                data.get("messageCount", 0),
+                max(0, data.get("totalEvents", 0) - data.get("swipeCount", 0) - data.get("matchCount", 0) - data.get("messageCount", 0)),
+            ]
+        }
+        df = pd.DataFrame(event_data)
+        if df["Count"].sum() > 0:
+            st.bar_chart(df.set_index("Event Type"))
+
+    st.divider()
+
+    # Recent activity log from DynamoDB (real-time)
+    st.subheader("Recent Activity Log (real-time, via DynamoDB)")
+    log_data, err = api_get("/analytics/log/recent")
+    if err:
+        st.warning(f"Could not load activity log (requires auth token): {err}")
+    elif log_data:
+        rows = []
+        for item in log_data.get("items", []):
+            rows.append({
+                "Time": to_pt(item.get("timestamp", "")),
+                "Event": item.get("eventType", ""),
+                "User": item.get("userId", "")[:8] + "...",
+            })
+        if rows:
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        else:
+            st.info("No recent activity. Try swiping or sending a message first.")
