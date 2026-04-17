@@ -66,6 +66,8 @@ def handle_event(event, context):
         return on_weekly_digest(detail)
     elif detail_type == "message.sent":
         return on_message_sent(detail)
+    elif detail_type == "profile.banned":
+        return on_profile_banned(detail)
     else:
         print(f"Unhandled event type: {detail_type}")
         return {"statusCode": 200}
@@ -192,6 +194,48 @@ def on_message_sent(detail):
         subject=get_subject_for_template("message_notification"),
         body_text="Someone sent you a message on Kismet. Open the app to reply.",
         body_html=render_template("message_notification", {}),
+    )
+
+    return {"statusCode": 200}
+
+
+def on_profile_banned(detail):
+    """Send suspension notice to banned user and audit email to admin."""
+    user_id = detail.get("userId", "")
+    reason = detail.get("reason", "unknown")
+    report_id = detail.get("reportId", "")
+    timestamp = detail.get("timestamp", datetime.now(timezone.utc).isoformat())
+
+    prefs = prefs_table.get_item(
+        Key={"PK": f"USER#{user_id}", "SK": "PREFS"}
+    ).get("Item", {})
+
+    email = prefs.get("email", "")
+    if email:
+        send_ses_email(
+            recipient=email,
+            subject=get_subject_for_template("ban_notice"),
+            body_text="Your Kismet account has been suspended following review of community reports. If you believe this is a mistake, contact support@kismet.app.",
+            body_html=render_template("ban_notice", {}),
+        )
+    else:
+        print(f"No email on record for banned user {user_id}, skipping suspension notice")
+
+    send_ses_email(
+        recipient=ADMIN_EMAIL,
+        subject=get_subject_for_template("ban_audit"),
+        body_text=(
+            f"User ID: {user_id}\n"
+            f"Reason: {reason}\n"
+            f"Report ID: {report_id}\n"
+            f"Timestamp: {timestamp}"
+        ),
+        body_html=render_template("ban_audit", {
+            "userId": user_id,
+            "reason": reason,
+            "reportId": report_id,
+            "timestamp": timestamp,
+        }),
     )
 
     return {"statusCode": 200}
@@ -396,6 +440,39 @@ def render_template(template_name, data):
             '<a href="#" style="color:#8a6d45;text-decoration:underline;">Manage preferences</a>'
             '</div></div></div>'
         ),
+        "ban_notice": (
+            '<div style="background:#1a0e15;padding:48px 20px;font-family:Georgia,\'Times New Roman\',serif;">'
+            '<div style="max-width:560px;margin:0 auto;background:#2d1824;border:1px solid #3d2030;border-radius:8px;overflow:hidden;">'
+            '<div style="padding:44px 40px 28px;text-align:center;border-bottom:1px solid #3d2030;">'
+            '<div style="font-family:\'Allura\',\'Brush Script MT\',cursive;font-size:52px;color:#d9a74a;line-height:1;">Kismet</div>'
+            '</div>'
+            '<div style="padding:40px 48px;color:#e8d9b8;font-size:16px;line-height:1.75;font-family:Georgia,serif;">'
+            '<p style="margin:0 0 24px;font-size:20px;color:#d9a74a;font-style:italic;">Your account has been suspended.</p>'
+            '<p style="margin:0 0 36px;">Following a review of community reports, your Kismet account has been suspended. If you believe this is a mistake, contact <a href="mailto:support@kismet.app" style="color:#d9a74a;">support@kismet.app</a>.</p>'
+            '</div>'
+            '<div style="padding:22px 40px;border-top:1px solid #3d2030;text-align:center;font-size:11px;color:#6e5538;line-height:1.7;font-family:Georgia,serif;">'
+            'This is an automated notice from <span style="color:#a88959;">Kismet</span>.'
+            '</div></div></div>'
+        ),
+        "ban_audit": (
+            '<div style="background:#e8d9b8;padding:48px 20px;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,sans-serif;">'
+            '<div style="max-width:560px;margin:0 auto;background:#f5ebd4;border:1px solid #d4c4a5;border-radius:2px;overflow:hidden;">'
+            '<div style="background:#2d1824;padding:14px 20px;">'
+            '<div style="color:#d9a74a;font-family:Georgia,serif;font-size:12px;letter-spacing:3px;text-transform:uppercase;">Kismet Admin</div>'
+            '</div>'
+            '<div style="padding:28px 24px;color:#22182a;font-size:13px;line-height:1.5;">'
+            '<div style="font-size:16px;font-weight:600;color:#22182a;letter-spacing:-0.2px;margin:0 0 4px;">Account Banned</div>'
+            '<div style="color:#6e5538;font-size:12px;margin:0 0 20px;">A user account has been suspended following community reports.</div>'
+            '<div style="border-left:3px solid #2d1824;padding:12px 16px;background:#ede0c2;">'
+            '<table style="width:100%;border-collapse:collapse;">'
+            f'<tr><td style="padding:4px 0;color:#6e5538;font-size:11px;text-transform:uppercase;letter-spacing:1.5px;width:36%;">User ID</td><td style="padding:4px 0;color:#22182a;font-family:\'SF Mono\',Menlo,Consolas,monospace;font-size:12px;">{data.get("userId", "")}</td></tr>'
+            f'<tr><td style="padding:4px 0;color:#6e5538;font-size:11px;text-transform:uppercase;letter-spacing:1.5px;">Reason</td><td style="padding:4px 0;color:#22182a;font-size:12px;">{data.get("reason", "")}</td></tr>'
+            f'<tr><td style="padding:4px 0;color:#6e5538;font-size:11px;text-transform:uppercase;letter-spacing:1.5px;">Report ID</td><td style="padding:4px 0;color:#22182a;font-family:\'SF Mono\',Menlo,Consolas,monospace;font-size:12px;">{data.get("reportId", "")}</td></tr>'
+            f'<tr><td style="padding:4px 0;color:#6e5538;font-size:11px;text-transform:uppercase;letter-spacing:1.5px;">Timestamp</td><td style="padding:4px 0;color:#22182a;font-family:\'SF Mono\',Menlo,Consolas,monospace;font-size:12px;">{data.get("timestamp", "")}</td></tr>'
+            '</table>'
+            '</div>'
+            '</div></div></div>'
+        ),
         "report_alert": (
             '<div style="background:#e8d9b8;padding:48px 20px;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,sans-serif;">'
             '<div style="max-width:560px;margin:0 auto;background:#f5ebd4;border:1px solid #d4c4a5;border-radius:2px;overflow:hidden;">'
@@ -428,6 +505,8 @@ def get_subject_for_template(template_name):
         "message_notification": "A message is waiting on Kismet",
         "weekly_digest": "This week on Kismet",
         "report_alert": "[Kismet Admin] New user report — action required",
+        "ban_notice": "Your Kismet account has been suspended",
+        "ban_audit": "[Kismet Admin] Account banned — action log",
     }
     return subjects.get(template_name, "Kismet Notification")
 
