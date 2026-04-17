@@ -199,25 +199,74 @@ def handle_delete(caller_id: str, user_id: str) -> Dict[str, Any]:
 
     table = dynamodb.Table(PROFILES_TABLE_NAME)
 
-    # Attempt to delete the profile row. delete_item is idempotent — it's a no-op
-    # if the row is already gone, which allows safe retries if a previous attempt
-    # partially succeeded (e.g., profile deleted but EventBridge publish failed).
-    table.delete_item(Key={"PK": f"USER#{user_id}", "SK": "PROFILE"})
+    # Read the profile before acting to check ban status. Use a strongly
+    # consistent read so a very-recent ban is never missed.
+    existing = table.get_item(
+        Key={"PK": f"USER#{user_id}", "SK": "PROFILE"},
+        ConsistentRead=True,
+        ProjectionExpression="#status",
+        ExpressionAttributeNames={"#status": "status"},
+    )
+    is_banned = existing.get("Item", {}).get("status") == "banned"
 
-    # Delete Cognito user so the email address can be re-registered
+    # Perform the Cognito action BEFORE removing the profile row.  This
+    # ensures that if the Cognito call fails and the request is retried,
+    # the profile row still exists so ban state can be re-read correctly.
+    # A ClientError here aborts the handler (returns 500) so the DynamoDB
+    # write and EventBridge publish are never reached; UserNotFoundException
+    # is treated as idempotent success (Cognito user already gone).
     if COGNITO_USER_POOL_ID:
-        try:
-            cognito.admin_delete_user(
-                UserPoolId=COGNITO_USER_POOL_ID,
-                Username=user_id,
-            )
-        except cognito.exceptions.UserNotFoundException:
-            logger.warning("Cognito user not found during deletion: %s", user_id)
-        except ClientError:
-            logger.exception("Failed to delete Cognito user %s", user_id)
+        if is_banned:
+            # Banned user: disable the Cognito account so the email address
+            # cannot be used to create a new account, bypassing the ban.
+            try:
+                cognito.admin_disable_user(
+                    UserPoolId=COGNITO_USER_POOL_ID,
+                    Username=user_id,
+                )
+            except cognito.exceptions.UserNotFoundException:
+                logger.warning("Cognito user not found during ban-deletion: %s", user_id)
+            except ClientError:
+                logger.exception("Failed to disable Cognito user %s", user_id)
+                return _response(500, {"code": "INTERNAL_ERROR", "message": "Failed to disable Cognito user."})
+        else:
+            # Active user: delete the Cognito account so the email address
+            # is freed for re-registration (normal account deletion UX).
+            try:
+                cognito.admin_delete_user(
+                    UserPoolId=COGNITO_USER_POOL_ID,
+                    Username=user_id,
+                )
+            except cognito.exceptions.UserNotFoundException:
+                logger.warning("Cognito user not found during deletion: %s", user_id)
+            except ClientError:
+                logger.exception("Failed to delete Cognito user %s", user_id)
+                return _response(500, {"code": "INTERNAL_ERROR", "message": "Failed to delete Cognito user."})
+
+    now = datetime.now(timezone.utc).isoformat()
+
+    if is_banned:
+        # For banned users, replace the full profile with a minimal tombstone
+        # instead of deleting it outright.  The tombstone preserves the ban
+        # status so that if EventBridge publish fails and the request is
+        # retried, the handler can still re-read "banned" and call
+        # admin_disable_user correctly (idempotent).  All personal data is
+        # removed, satisfying GDPR deletion requirements.
+        table.put_item(Item={
+            "PK": f"USER#{user_id}",
+            "SK": "PROFILE",
+            "userId": user_id,
+            "status": "banned",
+            "deletedAt": now,
+        })
+    else:
+        # Active user: delete the profile row so the slot is fully freed.
+        # delete_item is idempotent — it's a no-op if the row is already
+        # gone, which allows safe retries if a previous attempt partially
+        # succeeded (e.g., profile deleted but EventBridge publish failed).
+        table.delete_item(Key={"PK": f"USER#{user_id}", "SK": "PROFILE"})
 
     # Publish user.deleted event so other domains can clean up their data
-    now = datetime.now(timezone.utc).isoformat()
     event_response = events.put_events(Entries=[{
         "Source": "kismet.profile-service",
         "DetailType": "user.deleted",
