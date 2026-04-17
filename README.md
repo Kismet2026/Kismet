@@ -106,7 +106,7 @@ A microservice dating app built on AWS — with BaZi (八字) compatibility matc
 |---------|-------|-------------|-------------|
 | Activity Logger | Jessica | Kinesis Data Streams, Lambda | Capture user events |
 | Analytics Pipeline | Jessica | Kinesis Firehose, S3, Athena | Queryable data lake |
-| Admin Dashboard | Lingyun | Lambda, DynamoDB | Stats, flagged content |
+| Admin Dashboard | Lingyun | Lambda, DynamoDB, Streamlit (SCC) | Stats, flagged content; Streamlit UI on Streamlit Community Cloud |
 | Health Monitor | Lingyun | CloudWatch, Lambda, SNS | Service health alerts |
 
 ---
@@ -205,7 +205,14 @@ kismet/
 ├── tests/
 │   └── test_cross_domain_integration.py  ← 49 integration tests
 │
-└── frontend/                         ← Next.js app (Vercel deployment)
+├── scripts/
+│   ├── create-admin-user.sh         ← bootstrap the admin@kismet.com Cognito user
+│   ├── verify-d6.sh                 ← one-shot D6 unit + integration + synth check
+│   └── seed_profiles.py             ← populate demo profiles
+│
+└── frontend/                         ← user-facing app + admin dashboard
+    ├── (Next.js, Vercel)            ← `src/app/` — dating app UI
+    └── admin/                        ← Streamlit admin console, deployed on SCC
 ```
 
 Each service follows the same structure:
@@ -232,9 +239,9 @@ service-name/
 
 ---
 
-## Current Status (as of Apr 16)
+## Current Status (as of Apr 17)
 
-**All 7 CDK stacks deployed. Frontend live on Vercel.** See [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md) for full details.
+**All 7 CDK stacks deployed. User frontend on Vercel, admin console on Streamlit Community Cloud.** See [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md) for full details.
 
 | Stack | Status |
 |-------|--------|
@@ -257,7 +264,7 @@ service-name/
 - **Image moderation**: live end-to-end with AWS Rekognition — uploads go through D4 before landing in the discovery pool; inappropriate content surfaces a rejection dialog in the UI
 - **Image normalization**: WebP/HEIC uploads auto-converted to JPEG client-side so Rekognition can always scan them
 - **BaZi scoring**: bidirectional compatibility (你→ta and ta→你) visualized as a yin-yang dual-ring badge
-- **Open issues for follow-up**: ban notification email (#120), ban-then-resignup loophole (#121), API Gateway stage auto-redeploy on imported API (#118)
+- **Follow-up issues (all resolved before demo)**: ban notification email ([#120](https://github.com/Kismet2026/Kismet/issues/120) → [#133](https://github.com/Kismet2026/Kismet/pull/133)), ban-then-resignup loophole ([#121](https://github.com/Kismet2026/Kismet/issues/121) → [#124](https://github.com/Kismet2026/Kismet/pull/124)), API Gateway stage auto-redeploy ([#118](https://github.com/Kismet2026/Kismet/issues/118) → [#131](https://github.com/Kismet2026/Kismet/pull/131) + postmortem [#132](https://github.com/Kismet2026/Kismet/pull/132))
 
 ---
 
@@ -278,3 +285,20 @@ service-name/
 2. Navigate to your service folder under `services/`
 3. Read your service's README for setup instructions
 4. Deploy: `cd infra && npx cdk deploy <StackName> --app "python3 app.py"`
+
+### Admin dashboard (Streamlit)
+
+Local:
+
+```bash
+cd frontend/admin
+pip install -r requirements.txt
+API_BASE_URL="<your-api-gateway-base-url>" streamlit run app.py
+```
+
+Cloud (Streamlit Community Cloud):
+
+1. New app → pick this repo, branch `main`, main file `frontend/admin/app.py`
+2. Under **Advanced settings**, add secret `API_BASE_URL = "<api-gateway-base-url>"`
+3. Python version is pinned via [`frontend/admin/runtime.txt`](frontend/admin/runtime.txt) to match CI (3.12)
+4. First-time admin login requires `./scripts/create-admin-user.sh <UserPoolId>`
