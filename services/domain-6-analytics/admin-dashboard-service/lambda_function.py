@@ -469,18 +469,20 @@ def handle_user_reported(event):
 
 
 def _publish_user_banned(user_id: str, admin_id: str, banned_at: str):
-    """Publish user.banned to EventBridge so D1/D2/D3 cascade runs."""
+    """Publish user.banned using the existing producer contract so D1/D2/D3 cascade runs."""
     events_client.put_events(
         Entries=[
             {
-                "Source": "kismet.admin-dashboard",
+                "Source": "kismet.report-service",
                 "DetailType": "user.banned",
                 "EventBusName": EVENT_BUS_NAME,
-                "Detail": json.dumps({
-                    "userId": user_id,
-                    "bannedBy": admin_id,
-                    "bannedAt": banned_at,
-                }),
+                "Detail": json.dumps(
+                    {
+                        "userId": user_id,
+                        "bannedBy": admin_id,
+                        "bannedAt": banned_at,
+                    }
+                ),
             }
         ]
     )
