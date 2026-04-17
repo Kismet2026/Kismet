@@ -28,6 +28,10 @@ DEGRADED_METRICS = {
     "errors": 0, "errorRate": 0.0, "avgDuration": 500,
     "p99Duration": 800, "invocations": 100, "throttles": 0,
 }
+UNKNOWN_METRICS = {
+    "errors": 0, "errorRate": 0.0, "avgDuration": 0,
+    "p99Duration": 0, "invocations": 0, "throttles": 0,
+}
 
 
 @pytest.fixture
@@ -84,6 +88,13 @@ def _mock_cw_degraded(monkeypatch):
     )
 
 
+def _mock_cw_unknown(monkeypatch):
+    monkeypatch.setattr(
+        lambda_function, "_get_cloudwatch_metrics",
+        lambda service_name, period_minutes=5: UNKNOWN_METRICS,
+    )
+
+
 # ── GET /health ──────────────────────────────────────────────────────────────
 
 
@@ -106,6 +117,11 @@ class TestGetHealth:
         _mock_cw_unhealthy(monkeypatch)
         r = lambda_function.handler(http_event("GET", "/health"), {})
         assert json.loads(r["body"])["status"] == "unhealthy"
+
+    def test_unknown_rolls_up_when_no_recent_signal(self, aws, monkeypatch):
+        _mock_cw_unknown(monkeypatch)
+        r = lambda_function.handler(http_event("GET", "/health"), {})
+        assert json.loads(r["body"])["status"] == "unknown"
 
     def test_cloudwatch_error_returns_500(self, aws, monkeypatch):
         monkeypatch.setattr(
@@ -222,7 +238,13 @@ class TestStatusLogic:
     def test_derive_unhealthy(self):
         assert lambda_function._derive_status(UNHEALTHY_METRICS) == "unhealthy"
 
+    def test_derive_unknown(self):
+        assert lambda_function._derive_status(UNKNOWN_METRICS) == "unknown"
+
     def test_rollup_worst_wins(self):
+        assert lambda_function._rollup_status("healthy", "unknown") == "healthy"
+        assert lambda_function._rollup_status("unknown", "healthy") == "healthy"
+        assert lambda_function._rollup_status("unknown", "degraded") == "degraded"
         assert lambda_function._rollup_status("healthy", "degraded") == "degraded"
         assert lambda_function._rollup_status("degraded", "unhealthy") == "unhealthy"
         assert lambda_function._rollup_status("unhealthy", "healthy") == "unhealthy"

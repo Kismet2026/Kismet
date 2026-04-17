@@ -87,6 +87,28 @@ class TestEventBridgeMatch:
         pks = {i["PK"] for i in _items(aws)}
         assert pks == {"USER#user-1", "USER#user-2"}
 
+    def test_kinesis_failure_prevents_partial_dynamodb_writes(self, aws, monkeypatch):
+        original_write = lambda_function._write_to_kinesis
+        call_count = {"n": 0}
+
+        def flaky_write(record, partition_key):
+            call_count["n"] += 1
+            if call_count["n"] == 2:
+                raise RuntimeError("kinesis down")
+            return original_write(record, partition_key)
+
+        monkeypatch.setattr(lambda_function, "_write_to_kinesis", flaky_write)
+
+        with pytest.raises(RuntimeError):
+            lambda_function.handler(
+                eb_event("match.created", {
+                    "matchId": "m-1", "userIds": ["user-1", "user-2"],
+                    "timestamp": "2026-04-01T12:00:00Z",
+                }), {},
+            )
+
+        assert _items(aws) == []
+
 
 class TestEventBridgeMessage:
     def test_extracts_sender_id(self, aws):
@@ -183,6 +205,24 @@ class TestPostLog:
             }), {},
         )
         assert len(_items(aws)) == 1
+
+    def test_returns_502_when_kinesis_write_fails(self, aws, monkeypatch):
+        monkeypatch.setattr(
+            lambda_function,
+            "_write_to_kinesis",
+            lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("kinesis down")),
+        )
+        r = lambda_function.handler(
+            http_event("POST", "/analytics/log", body={
+                "eventType": "test.event",
+                "eventData": {"k": "v"},
+                "userId": "user-1",
+            }), {},
+        )
+        assert r["statusCode"] == 502
+        body = json.loads(r["body"])
+        assert body["error"] == "KINESIS_WRITE_FAILED"
+        assert _items(aws) == []
 
 
 # ── GET /analytics/log/recent ────────────────────────────────────────────────

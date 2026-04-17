@@ -64,7 +64,7 @@ def get_health():
     try:
         checked_at = datetime.now(timezone.utc).isoformat()
         service_results = {}
-        overall = "healthy"
+        overall = "unknown"
 
         for service_name in KNOWN_SERVICES:
             metrics = _get_cloudwatch_metrics(service_name)
@@ -139,7 +139,7 @@ def post_health_check():
     try:
         checked_at = datetime.now(timezone.utc).isoformat()
         service_results = {}
-        overall = "healthy"
+        overall = "unknown"
 
         for service_name in KNOWN_SERVICES:
             metrics = _get_cloudwatch_metrics(service_name)
@@ -235,7 +235,7 @@ def _derive_status(metrics: dict) -> str:
 
 def _rollup_status(current: str, new: str) -> str:
     """Return the worse of two statuses."""
-    order = {"healthy": 0, "unknown": 1, "degraded": 2, "unhealthy": 3}
+    order = {"unknown": 0, "healthy": 1, "degraded": 2, "unhealthy": 3}
     return current if order[current] >= order[new] else new
 
 
