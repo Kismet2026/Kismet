@@ -252,6 +252,127 @@ class TestOnUserReported:
 
 
 # ---------------------------------------------------------------------------
+# EventBridge: user.deleted
+# ---------------------------------------------------------------------------
+
+class TestOnUserDeleted:
+    def test_deletes_preferences_row(self, aws_resources):
+        seed_preferences(aws_resources, "user-del")
+        event = eb_event("kismet.profile-service", "user.deleted", {"userId": "user-del"})
+        result = lambda_function.handler(event, {})
+        assert result["statusCode"] == 200
+        table = aws_resources.Table("kismet-email-preferences")
+        item = table.get_item(Key={"PK": "USER#user-del", "SK": "PREFS"}).get("Item")
+        assert item is None
+
+    def test_missing_userId_returns_400(self, aws_resources):
+        event = eb_event("kismet.profile-service", "user.deleted", {})
+        result = lambda_function.handler(event, {})
+        assert result["statusCode"] == 400
+
+
+# ---------------------------------------------------------------------------
+# EventBridge: message.sent
+# ---------------------------------------------------------------------------
+
+class TestOnMessageSent:
+    def test_sends_to_opted_in_recipient(self, aws_resources):
+        seed_preferences(aws_resources, "user-recv", messageNotifications=True)
+        event = eb_event("kismet.message-service", "message.sent", {
+            "matchId": "match-001",
+            "messageId": "msg-001",
+            "senderId": "user-sender",
+            "recipientId": "user-recv",
+            "content": "Hey!",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+        result = lambda_function.handler(event, {})
+        assert result["statusCode"] == 200
+
+    def test_skips_opted_out_recipient(self, aws_resources):
+        seed_preferences(aws_resources, "user-recv", messageNotifications=False)
+        event = eb_event("kismet.message-service", "message.sent", {
+            "matchId": "match-001",
+            "messageId": "msg-002",
+            "senderId": "user-sender",
+            "recipientId": "user-recv",
+            "content": "Hey!",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+        result = lambda_function.handler(event, {})
+        assert result["statusCode"] == 200
+
+    def test_skips_missing_recipientId(self, aws_resources):
+        event = eb_event("kismet.message-service", "message.sent", {
+            "matchId": "match-001",
+            "senderId": "user-sender",
+            "content": "Hey!",
+        })
+        result = lambda_function.handler(event, {})
+        assert result["statusCode"] == 200
+
+
+# ---------------------------------------------------------------------------
+# EventBridge: scheduler.weekly_digest
+# ---------------------------------------------------------------------------
+
+class TestOnWeeklyDigest:
+    def test_sends_to_opted_in_users(self, aws_resources):
+        seed_preferences(aws_resources, "user-a", weeklyDigest=True)
+        seed_preferences(aws_resources, "user-b", weeklyDigest=True)
+        event = eb_event("kismet.scheduler-service", "scheduler.weekly_digest", {})
+        result = lambda_function.handler(event, {})
+        assert result["statusCode"] == 200
+
+    def test_skips_opted_out_users(self, aws_resources):
+        seed_preferences(aws_resources, "user-c", weeklyDigest=False)
+        event = eb_event("kismet.scheduler-service", "scheduler.weekly_digest", {})
+        result = lambda_function.handler(event, {})
+        assert result["statusCode"] == 200
+
+    def test_handles_empty_table(self, aws_resources):
+        event = eb_event("kismet.scheduler-service", "scheduler.weekly_digest", {})
+        result = lambda_function.handler(event, {})
+        assert result["statusCode"] == 200
+
+
+# ---------------------------------------------------------------------------
+# EventBridge: profile.banned
+# ---------------------------------------------------------------------------
+
+class TestOnProfileBanned:
+    def test_sends_notice_and_audit_when_email_known(self, aws_resources):
+        seed_preferences(aws_resources, "user-banned")
+        event = eb_event("kismet.profile-service", "profile.banned", {
+            "userId": "user-banned",
+            "reason": "inappropriate_content",
+            "reportId": "report-001",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+        result = lambda_function.handler(event, {})
+        assert result["statusCode"] == 200
+
+    def test_sends_audit_even_when_user_email_missing(self, aws_resources):
+        # No prefs row — user email unknown, but admin audit must still fire
+        event = eb_event("kismet.profile-service", "profile.banned", {
+            "userId": "user-no-prefs",
+            "reason": "harassment",
+            "reportId": "report-002",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+        result = lambda_function.handler(event, {})
+        assert result["statusCode"] == 200
+
+    def test_handles_missing_optional_fields(self, aws_resources):
+        seed_preferences(aws_resources, "user-banned2")
+        event = eb_event("kismet.profile-service", "profile.banned", {
+            "userId": "user-banned2",
+        })
+        result = lambda_function.handler(event, {})
+        assert result["statusCode"] == 200
+
+
+# ---------------------------------------------------------------------------
 # Routing
 # ---------------------------------------------------------------------------
 
