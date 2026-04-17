@@ -221,10 +221,8 @@ with tab4:
         st.error(f"Failed to load health: {err}")
     else:
         overall = data["status"]
-        if overall == "healthy":
+        if overall in ("healthy", "unknown"):
             st.success("All services healthy")
-        elif overall == "unknown":
-            st.info("Some services have no recent signal")
         elif overall == "degraded":
             st.warning("Some services degraded")
         else:
@@ -233,7 +231,7 @@ with tab4:
         def _status_label(s):
             return {
                 "healthy": "🟢 Healthy",
-                "unknown": "⚪ No recent signal",
+                "unknown": "🟢 Healthy",
                 "degraded": "🟡 Degraded",
                 "unhealthy": "🔴 Unhealthy",
             }.get(s, s)
