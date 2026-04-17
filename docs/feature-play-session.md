@@ -1,55 +1,56 @@
 # Feature Play Session Guide
 
-**Frontend:** Your Vercel URL (set NEXT_PUBLIC_API_BASE_URL to your backend)
-**Admin Dashboard:** http://localhost:8501 (login: admin@kismet.com / password123)
+Frontend: https://frontend-hazel-two-58.vercel.app
+Admin: http://localhost:8501 (or Streamlit Cloud once deployed)
 
 ---
 
 ## Setup
-- All 19 test accounts already created with profiles
-- Open frontend in **two different browsers** to simulate two users
-- Log in as `test1@kismet.com` in one, `test2@kismet.com` in the other (password: `password123`)
+1. Open the frontend in **two different browsers** (e.g. Chrome + Safari) to simulate two users
+2. Log in as `test1@kismet.com` in one, `test2@kismet.com` in the other
 
 ---
 
 ## D1 — Identity & Profiles
-- Log in with any test account → profile already exists
-- Go to Profile page → view/edit name, bio, interests
-- Upload a profile photo (stored in S3, served via CloudFront CDN)
+- Sign up → check email for verification code → confirm
+- Fill in profile (name, bio, age, gender, birth date/time for BaZi)
+- Upload a profile photo
+- View / edit profile
 
 ## D2 — Discovery & Matching
-- Go to Discovery feed → browse profiles with BaZi compatibility scores
-- Swipe right (Like) on a user
-- From browser 2, swipe right on the same user → **match notification appears**
+- Go to Discovery feed → browse candidate profiles
+- Swipe right (Like) / left (Pass)
+- From browser 2, swipe right on the same user → **match should appear**
 - Check Matches tab to see the match
 
 ## D3 — Messaging
-- Open a match → enter chat room
-- Send messages between the two browsers → **real-time delivery via WebSocket**
-- An AI-generated icebreaker appears on first match
+- Open a match → enter chat
+- Send messages back and forth between the two browsers
+- Watch real-time delivery (WebSocket)
+- Check if an AI icebreaker message appears on first match
 
 ## D4 — Moderation
-- Send a message with toxic content (e.g. "I hate you")
-- Message gets flagged → visible in Admin Dashboard → Flagged Content tab
-- Upload an inappropriate photo → rejected by Rekognition
+- Send a message with toxic content (e.g. "I hate you, kill yourself")
+- Message should be flagged → check Admin Dashboard → Flagged Content tab
+- Try uploading an inappropriate photo → should be rejected
 
 ## D5 — Notifications
-- After a match → push notification / email sent automatically
+- After a match, check if a push notification or email is received
 - Check notification bell in the app
 
-## D6 — Admin Dashboard (admin@kismet.com)
-- **Stats tab** — platform-wide metrics (totalUsers, matches, messages)
-- **Flagged Content tab** — review flagged messages/photos → Approve / Remove / Ban User
-- **Users tab** — search users, ban/unban
-- **Health Monitor tab** — all 6 services green in real-time
-- **Analytics Pipeline tab** — shows Kinesis → Firehose → S3 → Athena pipeline status + live event stats
+## D6 — Admin Dashboard
+- Open Admin Dashboard (Streamlit)
+- **Stats tab**: check total users, matches, messages count
+- **Flagged Content tab**: review flagged messages/photos, click Approve / Remove / Ban User
+- **Users tab**: search for a user, click Ban → verify they can't log in
+- **Health Monitor tab**: see all 6 services green
 
 ---
 
-## Quick E2E Demo (5 min)
-1. Login as test1 + test2 in two browsers
-2. test1 swipes right on test2 → test2 swipes right back → **match**
-3. test1 sends a message → test2 sees it instantly (WebSocket)
-4. test1 sends toxic message → Admin Dashboard shows it flagged
-5. Admin bans test1 → test1 loses access
-6. Admin Dashboard → Analytics Pipeline tab → show Kinesis pipeline data
+## Quick E2E Flow (5 min demo)
+1. test1 signs up + creates profile
+2. test2 signs up + creates profile
+3. test1 likes test2 → test2 likes test1 → **match**
+4. test1 sends a message → test2 sees it instantly
+5. test1 sends toxic message → admin sees it flagged
+6. Admin bans test1 → test1 can't access app
