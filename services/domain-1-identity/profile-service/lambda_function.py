@@ -202,7 +202,10 @@ def handle_delete(caller_id: str, user_id: str) -> Dict[str, Any]:
     # Read the profile before deleting to check ban status. This determines
     # how the Cognito account is handled: banned users must not be able to
     # re-register with the same email, so we disable rather than delete.
-    existing = table.get_item(Key={"PK": f"USER#{user_id}", "SK": "PROFILE"})
+    existing = table.get_item(
+        Key={"PK": f"USER#{user_id}", "SK": "PROFILE"},
+        ConsistentRead=True,
+    )
     is_banned = existing.get("Item", {}).get("status") == "banned"
 
     # Attempt to delete the profile row. delete_item is idempotent — it's a no-op
