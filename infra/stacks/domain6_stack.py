@@ -28,11 +28,7 @@ class Domain6Stack(cdk.Stack):
             "kismet-events",
         )
         activity_stream = shared.activity_stream
-        analytics_bucket = s3.Bucket.from_bucket_name(
-            self,
-            "ImportedAnalyticsBucket",
-            f"kismet-analytics-{self.account}-dev",
-        )
+        analytics_bucket = shared.analytics_bucket
         health_alerts_topic = sns.Topic.from_topic_arn(
             self,
             "ImportedHealthAlertsTopic",

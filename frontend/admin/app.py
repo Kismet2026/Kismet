@@ -5,6 +5,7 @@ import pandas as pd
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
+
 def to_pt(utc_str):
     if not utc_str:
         return ""

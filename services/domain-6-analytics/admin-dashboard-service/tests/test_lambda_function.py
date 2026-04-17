@@ -40,14 +40,29 @@ def aws():
         yield dynamodb
 
 
-def http_event(method, resource, body=None, path_params=None, query=None, admin_id="admin-1"):
+def http_event(
+    method,
+    resource,
+    body=None,
+    path_params=None,
+    query=None,
+    admin_id="admin-1",
+    email="admin@kismet.com",
+    groups=None,
+):
+    claims = {"sub": admin_id}
+    if email is not None:
+        claims["email"] = email
+    if groups is not None:
+        claims["cognito:groups"] = groups
+
     return {
         "httpMethod": method,
         "resource": resource,
         "body": json.dumps(body) if body else None,
         "pathParameters": path_params,
         "queryStringParameters": query,
-        "requestContext": {"authorizer": {"claims": {"sub": admin_id}}},
+        "requestContext": {"authorizer": {"claims": claims}},
     }
 
 
@@ -95,6 +110,20 @@ class TestGetStats:
         r = lambda_function.handler(http_event("GET", "/admin/stats"), {})
         body = json.loads(r["body"])
         assert body["totalUsers"] == 0
+
+    def test_non_admin_is_forbidden(self, aws):
+        r = lambda_function.handler(
+            http_event("GET", "/admin/stats", email="test1@kismet.com"),
+            {},
+        )
+        assert r["statusCode"] == 403
+
+    def test_admin_group_is_allowed(self, aws):
+        r = lambda_function.handler(
+            http_event("GET", "/admin/stats", email="test1@kismet.com", groups="admins"),
+            {},
+        )
+        assert r["statusCode"] == 200
 
 
 # ── GET /admin/flagged-content ───────────────────────────────────────────────
