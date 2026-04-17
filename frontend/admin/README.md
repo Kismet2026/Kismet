@@ -49,7 +49,6 @@ Reads `GET /admin/stats` and shows live admin metrics:
 - total users
 - active users
 - matches today
-- messages today
 - pending flagged content count
 
 ### Flagged Content Tab
@@ -62,12 +61,11 @@ Reads `GET /admin/users` with optional name search and supports banning/unbannin
 - `PUT /admin/users/{userId}/unban`
 
 ### Health Monitor Tab
-Reads `GET /health` and `GET /health/alarms`, and can trigger `POST /health/check`.
+Reads `GET /health` and `GET /health/alarms`.
 
 Health status meanings:
 
 - `healthy`: recent traffic exists and current metrics are within threshold
-- `unknown`: no recent invocations or no recent CloudWatch signal
 - `degraded`: recent traffic exists but latency is above threshold
 - `unhealthy`: recent traffic exists and error rate is above threshold
 
