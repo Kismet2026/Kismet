@@ -209,6 +209,7 @@ class TestGetCandidates:
     @patch('lambda_function.table')
     def test_returns_candidates_with_bazi_score(self, mock_table, mock_swipe, mock_bazi):
         mock_swipe.query.return_value = {'Items': []}
+        mock_table.get_item.return_value = {}  # caller profile not found → no default gender filter
         mock_bazi.return_value = {'1999-05-15': 92}
         mock_table.scan.return_value = {
             'Items': [
@@ -232,6 +233,7 @@ class TestGetCandidates:
     @patch('lambda_function.table')
     def test_bazi_score_none_when_not_in_top200(self, mock_table, mock_swipe, mock_bazi):
         mock_swipe.query.return_value = {'Items': []}
+        mock_table.get_item.return_value = {}  # caller profile not found → no default gender filter
         mock_bazi.return_value = {'2000-01-01': 85}
         mock_table.scan.return_value = {
             'Items': [
@@ -254,6 +256,7 @@ class TestGetCandidates:
         mock_swipe.query.return_value = {
             'Items': [{'targetUserId': 'user-456'}]
         }
+        mock_table.get_item.return_value = {}  # caller profile not found → no default gender filter
         mock_bazi.return_value = {}
         mock_table.scan.return_value = {
             'Items': [
@@ -278,6 +281,7 @@ class TestGetCandidates:
     @patch('lambda_function.table')
     def test_filters_by_gender(self, mock_table, mock_swipe, mock_bazi):
         mock_swipe.query.return_value = {'Items': []}
+        mock_table.get_item.return_value = {}  # caller profile not found → no default gender filter
         mock_bazi.return_value = {}
         mock_table.scan.return_value = {
             'Items': [
@@ -302,6 +306,7 @@ class TestGetCandidates:
     @patch('lambda_function.table')
     def test_filters_by_age(self, mock_table, mock_swipe, mock_bazi):
         mock_swipe.query.return_value = {'Items': []}
+        mock_table.get_item.return_value = {}  # caller profile not found → no default gender filter
         mock_bazi.return_value = {}
         mock_table.scan.return_value = {
             'Items': [
