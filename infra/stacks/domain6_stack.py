@@ -137,7 +137,16 @@ class Domain6Stack(cdk.Stack):
                 "user.reported",
             ],
             publish_events=False,
-            extra_policies=[],
+            extra_policies=(
+                [
+                    iam.PolicyStatement(
+                        actions=["kinesis:PutRecord", "kinesis:PutRecords"],
+                        resources=[activity_stream.stream_arn],
+                    ),
+                ]
+                if activity_stream is not None
+                else []
+            ),
             environment=(
                 {"ACTIVITY_LOG_TABLE": "kismet-activity-log", "KINESIS_STREAM_NAME": activity_stream.stream_name}
                 if activity_stream is not None
