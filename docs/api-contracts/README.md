@@ -17,7 +17,6 @@ api-contracts/
 ├── domain-1-auth-service.md
 ├── domain-1-profile-service.md
 ├── domain-1-photo-service.md
-├── domain-1-email-verification-service.md
 ├── domain-2-discovery-service.md
 ├── domain-2-swipe-service.md
 ├── domain-2-match-service.md
@@ -65,7 +64,7 @@ Authorization: Bearer <jwt_token>
 {
   "error": {
     "code": "VALIDATION_ERROR",
-    "message": "Email must be a .edu address"
+    "message": "Invalid email format"
   }
 }
 ```

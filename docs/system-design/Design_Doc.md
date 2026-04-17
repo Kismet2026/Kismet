@@ -6,7 +6,7 @@
 
 ## 1. What Is Kismet
 
-A microservice-based dating app for college students (.edu verified), differentiated by **BaZi (八字) compatibility scoring** — an ancient Chinese astrological system that ranks partner compatibility based on birth date and time.
+A microservice-based dating app, differentiated by **BaZi (八字) compatibility scoring** — an ancient Chinese astrological system that ranks partner compatibility based on birth date and time.
 
 Built entirely on AWS using a serverless, event-driven architecture: **25 microservices** across **6 domains**, deployed as AWS Lambda functions.
 
@@ -52,10 +52,9 @@ Built entirely on AWS using a serverless, event-driven architecture: **25 micros
 
 | Service | AWS | Responsibility |
 |---------|-----|----------------|
-| Auth Service | Cognito, Lambda | Sign up, login, JWT tokens |
+| Auth Service | Cognito, Lambda | Sign up, login, JWT tokens (Cognito auto-verifies email) |
 | Profile Service | Lambda, DynamoDB | CRUD user profiles |
 | Photo Service | S3, Lambda, CloudFront | Upload, resize, serve profile photos |
-| Email Verification | SES, Lambda | .edu email verification |
 
 ### Domain 2 — Discovery & Matching
 
@@ -222,10 +221,9 @@ Key tables:
 ## 8. Key User Flows
 
 ### Sign Up
-1. User submits email (.edu) + password + birth date
-2. Auth Service → Cognito creates account → returns JWT
-3. Email Verification Service → SES sends verification email
-4. On verification → `user.created` published → Email Service sends welcome email, Activity Logger records
+1. User submits email + password + birth date
+2. Auth Service → Cognito creates account, auto-verifies the email attribute, returns JWT
+3. `user.created` published → Email Service sends welcome email, Activity Logger records
 
 ### Discovery & Matching
 1. Frontend calls `GET /discovery` → Discovery + Recommendation + BaZi Services return ranked candidates
@@ -282,7 +280,7 @@ Deployment order: SharedStack first, then all domain stacks (can deploy in paral
 | Chat latency | < 500ms via WebSocket |
 | Scalability | Lambda auto-scales; DynamoDB on-demand |
 | Content safety | All photos scanned before display; all messages scanned post-send |
-| Auth | JWT (Cognito), .edu verified |
+| Auth | JWT (Cognito), email auto-verified |
 | Cost | Within AWS Academy / free tier where possible |
 
 ---

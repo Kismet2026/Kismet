@@ -17,7 +17,7 @@ The app is built entirely on AWS using a **serverless, event-driven architecture
 
 ## 2. Target Users
 
-- **Primary:** College students (verified via `.edu` email addresses)
+- **Primary:** College students
 - **Demographics:** 18–25, tech-comfortable, open to personality-based matching
 - **Key differentiator for users:** BaZi compatibility scores alongside traditional swipe-based discovery
 
@@ -26,10 +26,9 @@ The app is built entirely on AWS using a **serverless, event-driven architecture
 ## 3. Core Features
 
 ### 3.1 Identity & Profiles
-- **Sign up / Login** — Cognito-based authentication with JWT tokens
+- **Sign up / Login** — Cognito-based authentication with JWT tokens; email is auto-verified by Cognito
 - **Profile management** — Create, read, update, delete user profiles
 - **Photo upload** — Upload, auto-resize, and serve profile photos via CDN
-- **Email verification** — `.edu` email verification to ensure college student user base
 
 ### 3.2 Discovery & Matching
 - **Discovery feed** — Browse and filter candidate profiles by preferences
@@ -109,7 +108,6 @@ The app is built entirely on AWS using a **serverless, event-driven architecture
 | Auth Service | Quinn Gao | Cognito, Lambda | Sign up, login, JWT tokens |
 | Profile Service | Quinn Gao | Lambda, DynamoDB | CRUD for user profiles |
 | Photo Service | KS | S3, Lambda, CloudFront | Upload, resize, serve photos |
-| Email Verification | KS | SES, Lambda, Cognito | .edu email verification |
 
 ### Domain 2 — Discovery & Matching
 
@@ -162,12 +160,10 @@ The app is built entirely on AWS using a **serverless, event-driven architecture
 ## 6. User Flows
 
 ### 6.1 Sign Up
-1. User enters email (`.edu`), password, and birth date/time
-2. **Auth Service** creates Cognito account, returns JWT
-3. **Email Verification Service** sends verification email via SES
-4. User verifies email → account activated
-5. **Event Bus** publishes `user.created` event
-6. **Activity Logger** records the event
+1. User enters email, password, and birth date/time
+2. **Auth Service** creates Cognito account (email auto-verified by the user pool), returns JWT
+3. **Event Bus** publishes `user.created` event
+4. **Activity Logger** records the event; **Email Service** sends welcome email
 
 ### 6.2 Profile Creation
 1. User fills in profile (name, bio, preferences)
@@ -242,7 +238,7 @@ The app is built entirely on AWS using a **serverless, event-driven architecture
 | **Data durability** | DynamoDB for structured data; S3 for objects; Kinesis for streaming |
 | **Observability** | CloudWatch metrics/alarms on all services; Health Monitor for alerts |
 | **Cost** | Stay within AWS Academy / free-tier limits where possible |
-| **Auth** | JWT-based, Cognito-managed, .edu verified |
+| **Auth** | JWT-based, Cognito-managed, email auto-verified |
 
 ---
 
