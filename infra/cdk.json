@@ -8,6 +8,6 @@
     "@aws-cdk/aws-apigateway:usagePlanKeyOrderInsensitiveId": true,
     "@aws-cdk/aws-cognito:enableStandardAttributesInUserPool": true,
     "@aws-cdk/core:checkSecretUsage": true,
-    "enableActivityStream": true
+    "enableActivityStream": false
   }
 }
