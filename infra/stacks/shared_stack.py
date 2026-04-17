@@ -128,7 +128,10 @@ class SharedStack(cdk.Stack):
         # Opt-in via CDK context: `cdk deploy -c enableActivityStream=true`
         # or by setting `"enableActivityStream": true` in cdk.json context.
         # Disabled by default to avoid unexpected cost (~$11/month per shard).
-        if self.node.try_get_context("enableActivityStream") is True:
+        # Accept both the JSON boolean (from cdk.json) and the string "true"
+        # (from `-c key=true` on the CLI, which CDK does not coerce to bool).
+        _enable_stream = self.node.try_get_context("enableActivityStream")
+        if _enable_stream is True or _enable_stream == "true":
             self.activity_stream = kinesis.Stream(
                 self,
                 "ActivityStream",
