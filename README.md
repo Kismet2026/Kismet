@@ -140,7 +140,6 @@ kismet/
 ├── PRD.md
 │
 ├── docs/
-│   ├── PROJECT_STATUS.md             ← current deployment & progress status
 │   ├── api-contracts/                ← one API contract per service (25 files)
 │   ├── system-design/
 │   │   ├── Design_Doc.md             ← high-level architecture & decisions
@@ -241,14 +240,14 @@ service-name/
 
 ## Current Status (as of Apr 17)
 
-**All 7 CDK stacks deployed. User frontend on Vercel, admin console on Streamlit Community Cloud.** See [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md) for full details.
+**All 7 CDK stacks deployed. User frontend on Vercel, admin console on Streamlit Community Cloud.**
 
 | Stack | Status |
 |-------|--------|
 | SharedStack | Deployed |
 | Domain 1 — Identity | Deployed |
 | Domain 2 — Discovery | Deployed |
-| Domain 3 — Messaging | Deployed (#83 resolved) |
+| Domain 3 — Messaging | Deployed |
 | Domain 4 — Moderation | Deployed |
 | Domain 5 — Notifications | Deployed |
 | Domain 6 — Analytics | Deployed |
