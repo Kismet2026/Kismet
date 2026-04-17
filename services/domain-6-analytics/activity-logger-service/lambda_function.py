@@ -212,6 +212,16 @@ def handle_get_recent(event):
 
 
 def _write_to_kinesis(record, partition_key):
+    # Athena's `activity_events` table declares `eventData STRING`, so the
+    # JsonSerDe needs each record's `eventData` to be a JSON *string*, not a
+    # nested object — otherwise dashboard queries that call
+    # `json_extract_scalar(eventData, '$.matchId')` always get NULL.
+    # Stringify it here (Kinesis/Firehose/Athena path only). The DDB path
+    # below keeps the original dict so consumers of `kismet-activity-log`
+    # still see `eventData` as a native map.
+    kinesis_record = record
+    if isinstance(record.get("eventData"), dict):
+        kinesis_record = {**record, "eventData": json.dumps(record["eventData"])}
     try:
         # Append a newline so Firehose writes JSON Lines to S3. Kinesis records
         # are concatenated byte-for-byte into Firehose output objects with no
@@ -220,7 +230,7 @@ def _write_to_kinesis(record, partition_key):
         # only the first record per object.
         kinesis.put_record(
             StreamName=KINESIS_STREAM_NAME,
-            Data=(json.dumps(record) + "\n").encode("utf-8"),
+            Data=(json.dumps(kinesis_record) + "\n").encode("utf-8"),
             PartitionKey=partition_key,
         )
     except Exception as e:
