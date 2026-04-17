@@ -244,9 +244,15 @@ class Domain6Stack(cdk.Stack):
                     ],
                     resources=[
                         f"arn:aws:dynamodb:{self.region}:{self.account}:table/kismet-profiles",
+                        f"arn:aws:dynamodb:{self.region}:{self.account}:table/kismet-matches",
+                        f"arn:aws:dynamodb:{self.region}:{self.account}:table/kismet-messages",
                     ],
                 )
             ],
+            environment={
+                "MATCHES_TABLE": "kismet-matches",
+                "MESSAGES_TABLE": "kismet-messages",
+            },
             api=imported_api,
             authorizer=shared.authorizer,
             event_bus=event_bus,

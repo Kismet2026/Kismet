@@ -10,6 +10,8 @@ from moto import mock_aws
 os.environ["ADMIN_STATS_TABLE"] = "kismet-admin-stats"
 os.environ["FLAGGED_CONTENT_TABLE"] = "kismet-flagged-content"
 os.environ["PROFILES_TABLE"] = "kismet-profiles"
+os.environ["MATCHES_TABLE"] = "kismet-matches"
+os.environ["MESSAGES_TABLE"] = "kismet-messages"
 os.environ["AWS_DEFAULT_REGION"] = "us-east-1"
 os.environ["AWS_ACCESS_KEY_ID"] = "testing"
 os.environ["AWS_SECRET_ACCESS_KEY"] = "testing"
@@ -32,7 +34,13 @@ PK_SK_ATTR = [
 def aws():
     with mock_aws():
         dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
-        for tbl in ["kismet-admin-stats", "kismet-flagged-content", "kismet-profiles"]:
+        for tbl in [
+            "kismet-admin-stats",
+            "kismet-flagged-content",
+            "kismet-profiles",
+            "kismet-matches",
+            "kismet-messages",
+        ]:
             dynamodb.create_table(
                 TableName=tbl, KeySchema=PK_SK,
                 AttributeDefinitions=PK_SK_ATTR, BillingMode="PAY_PER_REQUEST",
@@ -94,18 +102,49 @@ def _seed_profile(aws, user_id, **extra):
     )
 
 
+def _seed_match(aws, match_id, matched_at, **extra):
+    aws.Table("kismet-matches").put_item(
+        Item={
+            "PK": f"MATCH#{match_id}",
+            "SK": "META",
+            "matchId": match_id,
+            "matchedAt": matched_at,
+            "status": "active",
+            **extra,
+        }
+    )
+
+
+def _seed_message(aws, match_id, message_id, timestamp, **extra):
+    aws.Table("kismet-messages").put_item(
+        Item={
+            "PK": f"CONV#{match_id}",
+            "SK": f"MSG#{timestamp}#{message_id}",
+            "messageId": message_id,
+            "timestamp": timestamp,
+            **extra,
+        }
+    )
+
+
 # ── GET /admin/stats ─────────────────────────────────────────────────────────
 
 
 class TestGetStats:
     def test_returns_stats(self, aws):
-        _seed_stat(aws, "totalUsers", 100)
-        _seed_stat(aws, "matchesToday", 5)
+        _seed_profile(aws, "user-1")
+        _seed_profile(aws, "user-2", status="banned")
+        _seed_flagged(aws, "c-1")
+        _seed_match(aws, "match-1", "2026-04-17T12:00:00Z")
+        _seed_message(aws, "match-1", "msg-1", "2026-04-17T12:30:00Z")
         r = lambda_function.handler(http_event("GET", "/admin/stats"), {})
         assert r["statusCode"] == 200
         body = json.loads(r["body"])
-        assert body["totalUsers"] == 100
-        assert body["matchesToday"] == 5
+        assert body["totalUsers"] == 2
+        assert body["activeUsers"] == 1
+        assert body["matchesToday"] == 1
+        assert body["messagesToday"] == 1
+        assert body["flaggedContentCount"] == 1
         assert "generatedAt" in body
 
     def test_defaults_to_zero(self, aws):
