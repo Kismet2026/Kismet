@@ -113,8 +113,6 @@ def get_query_results(event, context):
 
 
 def get_dashboard(event, context):
-    _ensure_catalog()
-
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     sql = (
         "SELECT "
@@ -136,32 +134,38 @@ def get_dashboard(event, context):
         f"FROM {ATHENA_DATABASE}.activity_events"
     )
 
-    defaults = {
-        "dau": 0,
-        "totalUsers": 0,
-        "matchesToday": 0,
-        "messagesToday": 0,
-        "generatedAt": datetime.now(timezone.utc).isoformat(),
-    }
-
     try:
+        _ensure_catalog()
         rows = _run_query_sync(sql)
-        if rows:
-            row = rows[0]
+        if not rows:
             return _response(
-                200,
+                503,
                 {
-                    "dau": int(row.get("dau") or 0),
-                    "totalUsers": int(row.get("totalUsers") or 0),
-                    "matchesToday": int(row.get("matchesToday") or 0),
-                    "messagesToday": int(row.get("messagesToday") or 0),
-                    "generatedAt": datetime.now(timezone.utc).isoformat(),
+                    "error": "ANALYTICS_UNAVAILABLE",
+                    "message": "Analytics query returned no usable results",
                 },
             )
+
+        row = rows[0]
+        return _response(
+            200,
+            {
+                "dau": int(row.get("dau") or 0),
+                "totalUsers": int(row.get("totalUsers") or 0),
+                "matchesToday": int(row.get("matchesToday") or 0),
+                "messagesToday": int(row.get("messagesToday") or 0),
+                "generatedAt": datetime.now(timezone.utc).isoformat(),
+            },
+        )
     except Exception as e:
         print(f"Dashboard Athena query failed: {e}")
-
-    return _response(200, defaults)
+        return _response(
+            503,
+            {
+                "error": "ANALYTICS_UNAVAILABLE",
+                "message": str(e),
+            },
+        )
 
 
 # ── Athena helpers ────────────────────────────────────────────────────────────
@@ -221,8 +225,9 @@ def _run_query_sync(sql, timeout_seconds=25):
             execution["QueryExecution"]["Status"]
             .get("StateChangeReason", "unknown")
         )
-        print(f"Athena query did not succeed: state={state} reason={reason}")
-        return []
+        raise RuntimeError(
+            f"Athena query did not succeed: state={state} reason={reason}"
+        )
 
     return _fetch_results(execution_id)
 

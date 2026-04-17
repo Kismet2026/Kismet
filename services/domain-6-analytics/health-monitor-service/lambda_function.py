@@ -224,6 +224,8 @@ def _get_cloudwatch_metrics(service_name: str, period_minutes: int = 5) -> dict:
 
 
 def _derive_status(metrics: dict) -> str:
+    if metrics["invocations"] == 0:
+        return "unknown"
     if metrics["errorRate"] > UNHEALTHY_ERROR_RATE:
         return "unhealthy"
     if metrics["avgDuration"] > DEGRADED_LATENCY_MS:
@@ -233,7 +235,7 @@ def _derive_status(metrics: dict) -> str:
 
 def _rollup_status(current: str, new: str) -> str:
     """Return the worse of two statuses."""
-    order = {"healthy": 0, "degraded": 1, "unhealthy": 2}
+    order = {"healthy": 0, "unknown": 1, "degraded": 2, "unhealthy": 3}
     return current if order[current] >= order[new] else new
 
 

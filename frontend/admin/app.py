@@ -223,6 +223,8 @@ with tab4:
         overall = data["status"]
         if overall == "healthy":
             st.success("All services healthy")
+        elif overall == "unknown":
+            st.info("Some services have no recent signal")
         elif overall == "degraded":
             st.warning("Some services degraded")
         else:
@@ -231,6 +233,7 @@ with tab4:
         def _status_label(s):
             return {
                 "healthy": "🟢 Healthy",
+                "unknown": "⚪ No recent signal",
                 "degraded": "🟡 Degraded",
                 "unhealthy": "🔴 Unhealthy",
             }.get(s, s)
@@ -278,20 +281,18 @@ with tab5:
         st.error(f"Failed to load analytics: {err}")
     else:
         cols = st.columns(4)
-        cols[0].metric("Total Events", data.get("totalEvents", 0))
-        cols[1].metric("Swipes", data.get("swipeCount", 0))
-        cols[2].metric("Matches", data.get("matchCount", 0))
-        cols[3].metric("Messages", data.get("messageCount", 0))
-        st.caption(f"Query time: {data.get('queryTimeMs', '—')}ms | Source: AWS Athena → S3")
+        cols[0].metric("DAU", data.get("dau", 0))
+        cols[1].metric("Total Users", data.get("totalUsers", 0))
+        cols[2].metric("Matches Today", data.get("matchesToday", 0))
+        cols[3].metric("Messages Today", data.get("messagesToday", 0))
+        st.caption(f"Generated at: {to_pt(data.get('generatedAt', ''))} | Source: AWS Athena → S3")
 
         # Event breakdown chart
         event_data = {
-            "Event Type": ["Swipes", "Matches", "Messages", "Other"],
+            "Event Type": ["Matches", "Messages"],
             "Count": [
-                data.get("swipeCount", 0),
-                data.get("matchCount", 0),
-                data.get("messageCount", 0),
-                max(0, data.get("totalEvents", 0) - data.get("swipeCount", 0) - data.get("matchCount", 0) - data.get("messageCount", 0)),
+                data.get("matchesToday", 0),
+                data.get("messagesToday", 0),
             ]
         }
         df = pd.DataFrame(event_data)
