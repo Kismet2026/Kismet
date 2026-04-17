@@ -3,7 +3,7 @@ from constructs import Construct
 from aws_cdk import aws_events as events, aws_iam as iam, aws_apigateway as apigateway
 
 from stacks.shared_stack import SharedStack
-from kismet_constructs.kismet_service import KismetService
+from kismet_constructs.kismet_service import KismetService, synth_stage_redeploy
 
 
 class Domain1Stack(cdk.Stack):
@@ -165,4 +165,5 @@ class Domain1Stack(cdk.Stack):
             event_bus=event_bus,
         )
 
-
+        # Force API Gateway dev stage to redeploy when routes change (issue #118)
+        synth_stage_redeploy(self, api=imported_api)

@@ -10,7 +10,7 @@ from aws_cdk import (
 )
 
 from stacks.shared_stack import SharedStack
-from kismet_constructs.kismet_service import KismetService
+from kismet_constructs.kismet_service import KismetService, synth_stage_redeploy
 
 
 class Domain6Stack(cdk.Stack):
@@ -238,3 +238,6 @@ class Domain6Stack(cdk.Stack):
             authorizer=shared.authorizer,
             event_bus=event_bus,
         )
+
+        # Force API Gateway dev stage to redeploy when routes change (issue #118)
+        synth_stage_redeploy(self, api=imported_api)
