@@ -9,7 +9,9 @@ def to_pt(utc_str):
     if not utc_str:
         return ""
     try:
-        dt = datetime.fromisoformat(utc_str)
+        dt = datetime.fromisoformat(utc_str.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
         return dt.astimezone(ZoneInfo("America/Los_Angeles")).strftime("%Y-%m-%d %I:%M %p PT")
     except Exception:
         return utc_str
