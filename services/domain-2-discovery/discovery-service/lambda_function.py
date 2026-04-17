@@ -139,9 +139,19 @@ def get_candidates(event):
     # Get current user's birthDate for BaZi scoring
     bazi_scores = _get_bazi_scores_for_user(user_id)
 
-    # Look up user's own birthDate (for reverse BaZi lookup)
+    # Look up caller's own profile for birthDate (reverse BaZi) and preferredGender
     user_profile_result = table.get_item(Key={'PK': f'PROFILE#{user_id}', 'SK': 'META'})
-    user_birth = user_profile_result.get('Item', {}).get('birthDate', '')
+    user_profile_item = user_profile_result.get('Item', {}) or {}
+    user_birth = user_profile_item.get('birthDate', '')
+
+    # Default gender filter to caller's preferredGender when no explicit `?gender=`
+    # is passed. Treat 'everyone' as "no filter". This makes the default safe
+    # (straight users don't see the wrong gender) while still allowing an
+    # override via the query string, e.g. `?gender=male` for deliberate browsing.
+    if not gender_filter:
+        caller_preferred = (user_profile_item.get('preferredGender') or '').strip()
+        if caller_preferred and caller_preferred != 'everyone':
+            gender_filter = caller_preferred
 
     # Scan all profiles (in production, use GSI or pre-computed candidate lists).
     # Do NOT pass `Limit` here — in DynamoDB scan, Limit caps rows *scanned*
