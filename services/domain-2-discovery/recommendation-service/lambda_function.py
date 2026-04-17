@@ -206,11 +206,13 @@ def _compute_recommendations(user_id, limit):
     """Compute recommendation scores for a user from the discovery pool."""
     from boto3.dynamodb.conditions import Key, Attr
 
-    # Get user's own profile for BaZi lookup
+    # Get user's own profile for BaZi lookup + preferredGender filter
     user_profile = discovery_table.get_item(
         Key={'PK': f'PROFILE#{user_id}', 'SK': 'META'}
-    ).get('Item', {})
+    ).get('Item', {}) or {}
     user_birth = user_profile.get('birthDate', '')
+    caller_preferred = (user_profile.get('preferredGender') or '').strip()
+    gender_filter = caller_preferred if caller_preferred and caller_preferred != 'everyone' else None
 
     # Get BaZi scores from discovery table cache
     bazi_scores = {}
@@ -224,10 +226,12 @@ def _compute_recommendations(user_id, limit):
     # Get already-swiped users to exclude
     swiped_ids = _get_swiped_user_ids(user_id)
 
-    # Get all candidate profiles from discovery table
+    # Scan candidate profiles. Do NOT pass `Limit` — kismet-discovery mixes
+    # PROFILE# rows with BAZI# cache rows (~99% are BAZI#), and DynamoDB's
+    # Limit caps rows *scanned* (pre-filter), so a small Limit can exhaust
+    # the page on cache rows before any profile surfaces. See #150.
     result = discovery_table.scan(
-        FilterExpression=Key('SK').eq('META') & Attr('userId').ne(user_id),
-        Limit=200,
+        FilterExpression=Attr('SK').eq('META') & Attr('userId').ne(user_id),
     )
 
     # Collect unique candidate birth dates to batch-lookup reverse BaZi scores
@@ -249,6 +253,10 @@ def _compute_recommendations(user_id, limit):
 
         # Skip already-swiped
         if candidate_id in swiped_ids:
+            continue
+
+        # Apply caller's preferredGender (same default as /discovery, #151)
+        if gender_filter and profile.get('gender') != gender_filter:
             continue
 
         score_breakdown = _calculate_score(profile, bazi_scores)
