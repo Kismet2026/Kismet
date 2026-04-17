@@ -77,6 +77,9 @@ if not get_token():
             )
             r.raise_for_status()
             data = r.json()
+            if email != "admin@kismet.com":
+                st.error("Admin only.")
+                st.stop()
             st.session_state["id_token"] = data["idToken"]
             st.success("Logged in!")
             st.rerun()
