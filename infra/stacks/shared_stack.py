@@ -125,15 +125,19 @@ class SharedStack(cdk.Stack):
         )
 
         # ── Kinesis Data Stream ───────────────────────────────────────────────
-        # TODO: re-enable when Kinesis is activated on new AWS account
-        # self.activity_stream = kinesis.Stream(
-        #     self,
-        #     "ActivityStream",
-        #     stream_name="kismet-activity-stream",
-        #     shard_count=1,
-        #     removal_policy=cdk.RemovalPolicy.DESTROY,
-        # )
-        self.activity_stream = None  # Kinesis not yet available
+        # Opt-in via CDK context: `cdk deploy -c enableActivityStream=true`
+        # or by setting `"enableActivityStream": true` in cdk.json context.
+        # Disabled by default to avoid unexpected cost (~$11/month per shard).
+        if self.node.try_get_context("enableActivityStream") is True:
+            self.activity_stream = kinesis.Stream(
+                self,
+                "ActivityStream",
+                stream_name="kismet-activity-stream",
+                shard_count=1,
+                removal_policy=cdk.RemovalPolicy.DESTROY,
+            )
+        else:
+            self.activity_stream = None
 
         # ── SNS ───────────────────────────────────────────────────────────────
         # Health Monitor publishes alerts here
@@ -157,5 +161,5 @@ class SharedStack(cdk.Stack):
             value=self.photos_cdn_base_url,
             description="CloudFront base URL for profile photo delivery",
         )
-        if self.activity_stream:
+        if self.activity_stream is not None:
             cdk.CfnOutput(self, "ActivityStreamArn", value=self.activity_stream.stream_arn)

@@ -42,7 +42,7 @@ A microservice dating app built on AWS — with BaZi (八字) compatibility matc
 
 | Domain | Members | Services |
 |--------|---------|----------|
-| **Identity & Profiles** | Quinn Gao, KS | Auth, Profile, Photo, Email Verification |
+| **Identity & Profiles** | Quinn Gao, KS | Auth, Profile, Photo |
 | **Discovery & Matching** | Qinyuan | Discovery, Swipe, Match, Recommendation, BaZi |
 | **Messaging** | Parker, QX, Jiaxin | Chat Gateway, Message, Presence, Icebreaker |
 | **Safety & Moderation** | Yue, Xinyuan Fan (Amber) | Text Moderation, Image Moderation, Report, Rate Limiter |
@@ -62,7 +62,6 @@ A microservice dating app built on AWS — with BaZi (八字) compatibility matc
 | Auth Service | Quinn Gao | Cognito, Lambda | Sign up, login, JWT tokens |
 | Profile Service | Quinn Gao | Lambda, DynamoDB | CRUD for user profiles |
 | Photo Service | KS | S3, Lambda, CloudFront | Upload, resize, serve photos |
-| Email Verification | KS | SES, Lambda, Cognito | .edu email verification |
 
 ### Domain 2 — Discovery & Matching
 
@@ -175,8 +174,7 @@ kismet/
 │   ├── domain-1-identity/
 │   │   ├── auth-service/
 │   │   ├── profile-service/
-│   │   ├── photo-service/
-│   │   └── email-verification-service/
+│   │   └── photo-service/
 │   ├── domain-2-discovery/
 │   │   ├── discovery-service/
 │   │   ├── swipe-service/

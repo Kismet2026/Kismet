@@ -267,7 +267,7 @@ table.put_item(
   "detail-type": "user.created",
   "detail": {
     "userId": "user-123",
-    "email": "student@northeastern.edu",
+    "email": "alice@example.com",
     "timestamp": "2026-04-01T10:00:00Z"
   }
 }

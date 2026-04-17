@@ -19,7 +19,7 @@ Register a new user account in Cognito.
 
 ```json
 {
-  "email": "student@university.edu",
+  "email": "alice@example.com",
   "password": "SecureP@ss123",
   "birthDate": "1999-05-15",
   "birthTime": "14:30"
@@ -38,7 +38,7 @@ Register a new user account in Cognito.
 ```json
 {
   "userId": "user-123",
-  "email": "student@university.edu",
+  "email": "alice@example.com",
   "createdAt": "2026-04-01T12:00:00Z"
 }
 ```
@@ -69,7 +69,7 @@ Confirm the Cognito signup code sent during `POST /auth/signup`.
 
 ```json
 {
-  "email": "student@university.edu",
+  "email": "alice@example.com",
   "code": "123456"
 }
 ```
@@ -108,7 +108,7 @@ Authenticate a user and return JWT tokens.
 
 ```json
 {
-  "email": "student@university.edu",
+  "email": "alice@example.com",
   "password": "SecureP@ss123"
 }
 ```
@@ -235,7 +235,7 @@ Published when a new user successfully signs up.
   "detail-type": "user.created",
   "detail": {
     "userId": "user-123",
-    "email": "student@university.edu",
+    "email": "alice@example.com",
     "timestamp": "2026-04-01T12:00:00Z"
   }
 }
