@@ -70,7 +70,7 @@ A microservice dating app built on AWS — with BaZi (八字) compatibility matc
 |---------|-------|-------------|-------------|
 | Discovery Service | Qinyuan | Lambda, DynamoDB | Filter and browse candidates |
 | Swipe Service | Qinyuan | Lambda, DynamoDB | Record like/pass actions |
-| Match Service | Qinyuan | Lambda, DynamoDB Streams, SNS | Detect mutual likes |
+| Match Service | Qinyuan | Lambda, DynamoDB, EventBridge | Detect mutual likes, ban cascade |
 | Recommendation Service | Qinyuan | Lambda, DynamoDB | Score and rank candidates |
 | BaZi Service | Qinyuan | Lambda | 八字 compatibility via external API |
 
@@ -88,8 +88,8 @@ A microservice dating app built on AWS — with BaZi (八字) compatibility matc
 | Service | Owner | AWS Services | Description |
 |---------|-------|-------------|-------------|
 | Text Moderation | Yue | Comprehend, Lambda | Flag toxic content |
-| Image Moderation | Yue | Rekognition, Lambda | Block inappropriate photos |
-| Report Service | Amber | Lambda, DynamoDB, SES | User reports → admin alerts |
+| Image Moderation | Yue | Rekognition, Lambda, S3 | Scan uploads; flag nudity/violence/weapons |
+| Report Service | Amber | Lambda, DynamoDB, SES, EventBridge | User reports → admin email + auto-ban at threshold |
 | Rate Limiter | Amber | API Gateway, ElastiCache (Redis) | Anti-spam protection |
 
 ### Domain 5 — Notifications & Engagement
@@ -227,33 +227,43 @@ service-name/
 
 ---
 
-## Current Status (as of Apr 10)
+## Current Status (as of Apr 16)
 
-**6 of 7 CDK stacks deployed to AWS.** See [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md) for full details.
+**All 7 CDK stacks deployed. Frontend live on Vercel.** See [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md) for full details.
 
 | Stack | Status |
 |-------|--------|
 | SharedStack | Deployed |
 | Domain 1 — Identity | Deployed |
 | Domain 2 — Discovery | Deployed |
-| Domain 3 — Messaging | Blocked (Issue #83) |
+| Domain 3 — Messaging | Deployed (#83 resolved) |
 | Domain 4 — Moderation | Deployed |
 | Domain 5 — Notifications | Deployed |
 | Domain 6 — Analytics | Deployed |
 
+**Live demo:** https://frontend-hazel-two-58.vercel.app
 - 49 cross-domain integration tests passing
-- Frontend plan ready ([`frontend/FRONTEND_PLAN.md`](frontend/FRONTEND_PLAN.md))
+- End-to-end flow verified on mobile web: signup → profile → discover → swipe → match → chat
+
+### Sprint 3 highlights (Apr 11–16)
+
+- **Account lifecycle**: full cascade on `user.deleted` across all 6 domains (#111, #113)
+- **Ban pipeline**: auto-ban at 2 distinct reports (#114) with cascade across matches, messages, and recommendation cache (#119)
+- **Image moderation**: live end-to-end with AWS Rekognition — uploads go through D4 before landing in the discovery pool; inappropriate content surfaces a rejection dialog in the UI
+- **Image normalization**: WebP/HEIC uploads auto-converted to JPEG client-side so Rekognition can always scan them
+- **BaZi scoring**: bidirectional compatibility (你→ta and ta→你) visualized as a yin-yang dual-ring badge
+- **Open issues for follow-up**: ban notification email (#120), ban-then-resignup loophole (#121), API Gateway stage auto-redeploy on imported API (#118)
 
 ---
 
 ## Timeline
 
-| Week | Milestone |
-|------|-----------|
-| Week 1 (Apr 1–6) | API contracts, Lambda scaffolding |
-| Week 2 (Apr 7–10) | Build, unit test, CDK deploy, integration tests |
-| Week 3 (Apr 11–16) | Frontend, D3 fix, demo prep, slides |
-| **Apr 17** | Presentation & Demo |
+| Week | Milestone | Status |
+|------|-----------|--------|
+| Week 1 (Apr 1–6) | API contracts, Lambda scaffolding | ✅ |
+| Week 2 (Apr 7–10) | Build, unit test, CDK deploy, integration tests | ✅ |
+| Week 3 (Apr 11–16) | Frontend, D3 fix, moderation pipeline, demo prep | ✅ |
+| **Apr 17** | Presentation & Demo | ▶ |
 
 ---
 
