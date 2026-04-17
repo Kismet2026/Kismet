@@ -1,3 +1,4 @@
+import html
 import json
 import os
 import boto3
@@ -202,6 +203,9 @@ def on_message_sent(detail):
 def on_profile_banned(detail):
     """Send suspension notice to banned user and audit email to admin."""
     user_id = detail.get("userId", "")
+    if not user_id:
+        print("[WARN] profile.banned event missing userId")
+        return {"statusCode": 400}
     reason = detail.get("reason", "unknown")
     report_id = detail.get("reportId", "")
     timestamp = detail.get("timestamp", datetime.now(timezone.utc).isoformat())
@@ -368,6 +372,8 @@ def send_ses_email(recipient, subject, body_text, body_html=None):
 def render_template(template_name, data):
     """Render an HTML email template. In production, use SES templates or
     a templating engine. For now, return simple HTML."""
+    # HTML-escape all data values to prevent injection via upstream event fields.
+    data = {k: html.escape(str(v)) for k, v in data.items()}
     templates = {
         "welcome": (
             '<div style="background:#1a0e15;padding:48px 20px;font-family:Georgia,\'Times New Roman\',serif;">'

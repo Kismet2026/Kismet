@@ -341,7 +341,15 @@ class TestOnWeeklyDigest:
 # ---------------------------------------------------------------------------
 
 class TestOnProfileBanned:
-    def test_sends_notice_and_audit_when_email_known(self, aws_resources):
+    def test_sends_notice_and_audit_when_email_known(self, aws_resources, monkeypatch):
+        calls = []
+        monkeypatch.setattr(
+            lambda_function,
+            "send_ses_email",
+            lambda recipient, subject, body_text, body_html=None: calls.append(
+                {"recipient": recipient, "subject": subject}
+            ),
+        )
         seed_preferences(aws_resources, "user-banned")
         event = eb_event("kismet.profile-service", "profile.banned", {
             "userId": "user-banned",
@@ -351,9 +359,25 @@ class TestOnProfileBanned:
         })
         result = lambda_function.handler(event, {})
         assert result["statusCode"] == 200
+        # Two emails must fire: suspension notice to user + audit to admin
+        assert len(calls) == 2
+        recipients = [c["recipient"] for c in calls]
+        assert "user-banned@example.com" in recipients
+        assert "admin@kismet.app" in recipients
+        subjects = [c["subject"] for c in calls]
+        assert any("suspended" in s.lower() for s in subjects)
+        assert any("admin" in s.lower() for s in subjects)
 
-    def test_sends_audit_even_when_user_email_missing(self, aws_resources):
+    def test_sends_audit_even_when_user_email_missing(self, aws_resources, monkeypatch):
         # No prefs row — user email unknown, but admin audit must still fire
+        calls = []
+        monkeypatch.setattr(
+            lambda_function,
+            "send_ses_email",
+            lambda recipient, subject, body_text, body_html=None: calls.append(
+                {"recipient": recipient, "subject": subject}
+            ),
+        )
         event = eb_event("kismet.profile-service", "profile.banned", {
             "userId": "user-no-prefs",
             "reason": "harassment",
@@ -362,14 +386,46 @@ class TestOnProfileBanned:
         })
         result = lambda_function.handler(event, {})
         assert result["statusCode"] == 200
+        # Only the admin audit email fires; no user email because prefs are absent
+        assert len(calls) == 1
+        assert calls[0]["recipient"] == "admin@kismet.app"
+        assert "admin" in calls[0]["subject"].lower()
 
-    def test_handles_missing_optional_fields(self, aws_resources):
+    def test_handles_missing_optional_fields(self, aws_resources, monkeypatch):
+        calls = []
+        monkeypatch.setattr(
+            lambda_function,
+            "send_ses_email",
+            lambda recipient, subject, body_text, body_html=None: calls.append(
+                {"recipient": recipient, "subject": subject}
+            ),
+        )
         seed_preferences(aws_resources, "user-banned2")
         event = eb_event("kismet.profile-service", "profile.banned", {
             "userId": "user-banned2",
         })
         result = lambda_function.handler(event, {})
         assert result["statusCode"] == 200
+        # Both emails fire because the user has an email on record
+        assert len(calls) == 2
+
+    def test_returns_400_when_userId_missing(self, aws_resources, monkeypatch):
+        calls = []
+        monkeypatch.setattr(
+            lambda_function,
+            "send_ses_email",
+            lambda recipient, subject, body_text, body_html=None: calls.append(
+                {"recipient": recipient, "subject": subject}
+            ),
+        )
+        event = eb_event("kismet.profile-service", "profile.banned", {
+            "reason": "spam",
+            "reportId": "report-003",
+        })
+        result = lambda_function.handler(event, {})
+        assert result["statusCode"] == 400
+        # No emails should fire when userId is missing
+        assert len(calls) == 0
 
 
 # ---------------------------------------------------------------------------
