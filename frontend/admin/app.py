@@ -110,12 +110,11 @@ with tab1:
     if err:
         st.error(f"Failed to load stats: {err}")
     else:
-        cols = st.columns(5)
+        cols = st.columns(4)
         cols[0].metric("Total Users", data["totalUsers"])
         cols[1].metric("Active Users", data["activeUsers"])
         cols[2].metric("Matches Today", data["matchesToday"])
-        cols[3].metric("Messages Today", data["messagesToday"])
-        cols[4].metric("Flagged Content", data["flaggedContentCount"])
+        cols[3].metric("Flagged Content", data["flaggedContentCount"])
         st.caption(f"Generated at: {to_pt(data.get('generatedAt', ''))}")
 
 # ─── Tab 2: Flagged Content ───────────────────────────────────────────────────
