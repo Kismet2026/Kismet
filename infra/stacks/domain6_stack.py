@@ -182,7 +182,7 @@ class Domain6Stack(cdk.Stack):
                 {"method": "PUT", "path": "/admin/users/{userId}/unban", "auth": True},
             ],
             consume_events=["content.flagged", "user.reported"],
-            publish_events=False,
+            publish_events=True,
             extra_policies=[
                 iam.PolicyStatement(
                     actions=[

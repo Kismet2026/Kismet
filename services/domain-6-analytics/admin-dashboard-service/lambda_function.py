@@ -7,6 +7,7 @@ from decimal import Decimal
 import boto3
 
 dynamodb = boto3.resource("dynamodb")
+events_client = boto3.client("events")
 
 ADMIN_STATS_TABLE = os.environ.get("ADMIN_STATS_TABLE", "kismet-admin-stats")
 FLAGGED_CONTENT_TABLE = os.environ.get(
@@ -15,6 +16,7 @@ FLAGGED_CONTENT_TABLE = os.environ.get(
 # Cross-service: kismet-profiles is owned by domain-1 (Quinn).
 # The CDK stack must grant this Lambda read/write access to kismet-profiles.
 PROFILES_TABLE = os.environ.get("PROFILES_TABLE", "kismet-profiles")
+EVENT_BUS_NAME = os.environ.get("EVENT_BUS_NAME", "kismet-events")
 
 
 def _response(status_code, body):
@@ -206,7 +208,9 @@ def resolve_flagged_content(event, context):
     if action == "ban_user":
         content_owner = existing["Item"].get("userId")
         if content_owner:
-            _ban_user_in_profiles(content_owner, admin_id, resolved_at)
+            ban_result = _ban_user_in_profiles(content_owner, admin_id, resolved_at)
+            if ban_result == "ok":
+                _publish_user_banned(content_owner, admin_id, resolved_at)
 
     # Decrement flaggedContentCount stat
     _update_stat("flaggedContentCount", -1)
@@ -294,6 +298,8 @@ def ban_user(event, context):
         return _response(
             409, {"error": "CONFLICT", "message": "User is already banned"}
         )
+
+    _publish_user_banned(user_id, admin_id, banned_at)
 
     return _response(
         200,
@@ -413,6 +419,24 @@ def handle_user_reported(event):
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
+
+def _publish_user_banned(user_id: str, admin_id: str, banned_at: str):
+    """Publish user.banned to EventBridge so D1/D2/D3 cascade runs."""
+    events_client.put_events(
+        Entries=[
+            {
+                "Source": "kismet.admin-dashboard",
+                "DetailType": "user.banned",
+                "EventBusName": EVENT_BUS_NAME,
+                "Detail": json.dumps({
+                    "userId": user_id,
+                    "bannedBy": admin_id,
+                    "bannedAt": banned_at,
+                }),
+            }
+        ]
+    )
 
 
 def _update_stat(stat_name: str, delta: int):
