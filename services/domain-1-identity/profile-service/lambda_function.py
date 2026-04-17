@@ -204,6 +204,8 @@ def handle_delete(caller_id: str, user_id: str) -> Dict[str, Any]:
     existing = table.get_item(
         Key={"PK": f"USER#{user_id}", "SK": "PROFILE"},
         ConsistentRead=True,
+        ProjectionExpression="#status",
+        ExpressionAttributeNames={"#status": "status"},
     )
     is_banned = existing.get("Item", {}).get("status") == "banned"
 
