@@ -3,7 +3,7 @@ from constructs import Construct
 from aws_cdk import aws_events as events, aws_iam as iam, aws_apigateway as apigateway
 
 from stacks.shared_stack import SharedStack
-from kismet_constructs.kismet_service import KismetService
+from kismet_constructs.kismet_service import KismetService, synth_stage_redeploy
 
 
 class Domain1Stack(cdk.Stack):
@@ -100,9 +100,14 @@ class Domain1Stack(cdk.Stack):
                 "COGNITO_USER_POOL_ID": shared.user_pool.user_pool_id,
             },
             extra_policies=[
-                # Profile delete needs to remove the Cognito user
+                # Profile delete needs to remove or disable the Cognito user:
+                # - active users: AdminDeleteUser (frees the email)
+                # - banned users: AdminDisableUser (freezes the email to prevent re-registration)
                 iam.PolicyStatement(
-                    actions=["cognito-idp:AdminDeleteUser"],
+                    actions=[
+                        "cognito-idp:AdminDeleteUser",
+                        "cognito-idp:AdminDisableUser",
+                    ],
                     resources=[shared.user_pool.user_pool_arn],
                 ),
             ],
@@ -160,4 +165,5 @@ class Domain1Stack(cdk.Stack):
             event_bus=event_bus,
         )
 
-
+        # Force API Gateway dev stage to redeploy when routes change (issue #118)
+        synth_stage_redeploy(self, api=imported_api)

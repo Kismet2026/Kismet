@@ -24,7 +24,7 @@ Handles Cognito-backed sign-up, email confirmation, login, token refresh, and lo
 **Request:**
 ```json
 {
-  "email": "student@university.edu",
+  "email": "alice@example.com",
   "password": "SecureP@ss123",
   "birthDate": "1999-05-15",
   "birthTime": "14:30"
@@ -34,7 +34,7 @@ Handles Cognito-backed sign-up, email confirmation, login, token refresh, and lo
 ```json
 {
   "userId": "user-123",
-  "email": "student@university.edu",
+  "email": "alice@example.com",
   "createdAt": "2026-04-01T12:00:00Z"
 }
 ```
@@ -43,7 +43,7 @@ Handles Cognito-backed sign-up, email confirmation, login, token refresh, and lo
 **Request:**
 ```json
 {
-  "email": "student@university.edu",
+  "email": "alice@example.com",
   "password": "SecureP@ss123"
 }
 ```
@@ -61,7 +61,7 @@ Handles Cognito-backed sign-up, email confirmation, login, token refresh, and lo
 **Request:**
 ```json
 {
-  "email": "student@university.edu",
+  "email": "alice@example.com",
   "code": "123456"
 }
 ```

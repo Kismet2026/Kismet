@@ -1,6 +1,6 @@
 # Report Service — API Contract
 
-**Owner:** Amber
+**Owner:** Xinyuan Fan (Amber)
 **Domain:** Safety & Moderation
 **Base Path:** `/reports`
 **AWS Services:** Lambda, DynamoDB, SES

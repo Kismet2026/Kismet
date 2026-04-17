@@ -17,6 +17,8 @@ FLAGGED_CONTENT_TABLE = os.environ.get(
 # The CDK stack must grant this Lambda read/write access to kismet-profiles.
 PROFILES_TABLE = os.environ.get("PROFILES_TABLE", "kismet-profiles")
 EVENT_BUS_NAME = os.environ.get("EVENT_BUS_NAME", "kismet-events")
+ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "admin@kismet.com")
+ADMIN_GROUP_NAMES = {"admin", "admins"}
 
 
 def _response(status_code, body):
@@ -45,12 +47,53 @@ def _decode_cursor(cursor: str) -> dict:
 
 
 def _get_admin_id(event) -> str:
-    return (
-        event.get("requestContext", {})
-        .get("authorizer", {})
-        .get("claims", {})
-        .get("sub", "unknown")
-    )
+    return extract_claims(event).get("sub", "unknown")
+
+
+def extract_claims(event) -> dict:
+    request_context = event.get("requestContext") or {}
+    authorizer = request_context.get("authorizer")
+    if not isinstance(authorizer, dict):
+        return {}
+
+    claims = authorizer.get("claims")
+    if isinstance(claims, dict):
+        return claims
+
+    jwt = authorizer.get("jwt")
+    if isinstance(jwt, dict) and isinstance(jwt.get("claims"), dict):
+        return jwt["claims"]
+
+    return {}
+
+
+def _parse_groups(raw) -> set:
+    if raw is None:
+        return set()
+    if isinstance(raw, list):
+        return {str(group).strip() for group in raw if str(group).strip()}
+    if isinstance(raw, str):
+        value = raw.strip()
+        if not value:
+            return set()
+        if value.startswith("["):
+            try:
+                parsed = json.loads(value)
+                if isinstance(parsed, list):
+                    return {str(group).strip() for group in parsed if str(group).strip()}
+            except json.JSONDecodeError:
+                pass
+        return {group.strip() for group in value.replace(",", " ").split() if group.strip()}
+    return set()
+
+
+def _is_admin(claims: dict) -> bool:
+    groups = _parse_groups(claims.get("cognito:groups"))
+    if groups & ADMIN_GROUP_NAMES:
+        return True
+
+    email = (claims.get("email") or claims.get("cognito:username") or "").strip().lower()
+    return email == ADMIN_EMAIL.lower()
 
 
 def handler(event, context):
@@ -65,6 +108,10 @@ def handler(event, context):
 
     method = event.get("httpMethod", "")
     resource = event.get("resource", "")
+    claims = extract_claims(event)
+
+    if not _is_admin(claims):
+        return _response(403, {"error": "FORBIDDEN", "message": "Admin access required"})
 
     routes = {
         ("GET", "/admin/stats"): get_stats,

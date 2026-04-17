@@ -12,7 +12,7 @@ from aws_cdk import (
 )
 
 from stacks.shared_stack import SharedStack
-from kismet_constructs.kismet_service import KismetService
+from kismet_constructs.kismet_service import KismetService, synth_stage_redeploy
 
 
 class Domain3Stack(cdk.Stack):
@@ -294,3 +294,6 @@ class Domain3Stack(cdk.Stack):
             "TABLE_NAME", icebreaker_service.tables[0].table_name
         )
         matches_table.grant_read_data(icebreaker_service.function)
+
+        # Force API Gateway dev stage to redeploy when routes change (issue #118)
+        synth_stage_redeploy(self, api=imported_api)

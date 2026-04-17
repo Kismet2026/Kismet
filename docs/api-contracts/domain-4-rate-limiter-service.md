@@ -1,6 +1,6 @@
 # Rate Limiter Service — API Contract
 
-**Owner:** Amber
+**Owner:** Xinyuan Fan (Amber)
 **Domain:** Safety & Moderation
 **Base Path:** N/A (middleware, not directly called)
 **AWS Services:** API Gateway, ElastiCache (Redis)

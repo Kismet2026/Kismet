@@ -42,10 +42,10 @@ A microservice dating app built on AWS — with BaZi (八字) compatibility matc
 
 | Domain | Members | Services |
 |--------|---------|----------|
-| **Identity & Profiles** | Quinn Gao, KS | Auth, Profile, Photo, Email Verification |
+| **Identity & Profiles** | Quinn Gao, KS | Auth, Profile, Photo |
 | **Discovery & Matching** | Qinyuan | Discovery, Swipe, Match, Recommendation, BaZi |
 | **Messaging** | Parker, QX, Jiaxin | Chat Gateway, Message, Presence, Icebreaker |
-| **Safety & Moderation** | Yue, Amber | Text Moderation, Image Moderation, Report, Rate Limiter |
+| **Safety & Moderation** | Yue, Xinyuan Fan (Amber) | Text Moderation, Image Moderation, Report, Rate Limiter |
 | **Notifications** | Nili, Xiaoyuan | Push Notification, Email, Event Bus, Scheduler |
 | **Analytics & Admin** | Jessica, Lingyun | Activity Logger, Analytics Pipeline, Admin Dashboard, Health Monitor |
 | **Integration** | Qinyuan | Cross-domain service orchestration |
@@ -62,7 +62,6 @@ A microservice dating app built on AWS — with BaZi (八字) compatibility matc
 | Auth Service | Quinn Gao | Cognito, Lambda | Sign up, login, JWT tokens |
 | Profile Service | Quinn Gao | Lambda, DynamoDB | CRUD for user profiles |
 | Photo Service | KS | S3, Lambda, CloudFront | Upload, resize, serve photos |
-| Email Verification | KS | SES, Lambda, Cognito | .edu email verification |
 
 ### Domain 2 — Discovery & Matching
 
@@ -78,7 +77,7 @@ A microservice dating app built on AWS — with BaZi (八字) compatibility matc
 
 | Service | Owner | AWS Services | Description |
 |---------|-------|-------------|-------------|
-| Chat Gateway | Parker | API Gateway WebSocket, Lambda | Real-time message routing |
+| Chat Gateway | Parker, Jiaxin | API Gateway WebSocket, Lambda | Real-time message routing |
 | Message Service | Parker | Lambda, DynamoDB | Persist and retrieve chats |
 | Presence Service | QX | DynamoDB, Lambda | Online/offline/typing status |
 | Icebreaker Service | Jiaxin | Bedrock, Lambda | AI conversation starters |
@@ -89,8 +88,8 @@ A microservice dating app built on AWS — with BaZi (八字) compatibility matc
 |---------|-------|-------------|-------------|
 | Text Moderation | Yue | Comprehend, Lambda | Flag toxic content |
 | Image Moderation | Yue | Rekognition, Lambda, S3 | Scan uploads; flag nudity/violence/weapons |
-| Report Service | Amber | Lambda, DynamoDB, SES, EventBridge | User reports → admin email + auto-ban at threshold |
-| Rate Limiter | Amber | API Gateway, ElastiCache (Redis) | Anti-spam protection |
+| Report Service | Xinyuan Fan (Amber) | Lambda, DynamoDB, SES, EventBridge | User reports → admin email + auto-ban at threshold |
+| Rate Limiter | Xinyuan Fan (Amber) | API Gateway, ElastiCache (Redis) | Anti-spam protection |
 
 ### Domain 5 — Notifications & Engagement
 
@@ -175,8 +174,7 @@ kismet/
 │   ├── domain-1-identity/
 │   │   ├── auth-service/
 │   │   ├── profile-service/
-│   │   ├── photo-service/
-│   │   └── email-verification-service/
+│   │   └── photo-service/
 │   ├── domain-2-discovery/
 │   │   ├── discovery-service/
 │   │   ├── swipe-service/

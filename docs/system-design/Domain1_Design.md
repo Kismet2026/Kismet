@@ -1,6 +1,6 @@
 # Domain 1 — Identity & Profiles
 
-> Detailed design for the auth, profile, photo, and email-verification services.
+> Detailed design for the auth, profile, and photo services.
 > Source of truth: [`infra/stacks/domain1_stack.py`](../../infra/stacks/domain1_stack.py) + [`services/domain-1-identity/`](../../services/domain-1-identity/)
 > Last verified: Apr 16, 2026
 
@@ -8,7 +8,7 @@
 
 ## 1. Purpose
 
-Domain 1 is the "front door" of Kismet — it owns **who a user is, how they log in, what their profile looks like, and which photos they've uploaded**. Three Lambda services are wired into the shared REST API via `Domain1Stack`: Auth, Profile, and Photo. A fourth service, Email Verification, lives in-tree but is not currently provisioned by the stack (see §8).
+Domain 1 is the "front door" of Kismet — it owns **who a user is, how they log in, what their profile looks like, and which photos they've uploaded**. Three Lambda services are wired into the shared REST API via `Domain1Stack`: Auth, Profile, and Photo. Cognito's built-in auto-verification handles email confirmation at signup, so no separate verification service is needed. (An `email-verification-service/` directory exists in-tree as legacy code but is not provisioned — see §8.)
 
 Downstream, D1 publishes the lifecycle events that every other domain keys off: `user.created`, `profile.completed`, `profile.updated`, `profile.banned`, `user.deleted`, and `photo.uploaded`. Upstream, D1 consumes `user.banned` from D4 (re-emitted as `profile.banned`) and — for the Photo service — its own `user.deleted` fan-out.
 
@@ -131,22 +131,9 @@ The confirm endpoint exists because **D4 image-moderation needs a stable S3 obje
 - `PUT /photos/{photoId}/primary` unsets any existing primary, sets the target, then mirrors `avatarUrl` into `kismet-profiles` and `kismet-discovery` (both guarded with `ConditionExpression: attribute_exists(PK)` so it's a no-op if the row isn't there yet).
 - `DELETE` of the primary promotes the most-recent remaining photo (by `uploadedAt`) so the user is never left avatar-less with photos still on file.
 
-### 3.4 Email Verification Service
+### 3.4 Email Verification (Cognito built-in)
 
-| | |
-|---|---|
-| **Entry** | `POST /verify/send`, `POST /verify/confirm`, `GET /verify/status` |
-| **Table** | `kismet-verifications` (PK `EMAIL#{email}`, SK `LATEST`) |
-| **Consumes events** | none |
-| **Publishes** | none |
-
-SES-based flow for gating signup to `.edu` addresses:
-
-1. `POST /verify/send` — rejects non-`.edu` emails, generates a 6-digit code with `secrets.choice`, writes a row with a 10-minute TTL, and sends the code via `ses.send_email` from `SES_SOURCE_EMAIL`.
-2. `POST /verify/confirm` — validates the code, flips `verified=true`, extends TTL to 30 days, removes the `code` attribute, and best-effort pushes `email_verified=true` to Cognito via `admin_update_user_attributes`. DynamoDB is source of truth; Cognito sync failure only logs a warning.
-3. `GET /verify/status` — reads from JWT `email` claim (falls back to `?email=` for local dev).
-
-**Not yet wired into `domain1_stack.py`.** The Lambda code and API contract exist, but the CDK service block, SES identity, and DynamoDB table provisioning are still open. Referenced here for completeness; currently dead code at deploy time.
+No standalone service — Cognito's user pool is configured with `auto_verify=cognito.AutoVerifiedAttrs(email=True)` in `SharedStack`, which triggers the built-in confirmation-code email at signup. A legacy `email-verification-service/` directory exists in the repo from an earlier design iteration but is **not wired into any CDK stack**, has no API Gateway routes, and no DynamoDB table is provisioned for it. Not dead code so much as "moved into Cognito." Safe to delete.
 
 ---
 
@@ -157,7 +144,6 @@ SES-based flow for gating signup to `.edu` addresses:
 | `kismet-users` | Auth | `USER#{userId}` / `METADATA` | ~N users | denormalization of Cognito `sub`; small, rarely read |
 | `kismet-profiles` | Profile | `USER#{userId}` / `PROFILE` | ~N users | canonical profile doc; `status ∈ {active, banned}` |
 | `kismet-photos` | Photo | `USER#{userId}` / `PHOTO#{photoId}` | ≤ 6·N | `status ∈ {pending, active, rejected}`; one row per upload |
-| `kismet-verifications` | Email Verification | `EMAIL#{email}` / `LATEST` | ≤ N | DynamoDB TTL reaps expired codes; not yet provisioned |
 
 All tables use on-demand billing. No GSIs — every access pattern is direct-key or a single-PK Query.
 
@@ -261,7 +247,6 @@ If the EventBridge publish fails, the handler returns 500 and the client can saf
 | Auth | Cognito User Pool | source of identity |
 | Profile | Cognito `AdminDeleteUser` | self-service account deletion frees the email |
 | Photo | S3 `PutObject`/`GetObject`/`DeleteObject`, `kismet-profiles` (write), `kismet-discovery` (write) | presigned URLs; avatarUrl mirroring |
-| Email Verification | Cognito `AdminUpdateUserAttributes`, SES | flip `email_verified`; send code |
 
 Cross-domain writes are deliberately one-way and guarded with `ConditionExpression: attribute_exists(PK)` so Photo-service can't create phantom rows in tables it doesn't own.
 
@@ -269,22 +254,20 @@ Cross-domain writes are deliberately one-way and guarded with `ConditionExpressi
 
 ## 7. Known Gotchas
 
-1. **Banned-user re-registration loophole** (#121). `handle_delete` calls `cognito.admin_delete_user`, which removes the user from the Cognito pool entirely. A banned user who hits `DELETE /profiles/me` has their Cognito record wiped and can immediately re-signup with the same email — stepping around the ban. Fix under discussion: either skip Cognito delete when `status == banned`, or flip the account to `DISABLED` instead.
+1. **Banned-user re-registration loophole** (#121, resolved by #124). `handle_delete` previously called `admin_delete_user` unconditionally, so a banned user could wipe their Cognito record and re-signup. Now: banned → `admin_disable_user` + tombstone row (email frozen); active → `admin_delete_user` + delete row (email freed).
 2. **No ban notification** (#120). Users currently learn they've been banned only when their next login fails or their profile 404s. `profile.banned` has no D5 consumer yet; adding one is tracked.
-3. **API Gateway stage doesn't auto-redeploy on imported-API route changes** (#118). When `POST /photos/{photoId}/confirm` was added in #112, `cdk deploy KismetDomain1` created the Resource and Method but the `dev` stage kept serving the old route set. Manual `aws apigateway create-deployment --rest-api-id ... --stage-name dev` published it. Same class of bug as D2 hit in #118; infra-level fix still open.
+3. **API Gateway stage doesn't auto-redeploy on imported-API route changes** (#118, resolved by #131). When `POST /photos/{photoId}/confirm` was added in #112, `cdk deploy KismetDomain1` created the Resource and Method but the `dev` stage kept serving the old route set. The new `synth_stage_redeploy` helper ensures every route change emits a fresh Deployment; see the 2026-04-16 postmortem.
 4. **Rekognition rejects WebP/HEIC.** `ALLOWED_CONTENT_TYPES` at upload includes `image/webp` because the frontend supports it in the picker, but D4 moderation can only scan JPEG/PNG. The frontend now normalizes WebP/HEIC to JPEG client-side via `<canvas>` in [`frontend/src/lib/imageUtils.ts`](../../frontend/src/lib/imageUtils.ts) before calling `/photos/upload`. If that normalizer regresses, uploads still succeed but moderation silently errors.
-5. **Email verification service is code-only.** `lambda_function.py` is complete and the API contract is published, but `domain1_stack.py` has no block for it — no Lambda, no table, no SES identity. Currently not deployed.
-6. **`kismet-users` is a write-mostly denormalization.** Nothing except Auth signup writes to it, and no D1 route reads it. Kept around so we can detach from Cognito later, but dead weight today.
-7. **Photo service does best-effort S3 cleanup.** `handle_user_deleted` logs a warning and continues if `s3.delete_object` fails — the DynamoDB row is always removed. Orphaned S3 objects accumulate silently on repeated failures; no reconciler yet.
+5. **`kismet-users` is a write-mostly denormalization.** Nothing except Auth signup writes to it, and no D1 route reads it. Kept around so we can detach from Cognito later, but dead weight today.
+6. **Photo service does best-effort S3 cleanup.** `handle_user_deleted` logs a warning and continues if `s3.delete_object` fails — the DynamoDB row is always removed. Orphaned S3 objects accumulate silently on repeated failures; no reconciler yet.
+7. **Legacy `email-verification-service/` directory.** Self-rolled SES verification flow from an earlier design; superseded by Cognito's built-in `auto_verify`. The code is in-tree but has no CDK block, table, or SES identity. Safe to delete when someone has the cycles.
 
 ---
 
 ## 8. Open Follow-ups
 
-- **#118** — CDK: imported API Gateway stage auto-redeploy (blocks D1 route additions from landing cleanly)
 - **#120** — Ban notification email (wire D5 to `profile.banned`; user learns why account is restricted)
-- **#121** — Banned-user re-registration loophole (fix `handle_delete` to skip / soft-disable Cognito when banned)
-- **Email Verification stack wiring** — provision the Lambda, table, SES identity, and routes in `domain1_stack.py`
+- **Retire legacy `email-verification-service/`** — delete the directory and the `domain-1-email-verification-service.md` contract; Cognito auto-verify supersedes it
 - **Orphaned S3 reconciler** — periodic job to diff bucket keys against `kismet-photos` rows
 - **`kismet-users`** — decide whether to keep as write-mostly denormalization or retire
 
@@ -292,7 +275,7 @@ Cross-domain writes are deliberately one-way and guarded with `ConditionExpressi
 
 ## 9. References
 
-- API contracts: [`docs/api-contracts/domain-1-auth-service.md`](../api-contracts/domain-1-auth-service.md), [`domain-1-profile-service.md`](../api-contracts/domain-1-profile-service.md), [`domain-1-photo-service.md`](../api-contracts/domain-1-photo-service.md), [`domain-1-email-verification-service.md`](../api-contracts/domain-1-email-verification-service.md)
+- API contracts: [`docs/api-contracts/domain-1-auth-service.md`](../api-contracts/domain-1-auth-service.md), [`domain-1-profile-service.md`](../api-contracts/domain-1-profile-service.md), [`domain-1-photo-service.md`](../api-contracts/domain-1-photo-service.md)
 - Event shapes: [`event-schema.json`](./event-schema.json)
 - Shared infra (Cognito user pool, REST API, S3 bucket, CloudFront): [`shared_stack.py`](../../infra/stacks/shared_stack.py)
 - Reusable Lambda + DDB + route + IAM construct: [`kismet_constructs/kismet_service.py`](../../infra/kismet_constructs/kismet_service.py)
