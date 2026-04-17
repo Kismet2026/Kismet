@@ -42,7 +42,7 @@ https://ugt4knycyj.execute-api.us-east-1.amazonaws.com/dev/
 | D1 Identity | `POST /auth/signup`, `POST /auth/confirm`, `POST /auth/login`, `POST /auth/refresh`, `POST /auth/logout`, `GET/PUT/DELETE /profiles/{userId}`, `POST /profiles`, `POST /photos/upload`, `GET /users/{userId}/photos`, `DELETE /photos/{photoId}`, `PUT /photos/{photoId}/primary` |
 | D2 Discovery | `GET /discovery`, `GET /recommend`, `GET /bazi/top-matches`, `POST /swipe`, `GET /swipe/history`, `GET /matches`, `GET /matches/{matchId}` |
 | D3 Messaging | `POST /messages`, `POST /messages/read`, `GET /messages/match/{matchId}`, `DELETE /messages/{messageId}`, `POST /presence/heartbeat`, `GET /presence/user/{userId}`, `POST /presence/{matchId}/typing`, `GET /presence/{matchId}/typing`, `POST /icebreaker/generate`, `GET /icebreaker/{matchId}` |
-| D4 Moderation | `POST /reports`, `POST /moderate/text`, `POST /moderate/image`, `GET /ratelimit/status/{userId}` |
+| D4 Moderation | `POST /reports`, `GET /reports`, `GET /reports/{reportId}`, `PUT /reports/{reportId}/resolve`, `POST /moderate/text`, `POST /moderate/image`, `GET /ratelimit/status/{userId}`, `POST /ratelimit/reset/{userId}` |
 | D5 Notifications | `GET /notifications`, `GET /notifications/unread-count`, `GET/PUT /email/preferences` |
 | D6 Analytics | `POST /analytics/log`, `GET /admin/stats`, `GET /health` |
 
