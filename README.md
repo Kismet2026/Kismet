@@ -246,7 +246,7 @@ service-name/
 | Domain 5 — Notifications | Deployed |
 | Domain 6 — Analytics | Deployed |
 
-**Live demo:** https://frontend-hazel-two-58.vercel.app
+**Live demo:** available on request (URL withheld to limit public exposure)
 - 49 cross-domain integration tests passing
 - End-to-end flow verified on mobile web: signup → profile → discover → swipe → match → chat
 
