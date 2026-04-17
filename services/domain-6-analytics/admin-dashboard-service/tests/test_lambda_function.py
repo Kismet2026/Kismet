@@ -36,6 +36,7 @@ def aws():
                 TableName=tbl, KeySchema=PK_SK,
                 AttributeDefinitions=PK_SK_ATTR, BillingMode="PAY_PER_REQUEST",
             )
+        boto3.client("events", region_name="us-east-1").create_event_bus(Name="kismet-events")
         importlib.reload(lambda_function)
         yield dynamodb
 
