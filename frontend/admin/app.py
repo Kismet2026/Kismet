@@ -95,7 +95,6 @@ if not get_token():
     st.stop()
 
 
-st.info("📌 Note: Stats and activity data reflect real user actions only. Test accounts (test1–test19@kismet.com) are excluded from platform metrics.", icon=None)
 
 tab1, tab2, tab3, tab4, tab5 = st.tabs(
     ["Stats", "Flagged Content", "Users", "Health Monitor", "Analytics Pipeline"]

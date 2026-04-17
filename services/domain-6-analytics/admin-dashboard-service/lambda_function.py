@@ -17,6 +17,8 @@ FLAGGED_CONTENT_TABLE = os.environ.get(
 # Cross-service: kismet-profiles is owned by domain-1 (Quinn).
 # The CDK stack must grant this Lambda read/write access to kismet-profiles.
 PROFILES_TABLE = os.environ.get("PROFILES_TABLE", "kismet-profiles")
+MATCHES_TABLE = os.environ.get("MATCHES_TABLE", "kismet-matches")
+MESSAGES_TABLE = os.environ.get("MESSAGES_TABLE", "kismet-messages")
 EVENT_BUS_NAME = os.environ.get("EVENT_BUS_NAME", "kismet-events")
 ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "admin@kismet.com")
 ADMIN_GROUP_NAMES = {"admin", "admins"}
@@ -144,30 +146,84 @@ def handler(event, context):
 
 # GET /admin/stats
 def get_stats(event, context):
-    stat_keys = [
-        "totalUsers",
-        "activeUsers",
-        "matchesToday",
-        "messagesToday",
-        "flaggedContentCount",
-    ]
+    profiles_table = dynamodb.Table(PROFILES_TABLE)
+    flagged_table = dynamodb.Table(FLAGGED_CONTENT_TABLE)
 
-    # Batch-read all stats in one call (each stored at SK=LATEST)
-    keys = [{"PK": f"STAT#{k}", "SK": "LATEST"} for k in stat_keys]
-    response = dynamodb.batch_get_item(RequestItems={ADMIN_STATS_TABLE: {"Keys": keys}})
-    items = {
-        item["PK"].split("#")[1]: item.get("value", 0)
-        for item in response["Responses"].get(ADMIN_STATS_TABLE, [])
+    # Live count from kismet-profiles
+    total_users = 0
+    active_users = 0
+    profile_kwargs = {
+        "FilterExpression": "SK = :sk",
+        "ExpressionAttributeValues": {":sk": "PROFILE"},
+        "Select": "ALL_ATTRIBUTES",
     }
+    while True:
+        result = profiles_table.scan(**profile_kwargs)
+        for item in result.get("Items", []):
+            total_users += 1
+            if item.get("status", "active") != "banned":
+                active_users += 1
+        if "LastEvaluatedKey" not in result:
+            break
+        profile_kwargs["ExclusiveStartKey"] = result["LastEvaluatedKey"]
+
+    # Live count from kismet-flagged-content where status=pending
+    flagged_count = 0
+    flagged_kwargs = {
+        "FilterExpression": "#s = :pending",
+        "ExpressionAttributeNames": {"#s": "status"},
+        "ExpressionAttributeValues": {":pending": "pending"},
+        "Select": "COUNT",
+    }
+    while True:
+        result = flagged_table.scan(**flagged_kwargs)
+        flagged_count += result.get("Count", 0)
+        if "LastEvaluatedKey" not in result:
+            break
+        flagged_kwargs["ExclusiveStartKey"] = result["LastEvaluatedKey"]
+
+    # Live count from kismet-matches — only today's matches (SK=META, matchedAt starts with today)
+    today_prefix = datetime.now(timezone.utc).strftime("%Y-%m-%dT")
+    matches_count = 0
+    matches_kwargs = {
+        "FilterExpression": "SK = :meta AND begins_with(PK, :match_pk) AND begins_with(matchedAt, :today)",
+        "ExpressionAttributeValues": {
+            ":meta": "META",
+            ":match_pk": "MATCH#",
+            ":today": today_prefix,
+        },
+        "Select": "COUNT",
+    }
+    while True:
+        result = dynamodb.Table(MATCHES_TABLE).scan(**matches_kwargs)
+        matches_count += result.get("Count", 0)
+        if "LastEvaluatedKey" not in result:
+            break
+        matches_kwargs["ExclusiveStartKey"] = result["LastEvaluatedKey"]
+
+    # Live count from kismet-messages — only today's messages
+    today_prefix = datetime.now(timezone.utc).strftime("%Y-%m-%dT")
+    messages_count = 0
+    messages_kwargs = {
+        "FilterExpression": "begins_with(SK, :today)",
+        "ExpressionAttributeValues": {":today": f"MSG#{today_prefix}"},
+        "Select": "COUNT",
+    }
+    while True:
+        result = dynamodb.Table(MESSAGES_TABLE).scan(**messages_kwargs)
+        messages_count += result.get("Count", 0)
+        if "LastEvaluatedKey" not in result:
+            break
+        messages_kwargs["ExclusiveStartKey"] = result["LastEvaluatedKey"]
 
     return _response(
         200,
         {
-            "totalUsers": int(items.get("totalUsers", 0)),
-            "activeUsers": int(items.get("activeUsers", 0)),
-            "matchesToday": int(items.get("matchesToday", 0)),
-            "messagesToday": int(items.get("messagesToday", 0)),
-            "flaggedContentCount": int(items.get("flaggedContentCount", 0)),
+            "totalUsers": total_users,
+            "activeUsers": active_users,
+            "matchesToday": matches_count,
+            "messagesToday": messages_count,
+            "flaggedContentCount": flagged_count,
             "generatedAt": datetime.now(timezone.utc).isoformat(),
         },
     )
@@ -303,40 +359,38 @@ def get_users(event, context):
     scan_kwargs = {
         "FilterExpression": "SK = :profile",
         "ExpressionAttributeValues": {":profile": "PROFILE"},
-        "Limit": limit,
     }
-
-    if search:
-        scan_kwargs["FilterExpression"] = "SK = :profile AND contains(#name, :search)"
-        scan_kwargs["ExpressionAttributeNames"] = {"#name": "name"}
-        scan_kwargs["ExpressionAttributeValues"] = {
-            ":profile": "PROFILE",
-            ":search": search,
-        }
 
     if cursor:
         scan_kwargs["ExclusiveStartKey"] = _decode_cursor(cursor)
 
-    result = table.scan(**scan_kwargs)
-
     items = []
-    for item in result.get("Items", []):
-        user_id = item["PK"].replace("USER#", "")
-        items.append(
-            {
-                "userId": user_id,
-                "displayName": item.get("name"),
-                "email": item.get(
-                    "email"
-                ),  # email not stored in profile table; None unless populated
-                "status": item.get("status", "active"),
-                "createdAt": item.get("createdAt"),
-                "reportCount": int(item.get("reportCount", 0)),
-            }
+    next_cursor = None
+    while len(items) < limit:
+        result = table.scan(
+            **scan_kwargs,
+            Limit=max(1, limit - len(items)),
         )
 
-    next_cursor = None
-    if "LastEvaluatedKey" in result:
+        for item in result.get("Items", []):
+            name = item.get("name") or ""
+            if search and search not in name.lower():
+                continue
+            user_id = item["PK"].replace("USER#", "")
+            items.append(
+                {
+                    "userId": user_id,
+                    "displayName": name or None,
+                    "email": item.get("email"),
+                    "status": item.get("status", "active"),
+                    "createdAt": item.get("createdAt"),
+                    "reportCount": int(item.get("reportCount", 0)),
+                }
+            )
+
+        if "LastEvaluatedKey" not in result:
+            break
+        scan_kwargs["ExclusiveStartKey"] = result["LastEvaluatedKey"]
         next_cursor = _encode_cursor(result["LastEvaluatedKey"])
 
     return _response(
