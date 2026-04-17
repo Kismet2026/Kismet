@@ -43,13 +43,13 @@ A microservice dating app built on AWS — with BaZi (八字) compatibility matc
 | Domain | Members | Services |
 |--------|---------|----------|
 | **Identity & Profiles** | Quinn Gao, KS | Auth, Profile, Photo |
-| **Discovery & Matching** | Qinyuan | Discovery, Swipe, Match, Recommendation, BaZi |
+| **Discovery & Matching** | Qinyuan Shen | Discovery, Swipe, Match, Recommendation, BaZi |
 | **Messaging** | Parker, QX, Jiaxin | Chat Gateway, Message, Presence, Icebreaker |
 | **Safety & Moderation** | Yue, Xinyuan Fan (Amber) | Text Moderation, Image Moderation, Report, Rate Limiter |
 | **Notifications** | Nili, Xiaoyuan | Push Notification, Email, Event Bus, Scheduler |
-| **Analytics & Admin** | Jessica, Lingyun | Activity Logger, Analytics Pipeline, Admin Dashboard, Health Monitor |
-| **Integration** | Qinyuan | Cross-domain service orchestration |
-| **PM / Frontend** | Qinyuan | Architecture, frontend (AI-generated), coordination |
+| **Analytics & Admin** | Yuyi Zhang, Lingyun | Activity Logger, Analytics Pipeline, Admin Dashboard, Health Monitor |
+| **Integration** | Qinyuan Shen | Cross-domain service orchestration |
+| **PM / Frontend** | Qinyuan Shen | Architecture, frontend (AI-generated), coordination |
 
 ---
 
@@ -67,11 +67,11 @@ A microservice dating app built on AWS — with BaZi (八字) compatibility matc
 
 | Service | Owner | AWS Services | Description |
 |---------|-------|-------------|-------------|
-| Discovery Service | Qinyuan | Lambda, DynamoDB | Filter and browse candidates |
-| Swipe Service | Qinyuan | Lambda, DynamoDB | Record like/pass actions |
-| Match Service | Qinyuan | Lambda, DynamoDB, EventBridge | Detect mutual likes, ban cascade |
-| Recommendation Service | Qinyuan | Lambda, DynamoDB | Score and rank candidates |
-| BaZi Service | Qinyuan | Lambda | 八字 compatibility via external API |
+| Discovery Service | Qinyuan Shen | Lambda, DynamoDB | Filter and browse candidates |
+| Swipe Service | Qinyuan Shen | Lambda, DynamoDB | Record like/pass actions |
+| Match Service | Qinyuan Shen | Lambda, DynamoDB, EventBridge | Detect mutual likes, ban cascade |
+| Recommendation Service | Qinyuan Shen | Lambda, DynamoDB | Score and rank candidates |
+| BaZi Service | Qinyuan Shen | Lambda | 八字 compatibility via external API |
 
 ### Domain 3 — Messaging
 
@@ -104,8 +104,8 @@ A microservice dating app built on AWS — with BaZi (八字) compatibility matc
 
 | Service | Owner | AWS Services | Description |
 |---------|-------|-------------|-------------|
-| Activity Logger | Jessica | Kinesis Data Streams, Lambda | Capture user events |
-| Analytics Pipeline | Jessica | Kinesis Firehose, S3, Athena | Queryable data lake |
+| Activity Logger | Yuyi Zhang | Kinesis Data Streams, Lambda | Capture user events |
+| Analytics Pipeline | Yuyi Zhang | Kinesis Firehose, S3, Athena | Queryable data lake |
 | Admin Dashboard | Lingyun | Lambda, DynamoDB, Streamlit (SCC) | Stats, flagged content; Streamlit UI on Streamlit Community Cloud |
 | Health Monitor | Lingyun | CloudWatch, Lambda, SNS | Service health alerts |
 
