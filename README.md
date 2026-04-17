@@ -145,6 +145,13 @@ kismet/
 │   ├── api-contracts/                ← one API contract per service (25 files)
 │   ├── system-design/
 │   │   ├── Design_Doc.md             ← high-level architecture & decisions
+│   │   ├── SharedStack_Design.md     ← deep dive: shared foundation (Cognito/API GW/EventBus/S3/CDN)
+│   │   ├── Domain1_Design.md         ← deep dive: Identity & Profiles
+│   │   ├── Domain2_Design.md         ← deep dive: Discovery & Matching
+│   │   ├── Domain3_Design.md         ← deep dive: Messaging
+│   │   ├── Domain4_Design.md         ← deep dive: Safety & Moderation
+│   │   ├── Domain5_Design.md         ← deep dive: Notifications & Engagement
+│   │   ├── Domain6_Design.md         ← deep dive: Analytics & Admin
 │   │   └── event-schema.json         ← canonical EventBridge event schemas
 │   └── guides/
 │       └── Service_Communication_Guide.md
