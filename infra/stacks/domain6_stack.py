@@ -142,10 +142,11 @@ class Domain6Stack(cdk.Stack):
             ],
             publish_events=False,
             extra_policies=[],
-            environment={
-                "ACTIVITY_LOG_TABLE": "kismet-activity-log",
-                **({"KINESIS_STREAM_NAME": activity_stream.stream_name} if activity_stream is not None else {}),
-            },
+            environment=(
+                {"ACTIVITY_LOG_TABLE": "kismet-activity-log", "KINESIS_STREAM_NAME": activity_stream.stream_name}
+                if activity_stream is not None
+                else {"ACTIVITY_LOG_TABLE": "kismet-activity-log"}
+            ),
             api=imported_api,
             authorizer=shared.authorizer,
             event_bus=event_bus,
