@@ -215,7 +215,7 @@ def on_profile_banned(detail):
         send_ses_email(
             recipient=email,
             subject=get_subject_for_template("ban_notice"),
-            body_text="Your Kismet account has been suspended following review of community reports. If you believe this is a mistake, contact support@kismet.app.",
+            body_text="Your Kismet account has been suspended following a review of community reports. If you believe this is a mistake, contact support@kismet.app.",
             body_html=render_template("ban_notice", {}),
         )
     else:
