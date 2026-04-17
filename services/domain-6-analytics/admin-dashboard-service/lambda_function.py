@@ -26,6 +26,16 @@ class EventPublishError(Exception):
     pass
 
 
+def _event_publish_failed_response():
+    return _response(
+        502,
+        {
+            "error": "EVENT_PUBLISH_FAILED",
+            "message": "Failed to publish user.banned event",
+        },
+    )
+
+
 def _response(status_code, body):
     return {
         "statusCode": status_code,
@@ -265,13 +275,7 @@ def resolve_flagged_content(event, context):
                 try:
                     _publish_user_banned(content_owner, admin_id, resolved_at)
                 except EventPublishError:
-                    return _response(
-                        502,
-                        {
-                            "error": "EVENT_PUBLISH_FAILED",
-                            "message": "Failed to publish user.banned event",
-                        },
-                    )
+                    return _event_publish_failed_response()
 
     # Decrement flaggedContentCount stat
     _update_stat("flaggedContentCount", -1)
@@ -355,19 +359,16 @@ def ban_user(event, context):
 
     if result == "not_found":
         return _response(404, {"error": "NOT_FOUND", "message": "User not found"})
-    if result in ("ok", "already_banned"):
+    if result == "already_banned":
         try:
             _publish_user_banned(user_id, admin_id, banned_at)
         except EventPublishError:
-            return _response(
-                502,
-                {
-                    "error": "EVENT_PUBLISH_FAILED",
-                    "message": "Failed to publish user.banned event",
-                },
-            )
-    if result == "already_banned":
+            return _event_publish_failed_response()
         return _response(409, {"error": "CONFLICT", "message": "User is already banned"})
+    try:
+        _publish_user_banned(user_id, admin_id, banned_at)
+    except EventPublishError:
+        return _event_publish_failed_response()
 
     return _response(
         200,
@@ -508,11 +509,25 @@ def _publish_user_banned(user_id: str, admin_id: str, banned_at: str):
     except ClientError as exc:
         raise EventPublishError("Failed to call EventBridge PutEvents") from exc
 
-    if response.get("FailedEntryCount", 0):
-        raise EventPublishError(f"EventBridge PutEvents failed: {response.get('Entries')}")
-    if not response.get("Entries") or not response["Entries"][0].get("EventId"):
+    entries = response.get("Entries")
+    entries_list = entries if isinstance(entries, list) else []
+    failed_entry_count = response.get("FailedEntryCount", 0)
+    if failed_entry_count > 0:
+        first_entry = entries_list[0] if entries_list else {}
         raise EventPublishError(
-            f"EventBridge PutEvents returned invalid response: {response}"
+            "EventBridge PutEvents failed: "
+            f"ErrorCode={first_entry.get('ErrorCode')}, "
+            f"ErrorMessage={first_entry.get('ErrorMessage')}"
+        )
+    entries_count = len(entries_list)
+    if entries_count != 1:
+        raise EventPublishError(
+            "EventBridge PutEvents returned invalid response: "
+            f"expected 1 entry, got {entries_count}"
+        )
+    if not entries_list[0].get("EventId"):
+        raise EventPublishError(
+            f"EventBridge PutEvents entry missing EventId: {entries_list[0]}"
         )
 
 
