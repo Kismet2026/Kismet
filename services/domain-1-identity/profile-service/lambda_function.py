@@ -95,8 +95,19 @@ def handle_create(user_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
         return _response(400, {"code": "VALIDATION_ERROR", "message": "location is required."})
 
     table = dynamodb.Table(PROFILES_TABLE_NAME)
-    existing = table.get_item(Key={"PK": f"USER#{user_id}", "SK": "PROFILE"})
-    if existing.get("Item"):
+    existing = table.get_item(
+        Key={"PK": f"USER#{user_id}", "SK": "PROFILE"},
+        ConsistentRead=True,
+    )
+    existing_item = existing.get("Item")
+    if existing_item:
+        # Banned users must not be able to re-create a profile — this closes
+        # the loophole where onboarding UI re-triggers after ban (#148).
+        if existing_item.get("status") == "banned":
+            return _response(403, {
+                "code": "FORBIDDEN",
+                "message": "This account has been suspended.",
+            })
         return _response(409, {"code": "CONFLICT", "message": "Profile already exists."})
 
     now = datetime.now(timezone.utc).isoformat()
@@ -147,8 +158,20 @@ def handle_update(caller_id: str, user_id: str, body: Dict[str, Any]) -> Dict[st
         return _response(403, {"code": "FORBIDDEN", "message": "You can only update your own profile."})
 
     table = dynamodb.Table(PROFILES_TABLE_NAME)
-    if not table.get_item(Key={"PK": f"USER#{user_id}", "SK": "PROFILE"}).get("Item"):
+    existing_item = table.get_item(
+        Key={"PK": f"USER#{user_id}", "SK": "PROFILE"},
+        ConsistentRead=True,
+    ).get("Item")
+    if not existing_item:
         return _response(404, {"code": "NOT_FOUND", "message": "Profile not found."})
+    # Banned users cannot update their profile — this would otherwise let a
+    # logged-in banned user change name/bio/photos and effectively keep using
+    # the account (#148).
+    if existing_item.get("status") == "banned":
+        return _response(403, {
+            "code": "FORBIDDEN",
+            "message": "This account has been suspended.",
+        })
 
     updates = {k: json.loads(json.dumps(v), parse_float=Decimal) if isinstance(v, (dict, list, float)) else v
                 for k, v in body.items() if k in UPDATABLE_FIELDS}
@@ -331,6 +354,23 @@ def handle_user_banned(detail: Dict[str, Any]) -> Dict[str, Any]:
             ExpressionAttributeValues=expr_values,
         )
         item = table.get_item(Key={"PK": f"USER#{user_id}", "SK": "PROFILE"}).get("Item", item)
+
+    # Disable the Cognito user so the banned user cannot log in.  Without this,
+    # login still succeeds (Cognito auth isn't tied to DynamoDB profile.status),
+    # and the banned user can hit the onboarding flow to keep using the app.
+    # Closes the loophole described in #148.  Best-effort: DynamoDB is the source
+    # of truth for ban state; a Cognito failure logs a warning but doesn't fail
+    # the handler (so EventBridge doesn't retry forever on a transient error).
+    if COGNITO_USER_POOL_ID:
+        try:
+            cognito.admin_disable_user(
+                UserPoolId=COGNITO_USER_POOL_ID,
+                Username=user_id,
+            )
+        except cognito.exceptions.UserNotFoundException:
+            logger.warning("Cognito user missing while disabling for ban: %s", user_id)
+        except ClientError:
+            logger.exception("Failed to disable Cognito user for ban: %s", user_id)
 
     events.put_events(Entries=[{
         "Source": "kismet.profile-service",
