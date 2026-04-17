@@ -78,7 +78,7 @@ A microservice dating app built on AWS — with BaZi (八字) compatibility matc
 
 | Service | Owner | AWS Services | Description |
 |---------|-------|-------------|-------------|
-| Chat Gateway | Parker | API Gateway WebSocket, Lambda | Real-time message routing |
+| Chat Gateway | Parker, Jiaxin | API Gateway WebSocket, Lambda | Real-time message routing |
 | Message Service | Parker | Lambda, DynamoDB | Persist and retrieve chats |
 | Presence Service | QX | DynamoDB, Lambda | Online/offline/typing status |
 | Icebreaker Service | Jiaxin | Bedrock, Lambda | AI conversation starters |
