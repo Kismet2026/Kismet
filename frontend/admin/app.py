@@ -133,7 +133,7 @@ with tab2:
     else:
         for item in data["items"]:
             with st.expander(
-                f"{item['contentId']} — {item['reason']} ({item.get('flaggedAt', '')})"
+                f"{item['contentId']} — {item['reason']} ({to_pt(item.get('flaggedAt', ''))})"
             ):
                 st.write(f"**Type:** {item['type']}")
                 st.write(f"**User:** {item['userId']}")
