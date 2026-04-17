@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 import boto3
+from botocore.exceptions import ClientError
 
 dynamodb = boto3.resource("dynamodb")
 events_client = boto3.client("events")
@@ -19,6 +20,10 @@ PROFILES_TABLE = os.environ.get("PROFILES_TABLE", "kismet-profiles")
 EVENT_BUS_NAME = os.environ.get("EVENT_BUS_NAME", "kismet-events")
 ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "admin@kismet.com")
 ADMIN_GROUP_NAMES = {"admin", "admins"}
+
+
+class EventPublishError(Exception):
+    pass
 
 
 def _response(status_code, body):
@@ -256,8 +261,17 @@ def resolve_flagged_content(event, context):
         content_owner = existing["Item"].get("userId")
         if content_owner:
             ban_result = _ban_user_in_profiles(content_owner, admin_id, resolved_at)
-            if ban_result == "ok":
-                _publish_user_banned(content_owner, admin_id, resolved_at)
+            if ban_result in ("ok", "already_banned"):
+                try:
+                    _publish_user_banned(content_owner, admin_id, resolved_at)
+                except EventPublishError:
+                    return _response(
+                        502,
+                        {
+                            "error": "EVENT_PUBLISH_FAILED",
+                            "message": "Failed to publish user.banned event",
+                        },
+                    )
 
     # Decrement flaggedContentCount stat
     _update_stat("flaggedContentCount", -1)
@@ -341,12 +355,19 @@ def ban_user(event, context):
 
     if result == "not_found":
         return _response(404, {"error": "NOT_FOUND", "message": "User not found"})
+    if result in ("ok", "already_banned"):
+        try:
+            _publish_user_banned(user_id, admin_id, banned_at)
+        except EventPublishError:
+            return _response(
+                502,
+                {
+                    "error": "EVENT_PUBLISH_FAILED",
+                    "message": "Failed to publish user.banned event",
+                },
+            )
     if result == "already_banned":
-        return _response(
-            409, {"error": "CONFLICT", "message": "User is already banned"}
-        )
-
-    _publish_user_banned(user_id, admin_id, banned_at)
+        return _response(409, {"error": "CONFLICT", "message": "User is already banned"})
 
     return _response(
         200,
@@ -470,22 +491,29 @@ def handle_user_reported(event):
 
 def _publish_user_banned(user_id: str, admin_id: str, banned_at: str):
     """Publish user.banned using the existing producer contract so D1/D2/D3 cascade runs."""
-    events_client.put_events(
-        Entries=[
+    entry = {
+        "Source": "kismet.report-service",
+        "DetailType": "user.banned",
+        "EventBusName": EVENT_BUS_NAME,
+        "Detail": json.dumps(
             {
-                "Source": "kismet.report-service",
-                "DetailType": "user.banned",
-                "EventBusName": EVENT_BUS_NAME,
-                "Detail": json.dumps(
-                    {
-                        "userId": user_id,
-                        "bannedBy": admin_id,
-                        "bannedAt": banned_at,
-                    }
-                ),
+                "userId": user_id,
+                "bannedBy": admin_id,
+                "bannedAt": banned_at,
             }
-        ]
-    )
+        ),
+    }
+    try:
+        response = events_client.put_events(Entries=[entry])
+    except ClientError as exc:
+        raise EventPublishError("Failed to call EventBridge PutEvents") from exc
+
+    if response.get("FailedEntryCount", 0):
+        raise EventPublishError(f"EventBridge PutEvents failed: {response.get('Entries')}")
+    if not response.get("Entries") or not response["Entries"][0].get("EventId"):
+        raise EventPublishError(
+            f"EventBridge PutEvents returned invalid response: {response}"
+        )
 
 
 def _update_stat(stat_name: str, delta: int):

@@ -1,6 +1,7 @@
 import json
 import os
 import importlib
+from unittest.mock import patch
 
 import boto3
 import pytest
@@ -182,6 +183,18 @@ class TestResolve:
         )["Item"]
         assert profile["status"] == "banned"
 
+    def test_ban_user_returns_502_when_event_publish_fails(self, aws):
+        _seed_flagged(aws, "c-1", userId="user-bad")
+        _seed_profile(aws, "user-bad")
+        with patch.object(lambda_function.events_client, "put_events") as put_events:
+            put_events.return_value = {"FailedEntryCount": 1, "Entries": [{"ErrorCode": "InternalFailure"}]}
+            r = lambda_function.handler(
+                http_event("PUT", "/admin/flagged-content/{contentId}/resolve",
+                           body={"action": "ban_user"}, path_params={"contentId": "c-1"}), {},
+            )
+
+        assert r["statusCode"] == 502
+
     def test_invalid_action_returns_400(self, aws):
         r = lambda_function.handler(
             http_event("PUT", "/admin/flagged-content/{contentId}/resolve",
@@ -233,11 +246,15 @@ class TestBanUser:
 
     def test_already_banned_returns_409(self, aws):
         _seed_profile(aws, "user-1", status="banned")
-        r = lambda_function.handler(
-            http_event("PUT", "/admin/users/{userId}/ban",
-                       path_params={"userId": "user-1"}), {},
-        )
+        with patch.object(lambda_function.events_client, "put_events") as put_events:
+            put_events.return_value = {"FailedEntryCount": 0, "Entries": [{"EventId": "evt-1"}]}
+            r = lambda_function.handler(
+                http_event("PUT", "/admin/users/{userId}/ban",
+                           path_params={"userId": "user-1"}), {},
+            )
+
         assert r["statusCode"] == 409
+        put_events.assert_called_once()
 
     def test_not_found_returns_404(self, aws):
         r = lambda_function.handler(
@@ -245,6 +262,16 @@ class TestBanUser:
                        path_params={"userId": "ghost"}), {},
         )
         assert r["statusCode"] == 404
+
+    def test_returns_502_when_event_publish_fails(self, aws):
+        _seed_profile(aws, "user-1")
+        with patch.object(lambda_function.events_client, "put_events") as put_events:
+            put_events.return_value = {"FailedEntryCount": 1, "Entries": [{"ErrorCode": "InternalFailure"}]}
+            r = lambda_function.handler(
+                http_event("PUT", "/admin/users/{userId}/ban",
+                           path_params={"userId": "user-1"}), {},
+            )
+        assert r["statusCode"] == 502
 
 
 # ── PUT /admin/users/{userId}/unban ──────────────────────────────────────────
