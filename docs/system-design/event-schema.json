@@ -77,7 +77,7 @@
       "consumers": ["Email Service", "Activity Logger"],
       "detail": {
         "userId": { "type": "string", "example": "user-123" },
-        "email": { "type": "string", "example": "student@northeastern.edu" },
+        "email": { "type": "string", "example": "alice@example.com" },
         "timestamp": { "type": "string", "format": "date-time", "example": "2026-04-01T10:00:00Z" }
       }
     },
