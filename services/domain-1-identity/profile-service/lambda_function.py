@@ -212,6 +212,9 @@ def handle_delete(caller_id: str, user_id: str) -> Dict[str, Any]:
     # Perform the Cognito action BEFORE removing the profile row.  This
     # ensures that if the Cognito call fails and the request is retried,
     # the profile row still exists so ban state can be re-read correctly.
+    # A ClientError here aborts the handler (returns 500) so the DynamoDB
+    # write and EventBridge publish are never reached; UserNotFoundException
+    # is treated as idempotent success (Cognito user already gone).
     if COGNITO_USER_POOL_ID:
         if is_banned:
             # Banned user: disable the Cognito account so the email address
@@ -225,6 +228,7 @@ def handle_delete(caller_id: str, user_id: str) -> Dict[str, Any]:
                 logger.warning("Cognito user not found during ban-deletion: %s", user_id)
             except ClientError:
                 logger.exception("Failed to disable Cognito user %s", user_id)
+                return _response(500, {"code": "INTERNAL_ERROR", "message": "Failed to disable Cognito user."})
         else:
             # Active user: delete the Cognito account so the email address
             # is freed for re-registration (normal account deletion UX).
@@ -237,6 +241,7 @@ def handle_delete(caller_id: str, user_id: str) -> Dict[str, Any]:
                 logger.warning("Cognito user not found during deletion: %s", user_id)
             except ClientError:
                 logger.exception("Failed to delete Cognito user %s", user_id)
+                return _response(500, {"code": "INTERNAL_ERROR", "message": "Failed to delete Cognito user."})
 
     now = datetime.now(timezone.utc).isoformat()
 

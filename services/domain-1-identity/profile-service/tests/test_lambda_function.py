@@ -3,6 +3,8 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from botocore.exceptions import ClientError
+
 from lambda_function import handler
 
 
@@ -367,6 +369,51 @@ class DeleteProfileTests(unittest.TestCase):
 
             self.assertEqual(response["statusCode"], 200)
             mock_events.put_events.assert_called_once()
+
+    def test_delete_returns_500_and_stops_when_active_user_cognito_fails(self):
+        """ClientError from admin_delete_user returns 500 before DynamoDB/EventBridge are touched."""
+        with patch.dict("os.environ", {**ENV, "COGNITO_USER_POOL_ID": "us-east-1_test"}), \
+             patch("lambda_function.COGNITO_USER_POOL_ID", "us-east-1_test"), \
+             patch("lambda_function.dynamodb") as mock_dynamodb, \
+             patch("lambda_function.events") as mock_events, \
+             patch("lambda_function.cognito") as mock_cognito:
+
+            mock_table = mock_dynamodb.Table.return_value
+            mock_table.get_item.return_value = {"Item": {"status": "active"}}
+            mock_cognito.exceptions.UserNotFoundException = type("UserNotFoundException", (Exception,), {})
+            mock_cognito.admin_delete_user.side_effect = ClientError(
+                {"Error": {"Code": "AccessDeniedException", "Message": "Access denied"}}, "AdminDeleteUser"
+            )
+
+            event = {**make_event("/profiles/user-123", "DELETE"), **AUTHED_CONTEXT}
+            response = handler(event, self.context)
+
+            self.assertEqual(response["statusCode"], 500)
+            mock_table.delete_item.assert_not_called()
+            mock_events.put_events.assert_not_called()
+
+    def test_delete_returns_500_and_stops_when_banned_user_cognito_fails(self):
+        """ClientError from admin_disable_user returns 500 before DynamoDB/EventBridge are touched."""
+        with patch.dict("os.environ", {**ENV, "COGNITO_USER_POOL_ID": "us-east-1_test"}), \
+             patch("lambda_function.COGNITO_USER_POOL_ID", "us-east-1_test"), \
+             patch("lambda_function.dynamodb") as mock_dynamodb, \
+             patch("lambda_function.events") as mock_events, \
+             patch("lambda_function.cognito") as mock_cognito:
+
+            mock_table = mock_dynamodb.Table.return_value
+            mock_table.get_item.return_value = {"Item": {"status": "banned"}}
+            mock_cognito.exceptions.UserNotFoundException = type("UserNotFoundException", (Exception,), {})
+            mock_cognito.admin_disable_user.side_effect = ClientError(
+                {"Error": {"Code": "AccessDeniedException", "Message": "Access denied"}}, "AdminDisableUser"
+            )
+
+            event = {**make_event("/profiles/user-123", "DELETE"), **AUTHED_CONTEXT}
+            response = handler(event, self.context)
+
+            self.assertEqual(response["statusCode"], 500)
+            mock_table.put_item.assert_not_called()
+            mock_table.delete_item.assert_not_called()
+            mock_events.put_events.assert_not_called()
 
     def test_delete_another_users_profile_returns_403(self):
         with patch.dict("os.environ", ENV):
