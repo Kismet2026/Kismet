@@ -203,18 +203,8 @@ with tab3:
 # ─── Tab 4: Health Monitor ────────────────────────────────────────────────────
 with tab4:
     st.header("Service Health")
-    col_refresh, col_check = st.columns([1, 1])
-
-    with col_refresh:
-        if st.button("Refresh"):
-            st.rerun()
-    with col_check:
-        if st.button("Run Health Check"):
-            result, err = api_post("/health/check")
-            if err:
-                st.error(f"Health check failed: {err}")
-            else:
-                st.success(f"Check complete — overall: {result['status']}")
+    if st.button("Refresh"):
+        st.rerun()
 
     data, err = api_get("/health")
     if err:
