@@ -1,6 +1,6 @@
 # Feature Play Session Guide
 
-**Frontend:** Your Vercel URL (set NEXT_PUBLIC_API_BASE_URL to your backend)
+**Frontend:** See `NEXT_PUBLIC_APP_URL` in project README
 **Admin Dashboard:** http://localhost:8501 (login: admin@kismet.com)
 
 ---
