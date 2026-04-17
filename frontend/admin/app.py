@@ -14,7 +14,6 @@ def to_pt(utc_str):
         return utc_str
 
 API_BASE_URL = "https://ihdsi4eg31.execute-api.us-east-1.amazonaws.com/dev"
-COGNITO_CLIENT_ID = "1afn6c6gph8v5qua3flajcs20e"
 
 st.set_page_config(page_title="Kismet Admin", layout="wide")
 st.title("Kismet Admin Dashboard")
@@ -64,8 +63,8 @@ def api_post(path):
 if not get_token():
     st.subheader("Login")
     with st.form("login_form"):
-        email = st.text_input("Email", value="admin@kismet.com")
-        password = st.text_input("Password", type="password", value="password123")
+        email = st.text_input("Email")
+        password = st.text_input("Password", type="password")
         submitted = st.form_submit_button("Login")
 
     if submitted:
