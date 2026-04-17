@@ -285,6 +285,33 @@ service-name/
 3. Read your service's README for setup instructions
 4. Deploy: `cd infra && npx cdk deploy <StackName> --app "python3 app.py"`
 
+### User frontend (Next.js, Vercel)
+
+Local:
+
+```bash
+cd frontend
+npm install
+npm run dev     # http://localhost:3000
+```
+
+Required env vars (put them in `frontend/.env.local`):
+
+```
+NEXT_PUBLIC_API_BASE_URL=https://<api-id>.execute-api.<region>.amazonaws.com/dev
+NEXT_PUBLIC_WS_URL=wss://<ws-api-id>.execute-api.<region>.amazonaws.com/dev
+NEXT_PUBLIC_COGNITO_USER_POOL_ID=<KismetShared.UserPoolId>
+NEXT_PUBLIC_COGNITO_CLIENT_ID=<KismetShared.UserPoolClientId>
+```
+
+All four values come from `cdk deploy KismetShared` outputs.
+
+Deploy (Vercel):
+
+1. Connect `Kismet2026/Kismet` in Vercel, set **Root Directory** to `frontend/`
+2. Add the same four `NEXT_PUBLIC_*` vars in **Project Settings → Environment Variables**
+3. Pushes to `main` auto-deploy to production; PRs get preview URLs
+
 ### Admin dashboard (Streamlit)
 
 Local:
