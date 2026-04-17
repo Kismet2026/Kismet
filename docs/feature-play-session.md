@@ -5,6 +5,26 @@
 
 ---
 
+## Prerequisites
+
+### Admin Dashboard setup (D6)
+1. Deploy shared + domain6 stacks:
+   ```bash
+   cd infra
+   cdk deploy -c enableActivityStream=true KismetShared KismetDomain6
+   ```
+2. Create the admin Cognito user (run once after deploy):
+   ```bash
+   ./scripts/create-admin-user.sh <UserPoolId>
+   ```
+   `UserPoolId` is printed as a CloudFormation output (`KismetShared.UserPoolId`) after deploy.
+3. Start the Admin Dashboard with the API Gateway URL:
+   ```bash
+   API_BASE_URL=<KismetShared.ApiUrl> streamlit run frontend/admin/app.py
+   ```
+
+---
+
 ## Setup
 - All 19 test accounts already created with profiles
 - Open frontend in **two different browsers** to simulate two users

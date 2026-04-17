@@ -34,7 +34,7 @@ def get_token():
 def api_get(path, params=None):
     headers = {}
     if get_token():
-        headers["Authorization"] = get_token()
+        headers["Authorization"] = f"Bearer {get_token()}"
     try:
         r = requests.get(f"{API_BASE_URL}{path}", params=params, headers=headers, timeout=10)
         r.raise_for_status()
@@ -46,7 +46,7 @@ def api_get(path, params=None):
 def api_put(path, body=None):
     headers = {}
     if get_token():
-        headers["Authorization"] = get_token()
+        headers["Authorization"] = f"Bearer {get_token()}"
     try:
         r = requests.put(f"{API_BASE_URL}{path}", json=body, headers=headers, timeout=10)
         r.raise_for_status()
@@ -58,7 +58,7 @@ def api_put(path, body=None):
 def api_post(path):
     headers = {}
     if get_token():
-        headers["Authorization"] = get_token()
+        headers["Authorization"] = f"Bearer {get_token()}"
     try:
         r = requests.post(f"{API_BASE_URL}{path}", headers=headers, timeout=10)
         r.raise_for_status()

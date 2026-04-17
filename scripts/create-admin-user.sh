@@ -2,9 +2,12 @@
 set -euo pipefail
 
 # Creates the admin Cognito user for the Kismet Admin Dashboard.
-# Usage: ./scripts/create-admin-user.sh <UserPoolId>
+#
+# Usage:
+#   ./scripts/create-admin-user.sh <UserPoolId>                    # prompts for password
+#   PASSWORD=MySecret ./scripts/create-admin-user.sh <UserPoolId>  # via env var (CI-friendly)
+#
 # Example: ./scripts/create-admin-user.sh us-east-1_abc123
-# Or provide the password securely via the PASSWORD environment variable.
 
 USER_POOL_ID=${1:-}
 

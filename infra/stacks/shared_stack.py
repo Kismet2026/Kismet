@@ -1,4 +1,3 @@
-import os
 import aws_cdk as cdk
 from constructs import Construct
 from aws_cdk import (
@@ -126,7 +125,10 @@ class SharedStack(cdk.Stack):
         )
 
         # ── Kinesis Data Stream ───────────────────────────────────────────────
-        if os.environ.get("ENABLE_ACTIVITY_STREAM") == "true":
+        # Opt-in via CDK context: `cdk deploy -c enableActivityStream=true`
+        # or by setting `"enableActivityStream": true` in cdk.json context.
+        # Disabled by default to avoid unexpected cost (~$11/month per shard).
+        if self.node.try_get_context("enableActivityStream") is True:
             self.activity_stream = kinesis.Stream(
                 self,
                 "ActivityStream",
