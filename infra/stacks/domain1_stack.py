@@ -100,9 +100,14 @@ class Domain1Stack(cdk.Stack):
                 "COGNITO_USER_POOL_ID": shared.user_pool.user_pool_id,
             },
             extra_policies=[
-                # Profile delete needs to remove the Cognito user
+                # Profile delete needs to remove or disable the Cognito user:
+                # - active users: AdminDeleteUser (frees the email)
+                # - banned users: AdminDisableUser (freezes the email to prevent re-registration)
                 iam.PolicyStatement(
-                    actions=["cognito-idp:AdminDeleteUser"],
+                    actions=[
+                        "cognito-idp:AdminDeleteUser",
+                        "cognito-idp:AdminDisableUser",
+                    ],
                     resources=[shared.user_pool.user_pool_arn],
                 ),
             ],

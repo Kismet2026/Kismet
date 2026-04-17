@@ -404,7 +404,7 @@ class DeleteProfileTests(unittest.TestCase):
 
             mock_table = mock_dynamodb.Table.return_value
             mock_table.get_item.return_value = {"Item": {"userId": "user-123", "status": "banned"}}
-            mock_table.delete_item.return_value = {}
+            mock_table.put_item.return_value = {}
             mock_events.put_events.return_value = {"FailedEntryCount": 0, "Entries": [{"EventId": "e1"}]}
             mock_cognito.exceptions.UserNotFoundException = type("UserNotFoundException", (Exception,), {})
 
@@ -417,9 +417,17 @@ class DeleteProfileTests(unittest.TestCase):
                 Username="user-123",
             )
             mock_cognito.admin_delete_user.assert_not_called()
+            # Banned users get a tombstone (PK/SK/status/deletedAt) instead of a hard delete
+            mock_table.delete_item.assert_not_called()
+            put_call = mock_table.put_item.call_args[1]["Item"]
+            self.assertEqual(put_call["PK"], "USER#user-123")
+            self.assertEqual(put_call["SK"], "PROFILE")
+            self.assertEqual(put_call["status"], "banned")
+            self.assertIn("deletedAt", put_call)
+            self.assertEqual(set(put_call.keys()), {"PK", "SK", "userId", "status", "deletedAt"})
 
-    def test_delete_banned_user_retry_without_profile_row_disables_cognito_user(self):
-        """Banned-user retry still disables Cognito when the profile row is already gone."""
+    def test_delete_banned_user_tombstone_retry_disables_cognito_user(self):
+        """On retry the tombstone still carries banned status so Cognito disable is idempotent."""
         with patch.dict("os.environ", {**ENV, "COGNITO_USER_POOL_ID": "us-east-1_test"}), \
              patch("lambda_function.COGNITO_USER_POOL_ID", "us-east-1_test"), \
              patch("lambda_function.dynamodb") as mock_dynamodb, \
@@ -427,8 +435,11 @@ class DeleteProfileTests(unittest.TestCase):
              patch("lambda_function.cognito") as mock_cognito:
 
             mock_table = mock_dynamodb.Table.return_value
-            mock_table.get_item.return_value = {}  # Retry after prior delete removed the profile row
-            mock_table.delete_item.return_value = {}
+            # Tombstone left behind from the first (partial) request
+            mock_table.get_item.return_value = {
+                "Item": {"userId": "user-123", "status": "banned", "deletedAt": "2026-04-17T00:00:00+00:00"},
+            }
+            mock_table.put_item.return_value = {}
             mock_events.put_events.return_value = {"FailedEntryCount": 0, "Entries": [{"EventId": "e1"}]}
             mock_cognito.exceptions.UserNotFoundException = type("UserNotFoundException", (Exception,), {})
 
@@ -441,6 +452,7 @@ class DeleteProfileTests(unittest.TestCase):
                 Username="user-123",
             )
             mock_cognito.admin_delete_user.assert_not_called()
+
     def test_delete_active_user_deletes_cognito_user(self):
         """Active user deleting their profile removes the Cognito account to free the email."""
         with patch.dict("os.environ", {**ENV, "COGNITO_USER_POOL_ID": "us-east-1_test"}), \
