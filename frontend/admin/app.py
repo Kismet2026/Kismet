@@ -1,6 +1,17 @@
 import requests
 import streamlit as st
 import pandas as pd
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
+
+def to_pt(utc_str):
+    if not utc_str:
+        return ""
+    try:
+        dt = datetime.fromisoformat(utc_str)
+        return dt.astimezone(ZoneInfo("America/Los_Angeles")).strftime("%Y-%m-%d %I:%M %p PT")
+    except Exception:
+        return utc_str
 
 API_BASE_URL = "https://ihdsi4eg31.execute-api.us-east-1.amazonaws.com/dev"
 COGNITO_CLIENT_ID = "1afn6c6gph8v5qua3flajcs20e"
@@ -74,6 +85,8 @@ if not get_token():
     st.stop()
 
 
+st.info("📌 Note: Stats and activity data reflect real user actions only. Test accounts (test1–test19@kismet.com) are excluded from platform metrics.", icon=None)
+
 tab1, tab2, tab3, tab4, tab5 = st.tabs(
     ["Stats", "Flagged Content", "Users", "Health Monitor", "Analytics Pipeline"]
 )
@@ -94,7 +107,7 @@ with tab1:
         cols[2].metric("Matches Today", data["matchesToday"])
         cols[3].metric("Messages Today", data["messagesToday"])
         cols[4].metric("Flagged Content", data["flaggedContentCount"])
-        st.caption(f"Generated at: {data.get('generatedAt', '')}")
+        st.caption(f"Generated at: {to_pt(data.get('generatedAt', ''))}")
 
 # ─── Tab 2: Flagged Content ──────────────────────────────��─────────────────────
 with tab2:
@@ -222,7 +235,7 @@ with tab4:
             for name, svc in data["services"].items()
         ]
         st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-        st.caption(f"Checked at: {data.get('checkedAt', '')}")
+        st.caption(f"Checked at: {to_pt(data.get('checkedAt', ''))}")
 
     # Active alarms
     alarms, err = api_get("/health/alarms")
@@ -287,7 +300,7 @@ with tab5:
         rows = []
         for item in log_data.get("items", []):
             rows.append({
-                "Time": item.get("timestamp", "")[:19].replace("T", " "),
+                "Time": to_pt(item.get("timestamp", "")),
                 "Event": item.get("eventType", ""),
                 "User": item.get("userId", "")[:8] + "...",
             })
