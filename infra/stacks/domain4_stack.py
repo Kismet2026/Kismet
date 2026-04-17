@@ -15,7 +15,7 @@ from kismet_constructs.kismet_service import KismetService
 class Domain4Stack(cdk.Stack):
     """
     Domain 4 — Safety & Moderation
-    Owners: Yue (Text Moderation, Image Moderation), Amber (Report, Rate Limiter)
+    Owners: Yue (Text Moderation, Image Moderation), Xinyuan Fan (Amber) (Report, Rate Limiter)
     """
 
     def __init__(self, scope: Construct, construct_id: str, *, shared: SharedStack, **kwargs):
@@ -138,7 +138,7 @@ class Domain4Stack(cdk.Stack):
             event_bus=event_bus,
         )
 
-        # ── Report Service (Amber) ─────────────────────────────────────────────
+        # ── Report Service (Xinyuan Fan (Amber)) ─────────────────────────────────────────────
         KismetService(
             self,
             "ReportService",
@@ -183,7 +183,7 @@ class Domain4Stack(cdk.Stack):
             event_bus=event_bus,
         )
 
-        # ── Rate Limiter Service (Amber) ───────────────────────────────────────
+        # ── Rate Limiter Service (Xinyuan Fan (Amber)) ───────────────────────────────────────
         # Uses ElastiCache (Redis)
         vpc = ec2.Vpc(
             self,

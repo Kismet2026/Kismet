@@ -594,7 +594,7 @@ cdk deploy KismetShared          ← PM 部署共享资源
     ├──→ cdk deploy KismetDomain1   ← Quinn Gao, KS
     ├──→ cdk deploy KismetDomain2   ← Qinyuan
     ├──→ cdk deploy KismetDomain3   ← Parker, QX, Jiaxin
-    ├──→ cdk deploy KismetDomain4   ← Yue, Amber
+    ├──→ cdk deploy KismetDomain4   ← Yue, Xinyuan Fan (Amber)
     ├──→ cdk deploy KismetDomain5   ← Nili, Xiaoyuan
     └──→ cdk deploy KismetDomain6   ← Jessica, Lingyun
               │

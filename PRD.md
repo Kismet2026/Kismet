@@ -136,8 +136,8 @@ The app is built entirely on AWS using a **serverless, event-driven architecture
 |---------|-------|-------------|-------------|
 | Text Moderation | Yue | Comprehend, Lambda | Flag toxic content |
 | Image Moderation | Yue | Rekognition, Lambda | Block inappropriate photos |
-| Report Service | Amber | Lambda, DynamoDB, SES | User reports with admin alerts |
-| Rate Limiter | Amber | API Gateway, ElastiCache (Redis) | Anti-spam protection |
+| Report Service | Xinyuan Fan (Amber) | Lambda, DynamoDB, SES | User reports with admin alerts |
+| Rate Limiter | Xinyuan Fan (Amber) | API Gateway, ElastiCache (Redis) | Anti-spam protection |
 
 ### Domain 5 — Notifications & Engagement
 
@@ -256,7 +256,7 @@ The app is built entirely on AWS using a **serverless, event-driven architecture
 | **Domain 1 — Identity & Profiles** | Quinn Gao, KS |
 | **Domain 2 — Discovery & Matching** | Qinyuan |
 | **Domain 3 — Messaging** | Parker, QX, Jiaxin |
-| **Domain 4 — Safety & Moderation** | Yue, KS, Amber |
+| **Domain 4 — Safety & Moderation** | Yue, KS, Xinyuan Fan (Amber) |
 | **Domain 5 — Notifications** | Nili, Xiaoyuan |
 | **Domain 6 — Analytics & Admin** | Jessica, Lingyun |
 | **Integration Team** | QX, KS |
