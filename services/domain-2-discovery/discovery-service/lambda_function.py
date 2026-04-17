@@ -143,10 +143,15 @@ def get_candidates(event):
     user_profile_result = table.get_item(Key={'PK': f'PROFILE#{user_id}', 'SK': 'META'})
     user_birth = user_profile_result.get('Item', {}).get('birthDate', '')
 
-    # Scan all profiles (in production, use GSI or pre-computed candidate lists)
+    # Scan all profiles (in production, use GSI or pre-computed candidate lists).
+    # Do NOT pass `Limit` here — in DynamoDB scan, Limit caps rows *scanned*
+    # (pre-filter), not rows *returned*. kismet-discovery mixes PROFILE# rows
+    # with BAZI# cache rows (~99% are BAZI# today), so a small Limit blows the
+    # entire page on cache rows before reaching any profile. Without Limit the
+    # scan reads the full table each call. That's OK for demo-scale and we
+    # break out early once we have `limit` matching candidates below.
     scan_params = {
-        'FilterExpression': Key('SK').eq('META') & Attr('userId').ne(user_id),
-        'Limit': limit * 3,  # over-fetch to account for filters
+        'FilterExpression': Attr('SK').eq('META') & Attr('userId').ne(user_id),
     }
 
     if cursor:
