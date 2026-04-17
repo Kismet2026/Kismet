@@ -48,7 +48,7 @@ A microservice dating app built on AWS — with BaZi (八字) compatibility matc
 | **Safety & Moderation** | Yue, Amber | Text Moderation, Image Moderation, Report, Rate Limiter |
 | **Notifications** | Nili, Xiaoyuan | Push Notification, Email, Event Bus, Scheduler |
 | **Analytics & Admin** | Jessica, Lingyun | Activity Logger, Analytics Pipeline, Admin Dashboard, Health Monitor |
-| **Integration** | QX, KS | Cross-domain service orchestration |
+| **Integration** | Qinyuan | Cross-domain service orchestration |
 | **PM / Frontend** | Qinyuan | Architecture, frontend (AI-generated), coordination |
 
 ---
