@@ -213,9 +213,14 @@ def handle_get_recent(event):
 
 def _write_to_kinesis(record, partition_key):
     try:
+        # Append a newline so Firehose writes JSON Lines to S3. Kinesis records
+        # are concatenated byte-for-byte into Firehose output objects with no
+        # delimiter added, so without this trailing '\n' the S3 file is one
+        # long line of back-to-back JSON objects and Athena's JsonSerDe reads
+        # only the first record per object.
         kinesis.put_record(
             StreamName=KINESIS_STREAM_NAME,
-            Data=json.dumps(record).encode("utf-8"),
+            Data=(json.dumps(record) + "\n").encode("utf-8"),
             PartitionKey=partition_key,
         )
     except Exception as e:
