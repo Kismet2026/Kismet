@@ -45,7 +45,7 @@ A microservice dating app built on AWS — with BaZi (八字) compatibility matc
 | **Identity & Profiles** | Quinn Gao, KS | Auth, Profile, Photo, Email Verification |
 | **Discovery & Matching** | Qinyuan | Discovery, Swipe, Match, Recommendation, BaZi |
 | **Messaging** | Parker, QX, Jiaxin | Chat Gateway, Message, Presence, Icebreaker |
-| **Safety & Moderation** | Yue, Amber | Text Moderation, Image Moderation, Report, Rate Limiter |
+| **Safety & Moderation** | Yue, Xinyuan Fan (Amber) | Text Moderation, Image Moderation, Report, Rate Limiter |
 | **Notifications** | Nili, Xiaoyuan | Push Notification, Email, Event Bus, Scheduler |
 | **Analytics & Admin** | Jessica, Lingyun | Activity Logger, Analytics Pipeline, Admin Dashboard, Health Monitor |
 | **Integration** | Qinyuan | Cross-domain service orchestration |
@@ -89,8 +89,8 @@ A microservice dating app built on AWS — with BaZi (八字) compatibility matc
 |---------|-------|-------------|-------------|
 | Text Moderation | Yue | Comprehend, Lambda | Flag toxic content |
 | Image Moderation | Yue | Rekognition, Lambda, S3 | Scan uploads; flag nudity/violence/weapons |
-| Report Service | Amber | Lambda, DynamoDB, SES, EventBridge | User reports → admin email + auto-ban at threshold |
-| Rate Limiter | Amber | API Gateway, ElastiCache (Redis) | Anti-spam protection |
+| Report Service | Xinyuan Fan (Amber) | Lambda, DynamoDB, SES, EventBridge | User reports → admin email + auto-ban at threshold |
+| Rate Limiter | Xinyuan Fan (Amber) | API Gateway, ElastiCache (Redis) | Anti-spam protection |
 
 ### Domain 5 — Notifications & Engagement
 
