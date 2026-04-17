@@ -199,22 +199,42 @@ def handle_delete(caller_id: str, user_id: str) -> Dict[str, Any]:
 
     table = dynamodb.Table(PROFILES_TABLE_NAME)
 
+    # Read the profile before deleting to check ban status. This determines
+    # how the Cognito account is handled: banned users must not be able to
+    # re-register with the same email, so we disable rather than delete.
+    existing = table.get_item(Key={"PK": f"USER#{user_id}", "SK": "PROFILE"})
+    is_banned = existing.get("Item", {}).get("status") == "banned"
+
     # Attempt to delete the profile row. delete_item is idempotent — it's a no-op
     # if the row is already gone, which allows safe retries if a previous attempt
     # partially succeeded (e.g., profile deleted but EventBridge publish failed).
     table.delete_item(Key={"PK": f"USER#{user_id}", "SK": "PROFILE"})
 
-    # Delete Cognito user so the email address can be re-registered
     if COGNITO_USER_POOL_ID:
-        try:
-            cognito.admin_delete_user(
-                UserPoolId=COGNITO_USER_POOL_ID,
-                Username=user_id,
-            )
-        except cognito.exceptions.UserNotFoundException:
-            logger.warning("Cognito user not found during deletion: %s", user_id)
-        except ClientError:
-            logger.exception("Failed to delete Cognito user %s", user_id)
+        if is_banned:
+            # Banned user: disable the Cognito account so the email address
+            # cannot be used to create a new account, bypassing the ban.
+            try:
+                cognito.admin_disable_user(
+                    UserPoolId=COGNITO_USER_POOL_ID,
+                    Username=user_id,
+                )
+            except cognito.exceptions.UserNotFoundException:
+                logger.warning("Cognito user not found during ban-deletion: %s", user_id)
+            except ClientError:
+                logger.exception("Failed to disable Cognito user %s", user_id)
+        else:
+            # Active user: delete the Cognito account so the email address
+            # is freed for re-registration (normal account deletion UX).
+            try:
+                cognito.admin_delete_user(
+                    UserPoolId=COGNITO_USER_POOL_ID,
+                    Username=user_id,
+                )
+            except cognito.exceptions.UserNotFoundException:
+                logger.warning("Cognito user not found during deletion: %s", user_id)
+            except ClientError:
+                logger.exception("Failed to delete Cognito user %s", user_id)
 
     # Publish user.deleted event so other domains can clean up their data
     now = datetime.now(timezone.utc).isoformat()

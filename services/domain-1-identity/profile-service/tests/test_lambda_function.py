@@ -289,6 +289,7 @@ class DeleteProfileTests(unittest.TestCase):
              patch("lambda_function.cognito") as mock_cognito:
 
             mock_table = mock_dynamodb.Table.return_value
+            mock_table.get_item.return_value = {"Item": {"status": "active"}}
             mock_table.delete_item.return_value = {}
             mock_events.put_events.return_value = {"FailedEntryCount": 0, "Entries": [{"EventId": "e1"}]}
 
@@ -308,6 +309,7 @@ class DeleteProfileTests(unittest.TestCase):
              patch("lambda_function.cognito") as mock_cognito:
 
             mock_table = mock_dynamodb.Table.return_value
+            mock_table.get_item.return_value = {"Item": {"status": "active"}}
             mock_table.delete_item.return_value = {}
             mock_events.put_events.return_value = {"FailedEntryCount": 0, "Entries": [{"EventId": "e1"}]}
             mock_cognito.exceptions.UserNotFoundException = type("UserNotFoundException", (Exception,), {})
@@ -331,6 +333,7 @@ class DeleteProfileTests(unittest.TestCase):
              patch("lambda_function.cognito") as mock_cognito:
 
             mock_table = mock_dynamodb.Table.return_value
+            mock_table.get_item.return_value = {"Item": {"status": "active"}}
             mock_table.delete_item.return_value = {}
             mock_events.put_events.return_value = {"FailedEntryCount": 0, "Entries": [{"EventId": "e1"}]}
             mock_cognito.exceptions.UserNotFoundException = type("UserNotFoundException", (Exception,), {})
@@ -351,6 +354,7 @@ class DeleteProfileTests(unittest.TestCase):
              patch("lambda_function.cognito") as mock_cognito:
 
             mock_table = mock_dynamodb.Table.return_value
+            mock_table.get_item.return_value = {"Item": {"status": "active"}}
             mock_table.delete_item.return_value = {}
             mock_events.put_events.return_value = {"FailedEntryCount": 0, "Entries": [{"EventId": "e1"}]}
 
@@ -378,6 +382,7 @@ class DeleteProfileTests(unittest.TestCase):
              patch("lambda_function.cognito") as mock_cognito:
 
             mock_table = mock_dynamodb.Table.return_value
+            mock_table.get_item.return_value = {}  # Profile row already gone
             mock_table.delete_item.return_value = {}  # DynamoDB delete is always a no-op
             mock_events.put_events.return_value = {"FailedEntryCount": 0, "Entries": [{"EventId": "e1"}]}
             mock_cognito.exceptions.UserNotFoundException = type("UserNotFoundException", (Exception,), {})
@@ -388,6 +393,54 @@ class DeleteProfileTests(unittest.TestCase):
             self.assertEqual(response["statusCode"], 200)
             mock_table.delete_item.assert_called_once()
             mock_events.put_events.assert_called_once()
+
+    def test_delete_banned_user_disables_cognito_user(self):
+        """Banned user deleting their profile disables (not deletes) the Cognito account."""
+        with patch.dict("os.environ", {**ENV, "COGNITO_USER_POOL_ID": "us-east-1_test"}), \
+             patch("lambda_function.COGNITO_USER_POOL_ID", "us-east-1_test"), \
+             patch("lambda_function.dynamodb") as mock_dynamodb, \
+             patch("lambda_function.events") as mock_events, \
+             patch("lambda_function.cognito") as mock_cognito:
+
+            mock_table = mock_dynamodb.Table.return_value
+            mock_table.get_item.return_value = {"Item": {"userId": "user-123", "status": "banned"}}
+            mock_table.delete_item.return_value = {}
+            mock_events.put_events.return_value = {"FailedEntryCount": 0, "Entries": [{"EventId": "e1"}]}
+            mock_cognito.exceptions.UserNotFoundException = type("UserNotFoundException", (Exception,), {})
+
+            event = {**make_event("/profiles/user-123", "DELETE"), **AUTHED_CONTEXT}
+            response = handler(event, self.context)
+
+            self.assertEqual(response["statusCode"], 200)
+            mock_cognito.admin_disable_user.assert_called_once_with(
+                UserPoolId="us-east-1_test",
+                Username="user-123",
+            )
+            mock_cognito.admin_delete_user.assert_not_called()
+
+    def test_delete_active_user_deletes_cognito_user(self):
+        """Active user deleting their profile removes the Cognito account to free the email."""
+        with patch.dict("os.environ", {**ENV, "COGNITO_USER_POOL_ID": "us-east-1_test"}), \
+             patch("lambda_function.COGNITO_USER_POOL_ID", "us-east-1_test"), \
+             patch("lambda_function.dynamodb") as mock_dynamodb, \
+             patch("lambda_function.events") as mock_events, \
+             patch("lambda_function.cognito") as mock_cognito:
+
+            mock_table = mock_dynamodb.Table.return_value
+            mock_table.get_item.return_value = {"Item": {"userId": "user-123", "status": "active"}}
+            mock_table.delete_item.return_value = {}
+            mock_events.put_events.return_value = {"FailedEntryCount": 0, "Entries": [{"EventId": "e1"}]}
+            mock_cognito.exceptions.UserNotFoundException = type("UserNotFoundException", (Exception,), {})
+
+            event = {**make_event("/profiles/user-123", "DELETE"), **AUTHED_CONTEXT}
+            response = handler(event, self.context)
+
+            self.assertEqual(response["statusCode"], 200)
+            mock_cognito.admin_delete_user.assert_called_once_with(
+                UserPoolId="us-east-1_test",
+                Username="user-123",
+            )
+            mock_cognito.admin_disable_user.assert_not_called()
 
 
 class CorsTests(unittest.TestCase):
