@@ -16,10 +16,14 @@ def to_pt(utc_str):
     except Exception:
         return utc_str
 
-API_BASE_URL = os.environ["API_BASE_URL"]
+API_BASE_URL = os.getenv("API_BASE_URL")
 
 st.set_page_config(page_title="Kismet Admin", layout="wide")
 st.title("Kismet Admin Dashboard")
+
+if not API_BASE_URL:
+    st.error("Missing required environment variable: API_BASE_URL. Set API_BASE_URL to the backend base URL and restart the Streamlit app.")
+    st.stop()
 
 
 def get_token():
@@ -114,7 +118,7 @@ with tab1:
         cols[4].metric("Flagged Content", data["flaggedContentCount"])
         st.caption(f"Generated at: {to_pt(data.get('generatedAt', ''))}")
 
-# ─── Tab 2: Flagged Content ──────────────────────────────��─────────────────────
+# ─── Tab 2: Flagged Content ───────────────────────────────────────────────────
 with tab2:
     st.header("Flagged Content")
     type_filter = st.selectbox("Filter by type", ["all", "text", "image"])
@@ -164,7 +168,7 @@ with tab2:
                             )
                             st.success("User banned") if not err else st.error(err)
 
-# ─── Tab 3: Users ────────────────────────────────────────────────────────���────
+# ─── Tab 3: Users ─────────────────────────────────────────────────────────────
 with tab3:
     st.header("Users")
     search = st.text_input("Search by name", placeholder="e.g. John")
@@ -196,7 +200,7 @@ with tab3:
                         _, err = api_put(f"/admin/users/{user['userId']}/unban")
                         st.success("User unbanned") if not err else st.error(err)
 
-# ─── Tab 4: Health Monitor ──────────────────────────────────��──────────────────
+# ─── Tab 4: Health Monitor ────────────────────────────────────────────────────
 with tab4:
     st.header("Service Health")
     col_refresh, col_check = st.columns([1, 1])

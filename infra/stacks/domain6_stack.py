@@ -4,7 +4,6 @@ from aws_cdk import (
     aws_apigateway as apigateway,
     aws_events as events,
     aws_iam as iam,
-    aws_kinesis as kinesis,
     aws_kinesisfirehose as firehose,
     aws_s3 as s3,
     aws_sns as sns,
@@ -28,11 +27,7 @@ class Domain6Stack(cdk.Stack):
             "ImportedEventBus",
             "kismet-events",
         )
-        activity_stream = kinesis.Stream.from_stream_arn(
-            self,
-            "ImportedActivityStream",
-            f"arn:aws:kinesis:{self.region}:{self.account}:stream/kismet-activity-stream",
-        )
+        activity_stream = shared.activity_stream
         analytics_bucket = s3.Bucket.from_bucket_name(
             self,
             "ImportedAnalyticsBucket",
@@ -55,58 +50,64 @@ class Domain6Stack(cdk.Stack):
         )
 
         # ── Kinesis Firehose → S3 ─────────────────────────────────────────────
-        firehose_role = iam.Role(
-            self,
-            "FirehoseRole",
-            assumed_by=iam.ServicePrincipal("firehose.amazonaws.com"),
-            inline_policies={
-                "FirehosePolicy": iam.PolicyDocument(
-                    statements=[
-                        iam.PolicyStatement(
-                            actions=[
-                                "s3:PutObject",
-                                "s3:PutObjectAcl",
-                                "s3:GetBucketLocation",
-                                "s3:ListBucket",
-                            ],
-                            resources=[
-                                analytics_bucket.bucket_arn,
-                                f"{analytics_bucket.bucket_arn}/*",
-                            ],
-                        ),
-                        iam.PolicyStatement(
-                            actions=[
-                                "kinesis:GetRecords",
-                                "kinesis:GetShardIterator",
-                                "kinesis:DescribeStream",
-                                "kinesis:ListShards",
-                            ],
-                            resources=[activity_stream.stream_arn],
-                        ),
-                    ]
-                )
-            },
-        )
+        if activity_stream is not None:
+            firehose_role = iam.Role(
+                self,
+                "FirehoseRole",
+                assumed_by=iam.ServicePrincipal("firehose.amazonaws.com"),
+                inline_policies={
+                    "FirehosePolicy": iam.PolicyDocument(
+                        statements=[
+                            iam.PolicyStatement(
+                                actions=[
+                                    "s3:GetBucketLocation",
+                                    "s3:ListBucket",
+                                    "s3:ListBucketMultipartUploads",
+                                ],
+                                resources=[analytics_bucket.bucket_arn],
+                            ),
+                            iam.PolicyStatement(
+                                actions=[
+                                    "s3:PutObject",
+                                    "s3:PutObjectAcl",
+                                    "s3:AbortMultipartUpload",
+                                    "s3:GetObject",
+                                ],
+                                resources=[f"{analytics_bucket.bucket_arn}/*"],
+                            ),
+                            iam.PolicyStatement(
+                                actions=[
+                                    "kinesis:GetRecords",
+                                    "kinesis:GetShardIterator",
+                                    "kinesis:DescribeStream",
+                                    "kinesis:ListShards",
+                                ],
+                                resources=[activity_stream.stream_arn],
+                            ),
+                        ]
+                    )
+                },
+            )
 
-        firehose.CfnDeliveryStream(
-            self,
-            "ActivityFirehose",
-            delivery_stream_name="kismet-activity-firehose",
-            delivery_stream_type="KinesisStreamAsSource",
-            kinesis_stream_source_configuration=firehose.CfnDeliveryStream.KinesisStreamSourceConfigurationProperty(
-                kinesis_stream_arn=activity_stream.stream_arn,
-                role_arn=firehose_role.role_arn,
-            ),
-            s3_destination_configuration=firehose.CfnDeliveryStream.S3DestinationConfigurationProperty(
-                bucket_arn=analytics_bucket.bucket_arn,
-                role_arn=firehose_role.role_arn,
-                prefix="events/",
-                buffering_hints=firehose.CfnDeliveryStream.BufferingHintsProperty(
-                    interval_in_seconds=60,
-                    size_in_m_bs=5,
+            firehose.CfnDeliveryStream(
+                self,
+                "ActivityFirehose",
+                delivery_stream_name="kismet-activity-firehose",
+                delivery_stream_type="KinesisStreamAsSource",
+                kinesis_stream_source_configuration=firehose.CfnDeliveryStream.KinesisStreamSourceConfigurationProperty(
+                    kinesis_stream_arn=activity_stream.stream_arn,
+                    role_arn=firehose_role.role_arn,
                 ),
-            ),
-        )
+                s3_destination_configuration=firehose.CfnDeliveryStream.S3DestinationConfigurationProperty(
+                    bucket_arn=analytics_bucket.bucket_arn,
+                    role_arn=firehose_role.role_arn,
+                    prefix="events/",
+                    buffering_hints=firehose.CfnDeliveryStream.BufferingHintsProperty(
+                        interval_in_seconds=60,
+                        size_in_m_bs=5,
+                    ),
+                ),
+            )
 
         # ── Activity Logger (Jessica) ─────────────────────────────────────────
         KismetService(
@@ -143,7 +144,7 @@ class Domain6Stack(cdk.Stack):
             extra_policies=[],
             environment={
                 "ACTIVITY_LOG_TABLE": "kismet-activity-log",
-                "KINESIS_STREAM_NAME": activity_stream.stream_name,
+                **({"KINESIS_STREAM_NAME": activity_stream.stream_name} if activity_stream is not None else {}),
             },
             api=imported_api,
             authorizer=shared.authorizer,
