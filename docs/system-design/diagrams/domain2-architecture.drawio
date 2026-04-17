@@ -29,8 +29,8 @@
                     <mxGeometry x="330" y="230" width="260" height="120" as="geometry"/>
                 </mxCell>
                 <!-- Match Service -->
-                <mxCell id="matchService" value="Match Service&#xa;GET /matches&#xa;GET /matches/{matchId}&#xa;DELETE /matches/{matchId}&#xa;- detects mutual likes&#xa;- atomic match creation&#xa;- publishes match.created" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dcfce7;strokeColor=#16a34a;fontSize=13;" parent="domain" vertex="1">
-                    <mxGeometry x="330" y="400" width="260" height="140" as="geometry"/>
+                <mxCell id="matchService" value="Match Service&#xa;GET /matches&#xa;GET /matches/{matchId}&#xa;DELETE /matches/{matchId}&#xa;- detects mutual likes&#xa;- atomic match creation (TransactWrite)&#xa;- publishes match.created&#xa;- purges on user.deleted / profile.banned" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dcfce7;strokeColor=#16a34a;fontSize=13;" parent="domain" vertex="1">
+                    <mxGeometry x="330" y="400" width="260" height="160" as="geometry"/>
                 </mxCell>
                 <!-- Recommendation Service -->
                 <mxCell id="recoService" value="Recommendation Service&#xa;GET /recommend&#xa;POST /recommend/refresh&#xa;- composite scoring:&#xa;  BaZi (0-40) + profile (0-20)&#xa;  + recency (10)&#xa;- cached per user" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dcfce7;strokeColor=#16a34a;fontSize=13;" parent="domain" vertex="1">
@@ -69,8 +69,12 @@
                     <mxGeometry x="1010" y="430" width="240" height="130" as="geometry"/>
                 </mxCell>
                 <!-- Domain 1 event source -->
-                <mxCell id="d1Source" value="Domain 1 (Identity)&#xa;profile.completed event" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fee2e2;strokeColor=#dc2626;fontSize=13;" parent="domain" vertex="1">
-                    <mxGeometry x="1050" y="160" width="200" height="60" as="geometry"/>
+                <mxCell id="d1Source" value="Domain 1 (Identity)&#xa;profile.completed&#xa;profile.updated&#xa;profile.banned&#xa;user.deleted" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fee2e2;strokeColor=#dc2626;fontSize=13;" parent="domain" vertex="1">
+                    <mxGeometry x="1050" y="140" width="200" height="110" as="geometry"/>
+                </mxCell>
+                <!-- Domain 4 event source -->
+                <mxCell id="d4Source" value="Domain 4 (Moderation)&#xa;user.banned&#xa;→ consumed by D1 → republished as profile.banned" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fee2e2;strokeColor=#dc2626;fontSize=12;" parent="domain" vertex="1">
+                    <mxGeometry x="1050" y="570" width="240" height="90" as="geometry"/>
                 </mxCell>
                 <!-- Edges: REST API → Services -->
                 <mxCell id="e1" value="GET /discovery" style="curved=1;html=1;endArrow=block;endFill=1;strokeColor=#16a34a;fontSize=11;" parent="domain" source="restApi" target="discoveryService" edge="1">
@@ -124,7 +128,13 @@
                     <mxGeometry relative="1" as="geometry"/>
                 </mxCell>
                 <!-- Incoming events -->
-                <mxCell id="e17" value="profile.completed" style="curved=1;html=1;endArrow=block;endFill=1;strokeColor=#dc2626;fontSize=11;" parent="domain" source="d1Source" target="eventBus" edge="1">
+                <mxCell id="e17" value="profile.* / user.deleted" style="curved=1;html=1;endArrow=block;endFill=1;strokeColor=#dc2626;fontSize=11;" parent="domain" source="d1Source" target="eventBus" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e24" value="user.banned → D1" style="curved=1;html=1;endArrow=block;endFill=1;strokeColor=#dc2626;fontSize=11;dashed=1;" parent="domain" source="d4Source" target="d1Source" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e25" value="profile.banned / user.deleted&#xa;→ purge matches" style="curved=1;html=1;endArrow=block;endFill=1;strokeColor=#dc2626;fontSize=11;dashed=1;" parent="domain" source="eventBus" target="matchService" edge="1">
                     <mxGeometry relative="1" as="geometry"/>
                 </mxCell>
                 <mxCell id="e18" value="index profile" style="curved=1;html=1;endArrow=block;endFill=1;strokeColor=#dc2626;fontSize=11;dashed=1;" parent="domain" source="eventBus" target="discoveryService" edge="1">

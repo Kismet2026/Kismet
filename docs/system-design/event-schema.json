@@ -11,7 +11,7 @@
       "detail-type": "swipe.created",
       "description": "用户划右（like）时发布。仅 like 触发，pass 不触发。",
       "publisher": "Swipe Service",
-      "consumers": ["Match Service", "Activity Logger"],
+      "consumers": ["Match Service", "Recommendation Service", "Activity Logger"],
       "detail": {
         "swipeId": { "type": "string", "example": "swipe-001" },
         "userId": { "type": "string", "example": "user-123", "description": "执行划动的用户" },
@@ -85,7 +85,7 @@
     "profile.completed": {
       "source": "kismet.profile-service",
       "detail-type": "profile.completed",
-      "description": "用户首次完成个人资料后发布。用于将用户加入发现池。",
+      "description": "用户首次完成个人资料后发布。Discovery 用于加入发现池并预热 BaZi 缓存。",
       "publisher": "Profile Service",
       "consumers": ["Discovery Service", "Recommendation Service", "Activity Logger"],
       "detail": {
@@ -154,6 +154,48 @@
         "reason": { "type": "string", "example": "toxicity_detected" },
         "score": { "type": "number", "example": 0.92, "description": "审核置信度 0-1" },
         "timestamp": { "type": "string", "format": "date-time", "example": "2026-04-01T12:01:00Z" }
+      }
+    },
+
+    "user.banned": {
+      "source": "kismet.report-service",
+      "detail-type": "user.banned",
+      "description": "Report Service 决定封禁用户时发布（手动 admin resolve=ban 或自动达到阈值）。Profile Service 接收后把 profile.status 置为 banned 并再发 profile.banned。",
+      "publisher": "Report Service",
+      "consumers": ["Profile Service"],
+      "detail": {
+        "userId": { "type": "string", "example": "user-456", "description": "被封禁的用户" },
+        "reportId": { "type": "string", "example": "report-001", "description": "触发封禁的报告 ID" },
+        "reason": { "type": "string", "example": "inappropriate_content" },
+        "autoBanned": { "type": "boolean", "example": true, "description": "true 表示达到阈值自动封禁，false 表示 admin 手动封禁" },
+        "threshold": { "type": "integer", "example": 2, "description": "仅 autoBanned=true 时存在" },
+        "timestamp": { "type": "string", "format": "date-time", "example": "2026-04-16T23:14:19Z" }
+      }
+    },
+
+    "profile.banned": {
+      "source": "kismet.profile-service",
+      "detail-type": "profile.banned",
+      "description": "Profile Service 接收 user.banned 并持久化后发布，供下游服务清理被封禁用户的数据。",
+      "publisher": "Profile Service",
+      "consumers": ["Discovery Service", "Match Service", "Recommendation Service", "Message Service", "Email Service (planned #120)", "Activity Logger"],
+      "detail": {
+        "userId": { "type": "string", "example": "user-456" },
+        "reason": { "type": "string", "example": "inappropriate_content" },
+        "reportId": { "type": "string", "example": "report-001" },
+        "timestamp": { "type": "string", "format": "date-time", "example": "2026-04-16T23:14:19Z" }
+      }
+    },
+
+    "user.deleted": {
+      "source": "kismet.profile-service",
+      "detail-type": "user.deleted",
+      "description": "用户调用 DELETE /profiles/me 后发布。触发全域数据清理（照片、匹配、消息、推荐缓存、通知设置等）。",
+      "publisher": "Profile Service",
+      "consumers": ["Photo Service", "Discovery Service", "Swipe Service", "Match Service", "Recommendation Service", "Message Service", "Email Service", "Activity Logger"],
+      "detail": {
+        "userId": { "type": "string", "example": "user-123" },
+        "timestamp": { "type": "string", "format": "date-time", "example": "2026-04-16T23:14:19Z" }
       }
     }
   },
