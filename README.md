@@ -285,6 +285,8 @@ service-name/
 3. Read your service's README for setup instructions
 4. Deploy: `cd infra && npx cdk deploy <StackName> --app "python3 app.py"`
 
+> **Heads up — `enableActivityStream` context flag.** If the target AWS account already has D6's activity pipeline deployed (Kinesis stream `kismet-activity-stream` + `kismet-activity-firehose`), **every `cdk deploy` on that account must include `-c enableActivityStream=true`**, even when deploying an unrelated stack. `cdk.json` ships with the flag set to `false` (to keep the stream opt-in and avoid the ~$11/month Kinesis cost on fresh environments), and without the CLI override CDK will try to drift-correct `KismetShared` back to the no-stream state on every deploy, fail because `KismetDomain6` still imports the ActivityStream ARN, and auto-rollback. No damage, but your real deploy never runs. Example: `cdk deploy KismetDomain2 -c enableActivityStream=true`.
+
 ### User frontend (Next.js, Vercel)
 
 Local:
