@@ -56,7 +56,18 @@ def handler(event, context):
 
 
 def handle_user_deleted(event):
-    """Delete all recommendation cache entries for a deleted user."""
+    """Purge a banned/deleted user from the recommendation cache.
+
+    Two directions to clean:
+      1. Rows keyed on the user's own PK (the user's *view* of candidates) —
+         query by PK and batch-delete.
+      2. Rows where the user appears as a *candidate* inside someone else's
+         cache (candidateUserId == user_id). Without these, a banned user
+         keeps showing up in other users' /recommend responses until their
+         cache TTL flips. No GSI on candidateUserId, so we scan + filter.
+         Recommendation cache is small (bounded by active users × cache
+         size), so a filtered scan is acceptable here.
+    """
     detail = event.get('detail') or {}
     if isinstance(detail, str):
         try:
@@ -68,9 +79,11 @@ def handle_user_deleted(event):
         logger.warning('user.deleted event missing userId')
         return {'statusCode': 400, 'body': 'Missing userId'}
 
-    from boto3.dynamodb.conditions import Key
+    from boto3.dynamodb.conditions import Key, Attr
+
+    # 1) Delete the user's own cache rows.
     last_key = None
-    deleted_count = 0
+    own_deleted = 0
     while True:
         query_kwargs = {
             'KeyConditionExpression': Key('PK').eq(f'USER#{user_id}'),
@@ -81,12 +94,36 @@ def handle_user_deleted(event):
         with table.batch_writer() as batch:
             for item in result.get('Items', []):
                 batch.delete_item(Key={'PK': item['PK'], 'SK': item['SK']})
-                deleted_count += 1
+                own_deleted += 1
         last_key = result.get('LastEvaluatedKey')
         if not last_key:
             break
 
-    logger.info('Deleted %d recommendation cache entries for user %s', deleted_count, user_id)
+    # 2) Delete rows where this user appears as a candidate in *other* users'
+    #    caches. No GSI, so scan + filter. Bounded by total recommendation
+    #    rows which stays small for this project.
+    last_key = None
+    orphan_deleted = 0
+    while True:
+        scan_kwargs = {
+            'FilterExpression': Attr('candidateUserId').eq(user_id),
+            'ProjectionExpression': 'PK, SK',
+        }
+        if last_key:
+            scan_kwargs['ExclusiveStartKey'] = last_key
+        result = table.scan(**scan_kwargs)
+        with table.batch_writer() as batch:
+            for item in result.get('Items', []):
+                batch.delete_item(Key={'PK': item['PK'], 'SK': item['SK']})
+                orphan_deleted += 1
+        last_key = result.get('LastEvaluatedKey')
+        if not last_key:
+            break
+
+    logger.info(
+        'Recommendation cache cleanup for %s: own=%d orphan=%d',
+        user_id, own_deleted, orphan_deleted,
+    )
     return {'statusCode': 200, 'body': 'Recommendation cache deleted'}
 
 
