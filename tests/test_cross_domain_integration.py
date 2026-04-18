@@ -1113,6 +1113,12 @@ class TestUserDeletedEventChain(unittest.TestCase):
                         {"PK": "USER#user-alice", "SK": "SCORE#0080#user-charlie"},
                     ]
                 }
+                # Handler also calls scan() to purge orphan candidate rows in
+                # OTHER users' caches. Return an empty page with no
+                # LastEvaluatedKey so the scan loop terminates — without this
+                # the default MagicMock makes `.get("LastEvaluatedKey")` a
+                # truthy Mock and the loop hangs until the CI runner kills it.
+                mock_table.scan.return_value = {"Items": []}
                 mock_batch = MagicMock()
                 mock_table.batch_writer.return_value.__enter__ = MagicMock(return_value=mock_batch)
                 mock_table.batch_writer.return_value.__exit__ = MagicMock(return_value=False)
@@ -1121,6 +1127,7 @@ class TestUserDeletedEventChain(unittest.TestCase):
 
                 self.assertEqual(response["statusCode"], 200)
                 mock_table.query.assert_called_once()
+                mock_table.scan.assert_called_once()
 
     # ── Message service deletes conversation messages ─────────────────────────
 
