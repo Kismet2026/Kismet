@@ -1,6 +1,7 @@
 import json
 import os
 import importlib
+from datetime import datetime, timezone
 from unittest.mock import patch
 
 import boto3
@@ -132,11 +133,16 @@ def _seed_message(aws, match_id, message_id, timestamp, **extra):
 
 class TestGetStats:
     def test_returns_stats(self, aws):
+        # get_stats filters matches/messages by "begins_with(... today)", where
+        # today is datetime.now(timezone.utc). Use a live "today" timestamp so
+        # the test is not date-sensitive (it was silently broken across UTC
+        # midnight — CI that ran minutes after midnight hit `0 == 1`).
+        today_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         _seed_profile(aws, "user-1")
         _seed_profile(aws, "user-2", status="banned")
         _seed_flagged(aws, "c-1")
-        _seed_match(aws, "match-1", "2026-04-17T12:00:00Z")
-        _seed_message(aws, "match-1", "msg-1", "2026-04-17T12:30:00Z")
+        _seed_match(aws, "match-1", today_iso)
+        _seed_message(aws, "match-1", "msg-1", today_iso)
         r = lambda_function.handler(http_event("GET", "/admin/stats"), {})
         assert r["statusCode"] == 200
         body = json.loads(r["body"])
