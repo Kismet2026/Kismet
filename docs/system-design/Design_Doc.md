@@ -6,7 +6,7 @@
 
 ## 1. What Is Kismet
 
-A microservice-based dating app for college students (.edu verified), differentiated by **BaZi (八字) compatibility scoring** — an ancient Chinese astrological system that ranks partner compatibility based on birth date and time.
+A microservice-based dating app, differentiated by **BaZi (八字) compatibility scoring** — an ancient Chinese astrological system that ranks partner compatibility based on birth date and time.
 
 Built entirely on AWS using a serverless, event-driven architecture: **25 microservices** across **6 domains**, deployed as AWS Lambda functions.
 
@@ -52,20 +52,19 @@ Built entirely on AWS using a serverless, event-driven architecture: **25 micros
 
 | Service | AWS | Responsibility |
 |---------|-----|----------------|
-| Auth Service | Cognito, Lambda | Sign up, login, JWT tokens |
+| Auth Service | Cognito, Lambda | Sign up, login, JWT tokens (Cognito auto-verifies email) |
 | Profile Service | Lambda, DynamoDB | CRUD user profiles |
 | Photo Service | S3, Lambda, CloudFront | Upload, resize, serve profile photos |
-| Email Verification | SES, Lambda | .edu email verification |
 
 ### Domain 2 — Discovery & Matching
 
 | Service | AWS | Responsibility |
 |---------|-----|----------------|
-| Discovery Service | Lambda, DynamoDB | Filter and browse candidate profiles |
-| Swipe Service | Lambda, DynamoDB | Record like / pass actions |
-| Match Service | Lambda, DynamoDB Streams | Detect mutual likes, emit `match.created` |
-| Recommendation Service | Lambda, DynamoDB | Score and rank candidates |
-| BaZi Service | Lambda | Compatibility score via external BaZi API |
+| Discovery Service | Lambda, DynamoDB | Maintain discovery pool; serve filtered candidate list; cache BaZi scores |
+| Swipe Service | Lambda, DynamoDB | Record like/pass actions; publish `swipe.created` on like |
+| Match Service | Lambda, DynamoDB, EventBridge | Detect mutual likes atomically (TransactWrite); emit `match.created`; purge on `user.deleted` / `profile.banned` |
+| Recommendation Service | Lambda, DynamoDB | Compute and cache ranked candidates; bidirectional BaZi scoring |
+| BaZi Service | Lambda | Compatibility score via external BaZi API (stateless; cache lives in Discovery table) |
 
 ### Domain 3 — Messaging
 
@@ -107,17 +106,21 @@ Built entirely on AWS using a serverless, event-driven architecture: **25 micros
 
 ## 4. Shared Infrastructure
 
-Deployed once by PM; all services reference these resources.
+Deployed once by PM (`SharedStack`); all domain stacks import these resources. See [`infra/stacks/shared_stack.py`](../../infra/stacks/shared_stack.py).
 
 | Resource | Name | Purpose |
 |----------|------|---------|
-| Cognito User Pool | `kismet-user-pool` | Auth, .edu verification, JWT issuance |
-| API Gateway | `kismet-api` | Single REST entry point + Cognito authorizer |
+| Cognito User Pool | `kismet-user-pool` | Auth, email verification, JWT issuance |
+| Cognito App Client | `kismet-web-client` | Frontend client with USER_PASSWORD + SRP auth flows |
+| API Gateway (REST) | `kismet-api` | Single REST entry point (stage `dev`) + Cognito authorizer |
 | EventBridge Bus | `kismet-events` | All async cross-domain events |
-| S3 | `kismet-photos-dev` | Profile photos (write: Photo Service, read: CloudFront) |
-| S3 | `kismet-analytics-dev` | Analytics data lake (write: Firehose, query: Athena) |
-| Kinesis Data Stream | `kismet-activity-stream` | Activity Logger → Analytics Pipeline |
+| S3 Bucket | `kismet-photos-{account}-dev` | Profile photos (PUT: Photo Service presigned, GET: CloudFront) |
+| CloudFront Distribution | (auto-generated domain) | CDN for photo GET (cache-optimized, gzip) |
+| S3 Bucket | `kismet-analytics-{account}-dev` | Analytics data lake (write: Firehose, query: Athena) |
+| Kinesis Data Stream | `kismet-activity-stream` | Activity Logger → Analytics Pipeline ⚠️ *deferred on current AWS account — see `SharedStack.activity_stream = None`* |
 | SNS Topic | `kismet-health-alerts` | Health Monitor alerts |
+
+Domain-3 chat uses a separate **API Gateway WebSocket API** (`kismet-chat-websocket`) owned by Domain 3 — not shared.
 
 ---
 
@@ -167,16 +170,22 @@ All events share this envelope format:
 
 ### Key events
 
+See [`event-schema.json`](./event-schema.json) for full detail schemas.
+
 | Event | Source | Consumers | Key fields |
 |-------|--------|-----------|------------|
 | `user.created` | auth-service | Email Service, Activity Logger | `userId`, `email`, `timestamp` |
-| `profile.completed` | profile-service | Recommendation Service, Activity Logger | `userId`, `timestamp` |
-| `photo.uploaded` | photo-service | Image Moderation, Activity Logger | `photoId`, `userId`, `s3Key` |
-| `swipe.created` | swipe-service | Match Service, Activity Logger | `userId`, `targetUserId`, `action` |
+| `profile.completed` | profile-service | Discovery, Recommendation, Activity Logger | `userId`, `birthDate`, `gender`, `preferred_gender`, `location_coordinates`, `avatarUrl`, `bio`, `timestamp` |
+| `profile.updated` | profile-service | Discovery, Activity Logger | same shape as `profile.completed` |
+| `photo.uploaded` | photo-service | Image Moderation, Activity Logger | `photoId`, `userId`, `s3Key`, `s3Bucket`, `contentType`, `isPrimary` |
+| `swipe.created` | swipe-service | Match, Recommendation (cache invalidation), Activity Logger | `userId`, `targetUserId`, `action`, `timestamp` |
 | `match.created` | match-service | Push Notification, Email, Icebreaker, Activity Logger | `matchId`, `userIds[]`, `timestamp` |
-| `message.sent` | message-service | Text Moderation, Activity Logger | `messageId`, `matchId`, `senderId`, `content` |
+| `message.sent` | message-service | Text Moderation, Push Notification, Activity Logger | `messageId`, `matchId`, `senderId`, `recipientId`, `content` |
 | `content.flagged` | moderation | Admin Dashboard, Activity Logger | `contentId`, `contentType`, `userId`, `reason`, `score` |
 | `user.reported` | report-service | Admin Dashboard, Email Service, Activity Logger | `reportId`, `reporterId`, `reportedUserId`, `reason` |
+| `user.banned` | report-service | Profile Service *(re-publishes as `profile.banned`)* | `userId`, `reportId`, `reason`, `autoBanned?`, `threshold?` |
+| `profile.banned` | profile-service | Discovery, Match, Recommendation, Message, Email (planned #120) | `userId`, `reason`, `reportId`, `timestamp` |
+| `user.deleted` | profile-service | Photo, Discovery, Swipe, Match, Recommendation, Message, Email | `userId`, `timestamp` |
 
 ---
 
@@ -186,17 +195,22 @@ All events share this envelope format:
 
 Key tables:
 
-| Table | Owner | PK | SK |
-|-------|-------|----|----|
-| `kismet-users` | Profile | `USER#{userId}` | `PROFILE` |
-| `kismet-swipes` | Swipe | `USER#{userId}` | `TARGET#{targetId}` |
-| `kismet-matches` | Match | `MATCH#{matchId}` | `USER#{userId}` |
-| `kismet-messages` | Message | `CONV#{matchId}` | `MSG#{timestamp}` |
-| `kismet-reports` | Report | `REPORT#{reportId}` | `META` |
-| `kismet-flagged-content` | Admin Dashboard | `CONTENT#{contentId}` | `META` |
-| `kismet-admin-stats` | Admin Dashboard | `STAT#{type}` | `DATE#{date}` |
-| `kismet-activity-log` | Activity Logger | `USER#{userId}` | `EVENT#{timestamp}` |
-| `kismet-presence` | Presence | `USER#{userId}` | `STATUS` |
+| Table | Owner | PK | SK | Notes |
+|-------|-------|----|----|-------|
+| `kismet-profiles` | Profile | `USER#{userId}` | `PROFILE` | canonical user doc; `status` field: `active \| banned` |
+| `kismet-photos` | Photo | `USER#{userId}` | `PHOTO#{photoId}` | `status`: `pending \| active \| rejected` |
+| `kismet-discovery` | Discovery | `PROFILE#{userId}` \| `BAZI#{birthDate}` | `META` \| `SCORES` | denormalized discovery pool + BaZi cache |
+| `kismet-swipes` | Swipe | `userId` | `targetUserId` | flat hash+range, one row per swipe |
+| `kismet-matches` | Match | `MATCH#{matchId}` \| `PAIR#{a}#{b}` \| `USER#{userId}` | `META` \| `MATCH#{ts}#{matchId}` | single-table with 3 access patterns |
+| `kismet-recommendations` | Recommendation | `USER#{userId}` | `SCORE#{score}#{candidateId}` | computed score cache |
+| `kismet-messages` | Message | `CONV#{matchId}` | `MSG#{timestamp}` | |
+| `kismet-reports` | Report | `pk` = `REPORT#{reportId}` | `sk` = `META` | GSI on `reportedUserId` for auto-ban count |
+| `kismet-image-moderation-dev` | Image Moderation | `photoId` = `PHOTO#{id}` | `sk` = `RESULT` | Rekognition scan history + GSI for admin |
+| `kismet-text-moderation-dev` | Text Moderation | `contentId` | `sk` | Comprehend scan history |
+| `kismet-flagged-content` | Admin Dashboard | `CONTENT#{contentId}` | `META` | |
+| `kismet-admin-stats` | Admin Dashboard | `STAT#{type}` | `DATE#{date}` | |
+| `kismet-activity-log` | Activity Logger | `USER#{userId}` | `EVENT#{timestamp}` | |
+| `kismet-presence` | Presence | `USER#{userId}` | `STATUS` | DynamoDB TTL → auto-offline |
 
 **DynamoDB TTL** is used for Presence Service: status expires after 60s (user marked offline if no heartbeat).
 
@@ -207,10 +221,9 @@ Key tables:
 ## 8. Key User Flows
 
 ### Sign Up
-1. User submits email (.edu) + password + birth date
-2. Auth Service → Cognito creates account → returns JWT
-3. Email Verification Service → SES sends verification email
-4. On verification → `user.created` published → Email Service sends welcome email, Activity Logger records
+1. User submits email + password + birth date
+2. Auth Service → Cognito creates account, auto-verifies the email attribute, returns JWT
+3. `user.created` published → Email Service sends welcome email, Activity Logger records
 
 ### Discovery & Matching
 1. Frontend calls `GET /discovery` → Discovery + Recommendation + BaZi Services return ranked candidates
@@ -267,7 +280,7 @@ Deployment order: SharedStack first, then all domain stacks (can deploy in paral
 | Chat latency | < 500ms via WebSocket |
 | Scalability | Lambda auto-scales; DynamoDB on-demand |
 | Content safety | All photos scanned before display; all messages scanned post-send |
-| Auth | JWT (Cognito), .edu verified |
+| Auth | JWT (Cognito), email auto-verified |
 | Cost | Within AWS Academy / free tier where possible |
 
 ---

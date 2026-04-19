@@ -17,10 +17,12 @@ SERVICE_NAME = "photo-service"
 USER_PHOTOS_PATTERN = re.compile(r"^/users/(?P<userId>[^/]+)/photos$")
 PHOTO_DETAIL_PATTERN = re.compile(r"^/photos/(?P<photoId>[^/]+)$")
 PHOTO_PRIMARY_PATTERN = re.compile(r"^/photos/(?P<photoId>[^/]+)/primary$")
+PHOTO_CONFIRM_PATTERN = re.compile(r"^/photos/(?P<photoId>[^/]+)/confirm$")
 
 PHOTOS_TABLE_NAME = os.environ.get("PHOTOS_TABLE_NAME", "")
 PHOTOS_BUCKET_NAME = os.environ.get("PHOTOS_BUCKET_NAME", "")
 PHOTOS_CDN_BASE_URL = os.environ.get("PHOTOS_CDN_BASE_URL", "").rstrip("/")
+PROFILES_TABLE_NAME = os.environ.get("PROFILES_TABLE_NAME", "kismet-profiles")
 EVENT_BUS_NAME = os.environ.get("EVENT_BUS_NAME", "")
 
 PRESIGNED_URL_EXPIRY = 300  # seconds
@@ -40,10 +42,16 @@ def handler(event, context):
     operation = None
     user_photos_match = USER_PHOTOS_PATTERN.match(path)
     primary_match = PHOTO_PRIMARY_PATTERN.match(path)
+    confirm_match = PHOTO_CONFIRM_PATTERN.match(path)
     detail_match = PHOTO_DETAIL_PATTERN.match(path)
 
     try:
-        if path == "/photos/upload":
+        if event.get("source") == "kismet.profile-service" and (
+            event.get("detail-type") or event.get("detailType")
+        ) == "user.deleted":
+            operation = "handleUserDeleted"
+            return handle_user_deleted(_get_event_detail(event))
+        elif path == "/photos/upload":
             if method != "POST":
                 return _response(404, {"code": "NOT_FOUND", "message": f"No route matches {method} {path}."})
             operation = "uploadPhoto"
@@ -53,6 +61,11 @@ def handler(event, context):
             if not user_id:
                 return _response(401, {"code": "UNAUTHORIZED", "message": "Authentication required."})
             return handle_upload(user_id, payload or {})
+        elif confirm_match and method == "POST":
+            operation = "confirmPhoto"
+            if not user_id:
+                return _response(401, {"code": "UNAUTHORIZED", "message": "Authentication required."})
+            return handle_confirm(user_id, confirm_match.group("photoId"))
         elif primary_match and method == "PUT":
             operation = "setPrimaryPhoto"
             if not user_id:
@@ -76,6 +89,30 @@ def handler(event, context):
         return _response(500, {"code": "INTERNAL_ERROR", "message": "An unexpected error occurred."})
 
 
+def handle_user_deleted(detail: Dict[str, Any]) -> Dict[str, Any]:
+    """Delete all photos for a deleted user from DynamoDB and S3."""
+    user_id = (detail.get("userId") or "").strip()
+    if not user_id:
+        logger.warning("user.deleted received without userId")
+        return {"statusCode": 400, "body": "Missing userId"}
+
+    table = dynamodb.Table(PHOTOS_TABLE_NAME)
+    from boto3.dynamodb.conditions import Key as BotoKey
+    result = table.query(KeyConditionExpression=BotoKey("PK").eq(f"USER#{user_id}"))
+
+    deleted_count = 0
+    for item in result.get("Items", []):
+        try:
+            s3.delete_object(Bucket=PHOTOS_BUCKET_NAME, Key=item["s3Key"])
+        except ClientError:
+            logger.warning("Failed to delete S3 object %s for user %s", item.get("s3Key"), user_id)
+        table.delete_item(Key={"PK": f"USER#{user_id}", "SK": f"PHOTO#{item['photoId']}"})
+        deleted_count += 1
+
+    logger.info("Deleted %d photos for user %s", deleted_count, user_id)
+    return {"statusCode": 200, "body": f"Deleted {deleted_count} photos"}
+
+
 def handle_upload(user_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
     content_type = (body.get("contentType") or "").strip().lower()
     filename = (body.get("filename") or "").strip()
@@ -95,7 +132,7 @@ def handle_upload(user_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
     ext = "jpg" if content_type == "image/jpeg" else content_type.split("/")[-1]
     s3_key = f"{user_id}/{photo_id}.{ext}"
     uploaded_at = datetime.now(timezone.utc).isoformat()
-    is_primary = existing.get("Count", 0) == 0  # first photo is primary by default
+    is_primary = existing.get("Count", 0) == 0
 
     upload_url = s3.generate_presigned_url(
         "put_object",
@@ -112,8 +149,32 @@ def handle_upload(user_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
         "contentType": content_type,
         "filename": filename,
         "isPrimary": is_primary,
+        "status": "pending",
         "uploadedAt": uploaded_at,
     })
+
+    return _response(200, {"photoId": photo_id, "uploadUrl": upload_url, "expiresIn": PRESIGNED_URL_EXPIRY})
+
+
+def handle_confirm(user_id: str, photo_id: str) -> Dict[str, Any]:
+    table = dynamodb.Table(PHOTOS_TABLE_NAME)
+    result = table.get_item(Key={"PK": f"USER#{user_id}", "SK": f"PHOTO#{photo_id}"})
+    item = result.get("Item")
+
+    if not item:
+        return _response(404, {"code": "NOT_FOUND", "message": "Photo not found."})
+    if item.get("status") != "pending":
+        return _response(409, {"code": "CONFLICT", "message": "Photo already confirmed."})
+
+    table.update_item(
+        Key={"PK": f"USER#{user_id}", "SK": f"PHOTO#{photo_id}"},
+        UpdateExpression="SET #st = :active",
+        ExpressionAttributeNames={"#st": "status"},
+        ExpressionAttributeValues={":active": "active"},
+    )
+
+    s3_key = item["s3Key"]
+    is_primary = item.get("isPrimary", False)
 
     events.put_events(Entries=[{
         "Source": "kismet.photo-service",
@@ -123,15 +184,19 @@ def handle_upload(user_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
             "userId": user_id,
             "s3Key": s3_key,
             "s3Bucket": PHOTOS_BUCKET_NAME,
-            "contentType": content_type,
+            "contentType": item.get("contentType", ""),
             "cdnUrl": f"{PHOTOS_CDN_BASE_URL}/{s3_key}" if PHOTOS_CDN_BASE_URL else "",
             "isPrimary": is_primary,
-            "timestamp": uploaded_at,
+            "timestamp": item.get("uploadedAt", ""),
         }),
         "EventBusName": EVENT_BUS_NAME,
     }])
 
-    return _response(200, {"photoId": photo_id, "uploadUrl": upload_url, "expiresIn": PRESIGNED_URL_EXPIRY})
+    if is_primary:
+        cdn_url = f"{PHOTOS_CDN_BASE_URL}/{s3_key}" if PHOTOS_CDN_BASE_URL else ""
+        _update_profile_avatar(user_id, cdn_url)
+
+    return _response(200, {"photoId": photo_id, "status": "active"})
 
 
 def handle_list(user_id: str) -> Dict[str, Any]:
@@ -140,6 +205,9 @@ def handle_list(user_id: str) -> Dict[str, Any]:
 
     photos = []
     for item in result.get("Items", []):
+        status = item.get("status", "active")
+        if status in ("rejected", "pending"):
+            continue
         photos.append({
             "photoId": item["photoId"],
             "url": f"{PHOTOS_CDN_BASE_URL}/{item['s3Key']}",
@@ -204,12 +272,62 @@ def handle_set_primary(user_id: str, photo_id: str) -> Dict[str, Any]:
         ExpressionAttributeValues={":t": True},
     )
 
+    # Update profile avatarUrl with new primary photo
+    item = result["Item"]
+    s3_key = item.get("s3Key", "")
+    cdn_url = f"{PHOTOS_CDN_BASE_URL}/{s3_key}" if PHOTOS_CDN_BASE_URL and s3_key else ""
+    _update_profile_avatar(user_id, cdn_url)
+
     return _response(200, {"photoId": photo_id, "isPrimary": True})
+
+
+def _update_profile_avatar(user_id: str, avatar_url: str) -> None:
+    """Update avatarUrl in profiles table and discovery table."""
+    try:
+        profiles_table = dynamodb.Table(PROFILES_TABLE_NAME)
+        profiles_table.update_item(
+            Key={"PK": f"USER#{user_id}", "SK": "PROFILE"},
+            UpdateExpression="SET avatarUrl = :url",
+            ExpressionAttributeValues={":url": avatar_url},
+            ConditionExpression="attribute_exists(PK)",
+        )
+        logger.info("Updated profile avatarUrl for user %s", user_id)
+    except ClientError as e:
+        if e.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+            logger.info("No profile found for user %s, skipping avatar update", user_id)
+        else:
+            logger.warning("Failed to update profile avatarUrl: %s", e)
+
+    # Also update discovery table
+    try:
+        discovery_table = dynamodb.Table("kismet-discovery")
+        discovery_table.update_item(
+            Key={"PK": f"PROFILE#{user_id}", "SK": "META"},
+            UpdateExpression="SET avatarUrl = :url",
+            ExpressionAttributeValues={":url": avatar_url},
+            ConditionExpression="attribute_exists(PK)",
+        )
+        logger.info("Updated discovery avatarUrl for user %s", user_id)
+    except ClientError:
+        logger.info("No discovery entry for user %s, skipping", user_id)
 
 
 def _get_user_id(event: Dict[str, Any]) -> Optional[str]:
     claims = event.get("requestContext", {}).get("authorizer", {}).get("claims", {})
     return claims.get("sub") or claims.get("cognito:username")
+
+
+def _get_event_detail(event: Dict[str, Any]) -> Dict[str, Any]:
+    detail = event.get("detail") or {}
+    if isinstance(detail, dict):
+        return detail
+    if isinstance(detail, str):
+        try:
+            parsed = json.loads(detail)
+        except json.JSONDecodeError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
 
 
 def _get_method(event: Dict[str, Any]) -> str:

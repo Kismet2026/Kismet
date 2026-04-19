@@ -79,8 +79,7 @@ def handle_eventbridge(event):
         "timestamp": timestamp,
     }
 
-    _write_to_kinesis(record, user_id)
-    _write_to_dynamodb(record, user_id)
+    records_to_write = [(record, user_id)]
 
     if detail_type == "match.created":
         user_ids = detail.get("userIds", [])
@@ -90,7 +89,17 @@ def handle_eventbridge(event):
                 "logId": f"log-{uuid.uuid4().hex[:12]}",
                 "userId": user_ids[1],
             }
-            _write_to_dynamodb(second_record, user_ids[1])
+            records_to_write.append((second_record, user_ids[1]))
+
+    try:
+        for current_record, current_user_id in records_to_write:
+            _write_to_kinesis(current_record, current_user_id)
+    except Exception as e:
+        print(f"Kinesis write failed for EventBridge event {detail_type}: {e}")
+        raise
+
+    for current_record, current_user_id in records_to_write:
+        _write_to_dynamodb(current_record, current_user_id)
 
     return {"statusCode": 200}
 
@@ -130,7 +139,17 @@ def handle_post_log(event):
         "timestamp": timestamp,
     }
 
-    _write_to_kinesis(record, user_id)
+    try:
+        _write_to_kinesis(record, user_id)
+    except Exception as e:
+        return _response(
+            502,
+            {
+                "error": "KINESIS_WRITE_FAILED",
+                "message": str(e),
+            },
+        )
+
     _write_to_dynamodb(record, user_id)
 
     return _response(
@@ -193,14 +212,31 @@ def handle_get_recent(event):
 
 
 def _write_to_kinesis(record, partition_key):
+    # Athena's `activity_events` table declares `eventData STRING`, so the
+    # JsonSerDe needs each record's `eventData` to be a JSON *string*, not a
+    # nested object — otherwise dashboard queries that call
+    # `json_extract_scalar(eventData, '$.matchId')` always get NULL.
+    # Stringify it here (Kinesis/Firehose/Athena path only). The DDB path
+    # below keeps the original dict so consumers of `kismet-activity-log`
+    # still see `eventData` as a native map.
+    kinesis_record = record
+    if isinstance(record.get("eventData"), dict):
+        kinesis_record = {**record, "eventData": json.dumps(record["eventData"])}
     try:
+        # Append a newline so Firehose writes JSON Lines to S3. Kinesis records
+        # are concatenated byte-for-byte into Firehose output objects with no
+        # delimiter added, so without this trailing '\n' the S3 file is one
+        # long line of back-to-back JSON objects and Athena's JsonSerDe reads
+        # only the first record per object.
         kinesis.put_record(
             StreamName=KINESIS_STREAM_NAME,
-            Data=json.dumps(record).encode("utf-8"),
+            Data=(json.dumps(kinesis_record) + "\n").encode("utf-8"),
             PartitionKey=partition_key,
         )
     except Exception as e:
-        print(f"Kinesis write failed: {e}")
+        raise RuntimeError(
+            f"failed to write to Kinesis stream {KINESIS_STREAM_NAME}"
+        ) from e
 
 
 def _write_to_dynamodb(record, user_id):

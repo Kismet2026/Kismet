@@ -22,6 +22,19 @@ events_client = boto3.client("events")
 
 def lambda_handler(event: Optional[Dict[str, Any]], context: Any) -> Dict[str, Any]:
     event = event or {}
+
+    # EventBridge: user.deleted or profile.banned → purge messages for the user
+    if event.get("source") == "kismet.profile-service" and (
+        event.get("detail-type") or event.get("detailType")
+    ) in ("user.deleted", "profile.banned"):
+        detail = event.get("detail") or {}
+        if isinstance(detail, str):
+            try:
+                detail = json.loads(detail)
+            except (json.JSONDecodeError, TypeError):
+                detail = {}
+        return handle_user_deleted(detail)
+
     method = get_http_method(event)
     path_params = event.get("pathParameters") or {}
     query_params = event.get("queryStringParameters") or {}
@@ -44,6 +57,54 @@ def lambda_handler(event: Optional[Dict[str, Any]], context: Any) -> Dict[str, A
         return handle_delete_message(path_params["messageId"], user_id)
 
     return json_response(404, {"code": "NOT_FOUND", "message": f"No route matches {method}"})
+
+
+def handle_user_deleted(detail: dict) -> Dict[str, Any]:
+    """Delete all messages in every conversation the deleted user participated in."""
+    user_id = (detail.get("userId") or "").strip()
+    if not user_id:
+        print("[WARN] user.deleted event missing userId")
+        return {"statusCode": 400, "body": "Missing userId"}
+
+    deleted_count = 0
+
+    # Find all matches for this user so we know which conversations to clean up
+    match_last_key = None
+    while True:
+        match_query_kwargs: Dict[str, Any] = {
+            "KeyConditionExpression": Key("PK").eq(f"USER#{user_id}") & Key("SK").begins_with("MATCH#"),
+        }
+        if match_last_key:
+            match_query_kwargs["ExclusiveStartKey"] = match_last_key
+
+        result = matches_table.query(**match_query_kwargs)
+
+        for match_index_item in result.get("Items", []):
+            match_id = match_index_item.get("matchId")
+            if not match_id:
+                continue
+            # Delete all messages in this conversation, handling pagination
+            last_key = None
+            while True:
+                query_kwargs: Dict[str, Any] = {
+                    "KeyConditionExpression": Key("PK").eq(f"CONV#{match_id}"),
+                }
+                if last_key:
+                    query_kwargs["ExclusiveStartKey"] = last_key
+                msgs = table.query(**query_kwargs)
+                with table.batch_writer() as batch:
+                    for msg in msgs.get("Items", []):
+                        batch.delete_item(Key={"PK": msg["PK"], "SK": msg["SK"]})
+                        deleted_count += 1
+                last_key = msgs.get("LastEvaluatedKey")
+                if not last_key:
+                    break
+
+        match_last_key = result.get("LastEvaluatedKey")
+        if not match_last_key:
+            break
+    print(f"[INFO] Deleted {deleted_count} messages for user {user_id}")
+    return {"statusCode": 200, "body": f"Deleted {deleted_count} messages"}
 
 
 # ── Handlers ──────────────────────────────────────────────────────────────────
@@ -129,7 +190,7 @@ def handle_send_message(body: dict, sender_id: str) -> Dict[str, Any]:
 
 
 def handle_get_messages(match_id: str, user_id: str, query_params: dict) -> Dict[str, Any]:
-    """GET /messages/{matchId} — Paginated conversation history, newest first."""
+    """GET /messages/match/{matchId} — Paginated conversation history, newest first."""
     _, match_error = get_match_for_user(match_id, user_id)
     if match_error:
         return match_error

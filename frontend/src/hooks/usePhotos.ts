@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { api, uploadToS3 } from "@/lib/api";
 import { getUserIdFromToken } from "@/lib/auth";
+import { normalizeImageFile } from "@/lib/imageUtils";
 import type { Photo, PhotoUploadResponse } from "@/types";
 
 export function usePhotos(userId?: string) {
@@ -35,24 +36,44 @@ export function usePhotos(userId?: string) {
   }, [fetchPhotos]);
 
   const uploadPhoto = useCallback(
-    async (file: File) => {
+    async (file: File): Promise<{ photoId: string; rejected: boolean }> => {
       setUploading(true);
       try {
-        // 1. Get presigned URL
+        // Rekognition only accepts JPEG/PNG — convert WebP/HEIC/etc. so
+        // D4 image-moderation can actually scan the upload.
+        const normalized = await normalizeImageFile(file);
         const { uploadUrl, photoId } = await api.post<PhotoUploadResponse>(
           "/photos/upload",
-          { contentType: file.type, filename: file.name }
+          { contentType: normalized.type, filename: normalized.name }
         );
-        // 2. Upload directly to S3
-        await uploadToS3(uploadUrl, file);
-        // 3. Refresh photos list
-        await fetchPhotos();
-        return photoId;
+        await uploadToS3(uploadUrl, normalized);
+        await api.post(`/photos/${photoId}/confirm`);
+
+        // D4 moderation is async (Rekognition typically ~1-3s). Wait long
+        // enough for the scan to settle, then check whether the photo is
+        // still in the list — the backend filters out rejected photos so
+        // missing == flagged.
+        await new Promise((r) => setTimeout(r, 5000));
+        let rejected = true;
+        if (targetId) {
+          try {
+            const data = await api.get<{ photos: Photo[]; count: number }>(
+              `/users/${targetId}/photos`
+            );
+            setPhotos(data.photos);
+            rejected = !data.photos.some((p) => p.photoId === photoId);
+          } catch {
+            // network failure — assume not rejected rather than lie to user
+            rejected = false;
+          }
+        }
+
+        return { photoId, rejected };
       } finally {
         setUploading(false);
       }
     },
-    [fetchPhotos]
+    [targetId]
   );
 
   const deletePhoto = useCallback(

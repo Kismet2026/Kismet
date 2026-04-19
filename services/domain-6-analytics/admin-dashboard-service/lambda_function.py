@@ -5,8 +5,10 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 import boto3
+from botocore.exceptions import ClientError
 
 dynamodb = boto3.resource("dynamodb")
+events_client = boto3.client("events")
 
 ADMIN_STATS_TABLE = os.environ.get("ADMIN_STATS_TABLE", "kismet-admin-stats")
 FLAGGED_CONTENT_TABLE = os.environ.get(
@@ -15,6 +17,25 @@ FLAGGED_CONTENT_TABLE = os.environ.get(
 # Cross-service: kismet-profiles is owned by domain-1 (Quinn).
 # The CDK stack must grant this Lambda read/write access to kismet-profiles.
 PROFILES_TABLE = os.environ.get("PROFILES_TABLE", "kismet-profiles")
+MATCHES_TABLE = os.environ.get("MATCHES_TABLE", "kismet-matches")
+MESSAGES_TABLE = os.environ.get("MESSAGES_TABLE", "kismet-messages")
+EVENT_BUS_NAME = os.environ.get("EVENT_BUS_NAME", "kismet-events")
+ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "admin@kismet.com")
+ADMIN_GROUP_NAMES = {"admin", "admins"}
+
+
+class EventPublishError(Exception):
+    pass
+
+
+def _event_publish_failed_response():
+    return _response(
+        502,
+        {
+            "error": "EVENT_PUBLISH_FAILED",
+            "message": "Failed to publish user.banned event",
+        },
+    )
 
 
 def _response(status_code, body):
@@ -43,12 +64,53 @@ def _decode_cursor(cursor: str) -> dict:
 
 
 def _get_admin_id(event) -> str:
-    return (
-        event.get("requestContext", {})
-        .get("authorizer", {})
-        .get("claims", {})
-        .get("sub", "unknown")
-    )
+    return extract_claims(event).get("sub", "unknown")
+
+
+def extract_claims(event) -> dict:
+    request_context = event.get("requestContext") or {}
+    authorizer = request_context.get("authorizer")
+    if not isinstance(authorizer, dict):
+        return {}
+
+    claims = authorizer.get("claims")
+    if isinstance(claims, dict):
+        return claims
+
+    jwt = authorizer.get("jwt")
+    if isinstance(jwt, dict) and isinstance(jwt.get("claims"), dict):
+        return jwt["claims"]
+
+    return {}
+
+
+def _parse_groups(raw) -> set:
+    if raw is None:
+        return set()
+    if isinstance(raw, list):
+        return {str(group).strip() for group in raw if str(group).strip()}
+    if isinstance(raw, str):
+        value = raw.strip()
+        if not value:
+            return set()
+        if value.startswith("["):
+            try:
+                parsed = json.loads(value)
+                if isinstance(parsed, list):
+                    return {str(group).strip() for group in parsed if str(group).strip()}
+            except json.JSONDecodeError:
+                pass
+        return {group.strip() for group in value.replace(",", " ").split() if group.strip()}
+    return set()
+
+
+def _is_admin(claims: dict) -> bool:
+    groups = _parse_groups(claims.get("cognito:groups"))
+    if groups & ADMIN_GROUP_NAMES:
+        return True
+
+    email = (claims.get("email") or claims.get("cognito:username") or "").strip().lower()
+    return email == ADMIN_EMAIL.lower()
 
 
 def handler(event, context):
@@ -63,6 +125,10 @@ def handler(event, context):
 
     method = event.get("httpMethod", "")
     resource = event.get("resource", "")
+    claims = extract_claims(event)
+
+    if not _is_admin(claims):
+        return _response(403, {"error": "FORBIDDEN", "message": "Admin access required"})
 
     routes = {
         ("GET", "/admin/stats"): get_stats,
@@ -80,30 +146,84 @@ def handler(event, context):
 
 # GET /admin/stats
 def get_stats(event, context):
-    stat_keys = [
-        "totalUsers",
-        "activeUsers",
-        "matchesToday",
-        "messagesToday",
-        "flaggedContentCount",
-    ]
+    profiles_table = dynamodb.Table(PROFILES_TABLE)
+    flagged_table = dynamodb.Table(FLAGGED_CONTENT_TABLE)
 
-    # Batch-read all stats in one call (each stored at SK=LATEST)
-    keys = [{"PK": f"STAT#{k}", "SK": "LATEST"} for k in stat_keys]
-    response = dynamodb.batch_get_item(RequestItems={ADMIN_STATS_TABLE: {"Keys": keys}})
-    items = {
-        item["PK"].split("#")[1]: item.get("value", 0)
-        for item in response["Responses"].get(ADMIN_STATS_TABLE, [])
+    # Live count from kismet-profiles
+    total_users = 0
+    active_users = 0
+    profile_kwargs = {
+        "FilterExpression": "SK = :sk",
+        "ExpressionAttributeValues": {":sk": "PROFILE"},
+        "Select": "ALL_ATTRIBUTES",
     }
+    while True:
+        result = profiles_table.scan(**profile_kwargs)
+        for item in result.get("Items", []):
+            total_users += 1
+            if item.get("status", "active") != "banned":
+                active_users += 1
+        if "LastEvaluatedKey" not in result:
+            break
+        profile_kwargs["ExclusiveStartKey"] = result["LastEvaluatedKey"]
+
+    # Live count from kismet-flagged-content where status=pending
+    flagged_count = 0
+    flagged_kwargs = {
+        "FilterExpression": "#s = :pending",
+        "ExpressionAttributeNames": {"#s": "status"},
+        "ExpressionAttributeValues": {":pending": "pending"},
+        "Select": "COUNT",
+    }
+    while True:
+        result = flagged_table.scan(**flagged_kwargs)
+        flagged_count += result.get("Count", 0)
+        if "LastEvaluatedKey" not in result:
+            break
+        flagged_kwargs["ExclusiveStartKey"] = result["LastEvaluatedKey"]
+
+    # Live count from kismet-matches — only today's matches (SK=META, matchedAt starts with today)
+    today_prefix = datetime.now(timezone.utc).strftime("%Y-%m-%dT")
+    matches_count = 0
+    matches_kwargs = {
+        "FilterExpression": "SK = :meta AND begins_with(PK, :match_pk) AND begins_with(matchedAt, :today)",
+        "ExpressionAttributeValues": {
+            ":meta": "META",
+            ":match_pk": "MATCH#",
+            ":today": today_prefix,
+        },
+        "Select": "COUNT",
+    }
+    while True:
+        result = dynamodb.Table(MATCHES_TABLE).scan(**matches_kwargs)
+        matches_count += result.get("Count", 0)
+        if "LastEvaluatedKey" not in result:
+            break
+        matches_kwargs["ExclusiveStartKey"] = result["LastEvaluatedKey"]
+
+    # Live count from kismet-messages — only today's messages
+    today_prefix = datetime.now(timezone.utc).strftime("%Y-%m-%dT")
+    messages_count = 0
+    messages_kwargs = {
+        "FilterExpression": "begins_with(SK, :today)",
+        "ExpressionAttributeValues": {":today": f"MSG#{today_prefix}"},
+        "Select": "COUNT",
+    }
+    while True:
+        result = dynamodb.Table(MESSAGES_TABLE).scan(**messages_kwargs)
+        messages_count += result.get("Count", 0)
+        if "LastEvaluatedKey" not in result:
+            break
+        messages_kwargs["ExclusiveStartKey"] = result["LastEvaluatedKey"]
 
     return _response(
         200,
         {
-            "totalUsers": int(items.get("totalUsers", 0)),
-            "activeUsers": int(items.get("activeUsers", 0)),
-            "matchesToday": int(items.get("matchesToday", 0)),
-            "messagesToday": int(items.get("messagesToday", 0)),
-            "flaggedContentCount": int(items.get("flaggedContentCount", 0)),
+            "totalUsers": total_users,
+            "activeUsers": active_users,
+            "matchesToday": matches_count,
+            "messagesToday": messages_count,
+            "flaggedContentCount": flagged_count,
             "generatedAt": datetime.now(timezone.utc).isoformat(),
         },
     )
@@ -206,7 +326,12 @@ def resolve_flagged_content(event, context):
     if action == "ban_user":
         content_owner = existing["Item"].get("userId")
         if content_owner:
-            _ban_user_in_profiles(content_owner, admin_id, resolved_at)
+            ban_result = _ban_user_in_profiles(content_owner, admin_id, resolved_at)
+            if ban_result in ("ok", "already_banned"):
+                try:
+                    _publish_user_banned(content_owner, admin_id, resolved_at)
+                except EventPublishError:
+                    return _event_publish_failed_response()
 
     # Decrement flaggedContentCount stat
     _update_stat("flaggedContentCount", -1)
@@ -234,40 +359,38 @@ def get_users(event, context):
     scan_kwargs = {
         "FilterExpression": "SK = :profile",
         "ExpressionAttributeValues": {":profile": "PROFILE"},
-        "Limit": limit,
     }
-
-    if search:
-        scan_kwargs["FilterExpression"] = "SK = :profile AND contains(#name, :search)"
-        scan_kwargs["ExpressionAttributeNames"] = {"#name": "name"}
-        scan_kwargs["ExpressionAttributeValues"] = {
-            ":profile": "PROFILE",
-            ":search": search,
-        }
 
     if cursor:
         scan_kwargs["ExclusiveStartKey"] = _decode_cursor(cursor)
 
-    result = table.scan(**scan_kwargs)
-
     items = []
-    for item in result.get("Items", []):
-        user_id = item["PK"].replace("USER#", "")
-        items.append(
-            {
-                "userId": user_id,
-                "displayName": item.get("name"),
-                "email": item.get(
-                    "email"
-                ),  # email not stored in profile table; None unless populated
-                "status": item.get("status", "active"),
-                "createdAt": item.get("createdAt"),
-                "reportCount": int(item.get("reportCount", 0)),
-            }
+    next_cursor = None
+    while len(items) < limit:
+        result = table.scan(
+            **scan_kwargs,
+            Limit=max(1, limit - len(items)),
         )
 
-    next_cursor = None
-    if "LastEvaluatedKey" in result:
+        for item in result.get("Items", []):
+            name = item.get("name") or ""
+            if search and search not in name.lower():
+                continue
+            user_id = item["PK"].replace("USER#", "")
+            items.append(
+                {
+                    "userId": user_id,
+                    "displayName": name or None,
+                    "email": item.get("email"),
+                    "status": item.get("status", "active"),
+                    "createdAt": item.get("createdAt"),
+                    "reportCount": int(item.get("reportCount", 0)),
+                }
+            )
+
+        if "LastEvaluatedKey" not in result:
+            break
+        scan_kwargs["ExclusiveStartKey"] = result["LastEvaluatedKey"]
         next_cursor = _encode_cursor(result["LastEvaluatedKey"])
 
     return _response(
@@ -291,9 +414,15 @@ def ban_user(event, context):
     if result == "not_found":
         return _response(404, {"error": "NOT_FOUND", "message": "User not found"})
     if result == "already_banned":
-        return _response(
-            409, {"error": "CONFLICT", "message": "User is already banned"}
-        )
+        try:
+            _publish_user_banned(user_id, admin_id, banned_at)
+        except EventPublishError:
+            return _event_publish_failed_response()
+        return _response(409, {"error": "CONFLICT", "message": "User is already banned"})
+    try:
+        _publish_user_banned(user_id, admin_id, banned_at)
+    except EventPublishError:
+        return _event_publish_failed_response()
 
     return _response(
         200,
@@ -413,6 +542,47 @@ def handle_user_reported(event):
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
+
+def _publish_user_banned(user_id: str, admin_id: str, banned_at: str):
+    """Publish user.banned using the existing producer contract so D1/D2/D3 cascade runs."""
+    entry = {
+        "Source": "kismet.report-service",
+        "DetailType": "user.banned",
+        "EventBusName": EVENT_BUS_NAME,
+        "Detail": json.dumps(
+            {
+                "userId": user_id,
+                "bannedBy": admin_id,
+                "bannedAt": banned_at,
+            }
+        ),
+    }
+    try:
+        response = events_client.put_events(Entries=[entry])
+    except ClientError as exc:
+        raise EventPublishError("Failed to call EventBridge PutEvents") from exc
+
+    entries = response.get("Entries")
+    entries_list = entries if isinstance(entries, list) else []
+    failed_entry_count = response.get("FailedEntryCount", 0)
+    if failed_entry_count > 0:
+        first_entry = entries_list[0] if entries_list else {}
+        raise EventPublishError(
+            "EventBridge PutEvents failed: "
+            f"ErrorCode={first_entry.get('ErrorCode')}, "
+            f"ErrorMessage={first_entry.get('ErrorMessage')}"
+        )
+    entries_count = len(entries_list)
+    if entries_count != 1:
+        raise EventPublishError(
+            "EventBridge PutEvents returned invalid response: "
+            f"expected 1 entry, got {entries_count}"
+        )
+    if not entries_list[0].get("EventId"):
+        raise EventPublishError(
+            f"EventBridge PutEvents entry missing EventId: {entries_list[0]}"
+        )
 
 
 def _update_stat(stat_name: str, delta: int):

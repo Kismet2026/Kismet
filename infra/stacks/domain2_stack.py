@@ -3,7 +3,7 @@ from constructs import Construct
 from aws_cdk import aws_events as events, aws_iam as iam, aws_apigateway as apigateway
 
 from stacks.shared_stack import SharedStack
-from kismet_constructs.kismet_service import KismetService
+from kismet_constructs.kismet_service import KismetService, synth_stage_redeploy
 
 
 class Domain2Stack(cdk.Stack):
@@ -45,6 +45,7 @@ class Domain2Stack(cdk.Stack):
                 {"method": "POST", "path": "/swipe", "auth": True},
                 {"method": "GET", "path": "/swipe/history", "auth": True},
             ],
+            consume_events=["user.deleted"],
             publish_events=True,
             api=imported_api,
             authorizer=shared.authorizer,
@@ -69,7 +70,7 @@ class Domain2Stack(cdk.Stack):
                 {"method": "GET", "path": "/matches/{matchId}", "auth": True},
                 {"method": "DELETE", "path": "/matches/{matchId}", "auth": True},
             ],
-            consume_events=["swipe.created"],
+            consume_events=["swipe.created", "user.deleted", "profile.banned"],
             publish_events=True,
             environment={
                 "SWIPE_TABLE_NAME": swipe_svc.tables[0].table_name,
@@ -102,7 +103,7 @@ class Domain2Stack(cdk.Stack):
             routes=[
                 {"method": "GET", "path": "/discovery", "auth": True},
             ],
-            consume_events=["profile.completed"],
+            consume_events=["profile.completed", "profile.banned", "user.deleted"],
             environment={
                 "SWIPE_TABLE_NAME": swipe_svc.tables[0].table_name,
                 "BAZI_API_URL": "https://match-date-nu.vercel.app/api/match",
@@ -137,7 +138,7 @@ class Domain2Stack(cdk.Stack):
                 {"method": "GET", "path": "/recommend", "auth": True},
                 {"method": "POST", "path": "/recommend/refresh", "auth": True},
             ],
-            consume_events=["profile.completed", "swipe.created"],
+            consume_events=["profile.completed", "swipe.created", "user.deleted", "profile.banned"],
             environment={
                 "DISCOVERY_TABLE_NAME": discovery_svc.tables[0].table_name,
                 "SWIPE_TABLE_NAME": swipe_svc.tables[0].table_name,
@@ -145,7 +146,7 @@ class Domain2Stack(cdk.Stack):
             extra_policies=[
                 # Recommendation needs to read discovery table for candidate profiles + BaZi cache
                 iam.PolicyStatement(
-                    actions=["dynamodb:Scan", "dynamodb:Query", "dynamodb:GetItem"],
+                    actions=["dynamodb:Scan", "dynamodb:Query", "dynamodb:GetItem", "dynamodb:BatchGetItem"],
                     resources=[discovery_svc.tables[0].table_arn],
                 ),
                 # Recommendation needs to read swipe table to exclude already-swiped candidates
@@ -177,3 +178,6 @@ class Domain2Stack(cdk.Stack):
             authorizer=shared.authorizer,
             event_bus=event_bus,
         )
+
+        # Force API Gateway dev stage to redeploy when routes change (issue #118)
+        synth_stage_redeploy(self, api=imported_api)

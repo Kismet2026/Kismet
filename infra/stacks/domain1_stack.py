@@ -3,7 +3,7 @@ from constructs import Construct
 from aws_cdk import aws_events as events, aws_iam as iam, aws_apigateway as apigateway
 
 from stacks.shared_stack import SharedStack
-from kismet_constructs.kismet_service import KismetService
+from kismet_constructs.kismet_service import KismetService, synth_stage_redeploy
 
 
 class Domain1Stack(cdk.Stack):
@@ -74,7 +74,7 @@ class Domain1Stack(cdk.Stack):
         )
 
         # ── Profile Service (Quinn) ───────────────────────────────────────────
-        # CRUD for user profiles, publishes profile.completed
+        # CRUD for user profiles, publishes profile.* events, consumes user.banned
         profile_svc = KismetService(
             self,
             "ProfileService",
@@ -93,10 +93,24 @@ class Domain1Stack(cdk.Stack):
                 {"method": "PUT", "path": "/profiles/{userId}", "auth": True},
                 {"method": "DELETE", "path": "/profiles/{userId}", "auth": True},
             ],
+            consume_events=["user.banned"],
             publish_events=True,
             environment={
                 "PROFILES_TABLE_NAME": "kismet-profiles",
+                "COGNITO_USER_POOL_ID": shared.user_pool.user_pool_id,
             },
+            extra_policies=[
+                # Profile delete needs to remove or disable the Cognito user:
+                # - active users: AdminDeleteUser (frees the email)
+                # - banned users: AdminDisableUser (freezes the email to prevent re-registration)
+                iam.PolicyStatement(
+                    actions=[
+                        "cognito-idp:AdminDeleteUser",
+                        "cognito-idp:AdminDisableUser",
+                    ],
+                    resources=[shared.user_pool.user_pool_arn],
+                ),
+            ],
             api=imported_api,
             authorizer=shared.authorizer,
             event_bus=event_bus,
@@ -117,15 +131,19 @@ class Domain1Stack(cdk.Stack):
             ],
             routes=[
                 {"method": "POST", "path": "/photos/upload", "auth": True},
+                {"method": "POST", "path": "/photos/{photoId}/confirm", "auth": True},
                 {"method": "GET", "path": "/users/{userId}/photos", "auth": True},
                 {"method": "DELETE", "path": "/photos/{photoId}", "auth": True},
                 {"method": "PUT", "path": "/photos/{photoId}/primary", "auth": True},
             ],
+            consume_events=["user.deleted"],
             publish_events=True,
             environment={
                 "PHOTOS_TABLE_NAME": "kismet-photos",
                 "PHOTOS_BUCKET_NAME": shared.photos_bucket.bucket_name,
-                "PHOTOS_CDN_BASE_URL": "",  # TODO: add CloudFront URL when available
+                "PHOTOS_CDN_BASE_URL": shared.photos_cdn_base_url,
+                "EVENT_BUS_NAME": event_bus.event_bus_name,
+                "PROFILES_TABLE_NAME": "kismet-profiles",
             },
             extra_policies=[
                 # S3 for presigned URL generation and object deletion
@@ -133,10 +151,19 @@ class Domain1Stack(cdk.Stack):
                     actions=["s3:PutObject", "s3:GetObject", "s3:DeleteObject"],
                     resources=[f"{shared.photos_bucket.bucket_arn}/*"],
                 ),
+                # DynamoDB for updating profile + discovery avatarUrl
+                iam.PolicyStatement(
+                    actions=["dynamodb:UpdateItem"],
+                    resources=[
+                        self.format_arn(service="dynamodb", resource="table", resource_name="kismet-profiles"),
+                        self.format_arn(service="dynamodb", resource="table", resource_name="kismet-discovery"),
+                    ],
+                ),
             ],
             api=imported_api,
             authorizer=shared.authorizer,
             event_bus=event_bus,
         )
 
-
+        # Force API Gateway dev stage to redeploy when routes change (issue #118)
+        synth_stage_redeploy(self, api=imported_api)

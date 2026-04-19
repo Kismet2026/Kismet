@@ -1,6 +1,8 @@
 import json
 import os
 import importlib
+from datetime import datetime, timezone
+from unittest.mock import patch
 
 import boto3
 import pytest
@@ -9,6 +11,8 @@ from moto import mock_aws
 os.environ["ADMIN_STATS_TABLE"] = "kismet-admin-stats"
 os.environ["FLAGGED_CONTENT_TABLE"] = "kismet-flagged-content"
 os.environ["PROFILES_TABLE"] = "kismet-profiles"
+os.environ["MATCHES_TABLE"] = "kismet-matches"
+os.environ["MESSAGES_TABLE"] = "kismet-messages"
 os.environ["AWS_DEFAULT_REGION"] = "us-east-1"
 os.environ["AWS_ACCESS_KEY_ID"] = "testing"
 os.environ["AWS_SECRET_ACCESS_KEY"] = "testing"
@@ -31,23 +35,45 @@ PK_SK_ATTR = [
 def aws():
     with mock_aws():
         dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
-        for tbl in ["kismet-admin-stats", "kismet-flagged-content", "kismet-profiles"]:
+        for tbl in [
+            "kismet-admin-stats",
+            "kismet-flagged-content",
+            "kismet-profiles",
+            "kismet-matches",
+            "kismet-messages",
+        ]:
             dynamodb.create_table(
                 TableName=tbl, KeySchema=PK_SK,
                 AttributeDefinitions=PK_SK_ATTR, BillingMode="PAY_PER_REQUEST",
             )
+        boto3.client("events", region_name="us-east-1").create_event_bus(Name="kismet-events")
         importlib.reload(lambda_function)
         yield dynamodb
 
 
-def http_event(method, resource, body=None, path_params=None, query=None, admin_id="admin-1"):
+def http_event(
+    method,
+    resource,
+    body=None,
+    path_params=None,
+    query=None,
+    admin_id="admin-1",
+    email="admin@kismet.com",
+    groups=None,
+):
+    claims = {"sub": admin_id}
+    if email is not None:
+        claims["email"] = email
+    if groups is not None:
+        claims["cognito:groups"] = groups
+
     return {
         "httpMethod": method,
         "resource": resource,
         "body": json.dumps(body) if body else None,
         "pathParameters": path_params,
         "queryStringParameters": query,
-        "requestContext": {"authorizer": {"claims": {"sub": admin_id}}},
+        "requestContext": {"authorizer": {"claims": claims}},
     }
 
 
@@ -77,24 +103,74 @@ def _seed_profile(aws, user_id, **extra):
     )
 
 
+def _seed_match(aws, match_id, matched_at, **extra):
+    aws.Table("kismet-matches").put_item(
+        Item={
+            "PK": f"MATCH#{match_id}",
+            "SK": "META",
+            "matchId": match_id,
+            "matchedAt": matched_at,
+            "status": "active",
+            **extra,
+        }
+    )
+
+
+def _seed_message(aws, match_id, message_id, timestamp, **extra):
+    aws.Table("kismet-messages").put_item(
+        Item={
+            "PK": f"CONV#{match_id}",
+            "SK": f"MSG#{timestamp}#{message_id}",
+            "messageId": message_id,
+            "timestamp": timestamp,
+            **extra,
+        }
+    )
+
+
 # ── GET /admin/stats ─────────────────────────────────────────────────────────
 
 
 class TestGetStats:
     def test_returns_stats(self, aws):
-        _seed_stat(aws, "totalUsers", 100)
-        _seed_stat(aws, "matchesToday", 5)
+        # get_stats filters matches/messages by "begins_with(... today)", where
+        # today is datetime.now(timezone.utc). Use a live "today" timestamp so
+        # the test is not date-sensitive (it was silently broken across UTC
+        # midnight — CI that ran minutes after midnight hit `0 == 1`).
+        today_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        _seed_profile(aws, "user-1")
+        _seed_profile(aws, "user-2", status="banned")
+        _seed_flagged(aws, "c-1")
+        _seed_match(aws, "match-1", today_iso)
+        _seed_message(aws, "match-1", "msg-1", today_iso)
         r = lambda_function.handler(http_event("GET", "/admin/stats"), {})
         assert r["statusCode"] == 200
         body = json.loads(r["body"])
-        assert body["totalUsers"] == 100
-        assert body["matchesToday"] == 5
+        assert body["totalUsers"] == 2
+        assert body["activeUsers"] == 1
+        assert body["matchesToday"] == 1
+        assert body["messagesToday"] == 1
+        assert body["flaggedContentCount"] == 1
         assert "generatedAt" in body
 
     def test_defaults_to_zero(self, aws):
         r = lambda_function.handler(http_event("GET", "/admin/stats"), {})
         body = json.loads(r["body"])
         assert body["totalUsers"] == 0
+
+    def test_non_admin_is_forbidden(self, aws):
+        r = lambda_function.handler(
+            http_event("GET", "/admin/stats", email="test1@kismet.com"),
+            {},
+        )
+        assert r["statusCode"] == 403
+
+    def test_admin_group_is_allowed(self, aws):
+        r = lambda_function.handler(
+            http_event("GET", "/admin/stats", email="test1@kismet.com", groups="admins"),
+            {},
+        )
+        assert r["statusCode"] == 200
 
 
 # ── GET /admin/flagged-content ───────────────────────────────────────────────
@@ -152,6 +228,18 @@ class TestResolve:
         )["Item"]
         assert profile["status"] == "banned"
 
+    def test_ban_user_returns_502_when_event_publish_fails(self, aws):
+        _seed_flagged(aws, "c-1", userId="user-bad")
+        _seed_profile(aws, "user-bad")
+        with patch.object(lambda_function.events_client, "put_events") as put_events:
+            put_events.return_value = {"FailedEntryCount": 1, "Entries": [{"ErrorCode": "InternalFailure"}]}
+            r = lambda_function.handler(
+                http_event("PUT", "/admin/flagged-content/{contentId}/resolve",
+                           body={"action": "ban_user"}, path_params={"contentId": "c-1"}), {},
+            )
+
+        assert r["statusCode"] == 502
+
     def test_invalid_action_returns_400(self, aws):
         r = lambda_function.handler(
             http_event("PUT", "/admin/flagged-content/{contentId}/resolve",
@@ -203,11 +291,15 @@ class TestBanUser:
 
     def test_already_banned_returns_409(self, aws):
         _seed_profile(aws, "user-1", status="banned")
-        r = lambda_function.handler(
-            http_event("PUT", "/admin/users/{userId}/ban",
-                       path_params={"userId": "user-1"}), {},
-        )
+        with patch.object(lambda_function.events_client, "put_events") as put_events:
+            put_events.return_value = {"FailedEntryCount": 0, "Entries": [{"EventId": "evt-1"}]}
+            r = lambda_function.handler(
+                http_event("PUT", "/admin/users/{userId}/ban",
+                           path_params={"userId": "user-1"}), {},
+            )
+
         assert r["statusCode"] == 409
+        put_events.assert_called_once()
 
     def test_not_found_returns_404(self, aws):
         r = lambda_function.handler(
@@ -215,6 +307,16 @@ class TestBanUser:
                        path_params={"userId": "ghost"}), {},
         )
         assert r["statusCode"] == 404
+
+    def test_returns_502_when_event_publish_fails(self, aws):
+        _seed_profile(aws, "user-1")
+        with patch.object(lambda_function.events_client, "put_events") as put_events:
+            put_events.return_value = {"FailedEntryCount": 1, "Entries": [{"ErrorCode": "InternalFailure"}]}
+            r = lambda_function.handler(
+                http_event("PUT", "/admin/users/{userId}/ban",
+                           path_params={"userId": "user-1"}), {},
+            )
+        assert r["statusCode"] == 502
 
 
 # ── PUT /admin/users/{userId}/unban ──────────────────────────────────────────

@@ -14,7 +14,7 @@ from aws_cdk import (
 )
 
 from stacks.shared_stack import SharedStack
-from kismet_constructs.kismet_service import KismetService
+from kismet_constructs.kismet_service import KismetService, synth_stage_redeploy
 
 
 class Domain5Stack(cdk.Stack):
@@ -100,11 +100,10 @@ class Domain5Stack(cdk.Stack):
                 },
             ],
             routes=[
-                {"method": "POST", "path": "/email/send", "auth": True},
                 {"method": "GET", "path": "/email/preferences", "auth": True},
                 {"method": "PUT", "path": "/email/preferences", "auth": True},
             ],
-            consume_events=["user.created", "match.created", "user.reported"],
+            consume_events=["user.created", "match.created", "user.reported", "user.deleted", "scheduler.weekly_digest", "message.sent", "profile.banned"],
             publish_events=False,
             extra_policies=[
                 iam.PolicyStatement(
@@ -376,3 +375,6 @@ class Domain5Stack(cdk.Stack):
         cdk.CfnOutput(self, "EventLogTableName", value=event_log_table.table_name)
         cdk.CfnOutput(self, "SchedulerExecutorArn", value=executor_fn.function_arn)
         cdk.CfnOutput(self, "SchedulerTableName", value=scheduler_table.table_name)
+
+        # Force API Gateway dev stage to redeploy when routes change (issue #118)
+        synth_stage_redeploy(self, api=imported_api)

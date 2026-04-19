@@ -25,10 +25,20 @@ swipe_table = dynamodb.Table(SWIPE_TABLE_NAME)
 
 
 def handler(event, context):
-    # EventBridge event (profile.completed)
+    detail_type = event.get('detail-type') or event.get('detailType')
+
     if event.get('source') == 'kismet.profile-service':
-        logger.info('EventBridge: profile.completed')
-        return handle_profile_completed(event)
+        if detail_type == 'profile.completed':
+            logger.info('EventBridge: profile.completed')
+            return handle_profile_completed(event)
+        if detail_type == 'profile.banned':
+            logger.info('EventBridge: profile.banned')
+            return handle_profile_banned(event)
+        if detail_type == 'user.deleted':
+            logger.info('EventBridge: user.deleted')
+            return handle_user_deleted(event)
+        logger.info('Ignoring profile-service event: %s', detail_type)
+        return {'statusCode': 200, 'body': 'Ignored event'}
 
     method = _get_method(event)
     path = _get_path(event)
@@ -81,6 +91,34 @@ def handle_profile_completed(event):
     return {'statusCode': 200, 'body': 'Profile indexed'}
 
 
+def handle_profile_banned(event):
+    """Remove a banned user from the discovery pool."""
+    detail = _get_event_detail(event)
+    user_id = detail.get('userId')
+    if not user_id:
+        return {'statusCode': 400, 'body': 'Missing userId'}
+
+    table.delete_item(Key={
+        'PK': f'PROFILE#{user_id}',
+        'SK': 'META',
+    })
+    return {'statusCode': 200, 'body': 'Profile removed from discovery'}
+
+
+def handle_user_deleted(event):
+    """Remove a deleted user from the discovery pool."""
+    detail = _get_event_detail(event)
+    user_id = detail.get('userId')
+    if not user_id:
+        return {'statusCode': 400, 'body': 'Missing userId'}
+
+    table.delete_item(Key={
+        'PK': f'PROFILE#{user_id}',
+        'SK': 'META',
+    })
+    return {'statusCode': 200, 'body': 'Profile removed from discovery'}
+
+
 def get_candidates(event):
     user_id = _get_user_id(event)
     if not user_id:
@@ -101,10 +139,29 @@ def get_candidates(event):
     # Get current user's birthDate for BaZi scoring
     bazi_scores = _get_bazi_scores_for_user(user_id)
 
-    # Scan all profiles (in production, use GSI or pre-computed candidate lists)
+    # Look up caller's own profile for birthDate (reverse BaZi) and preferredGender
+    user_profile_result = table.get_item(Key={'PK': f'PROFILE#{user_id}', 'SK': 'META'})
+    user_profile_item = user_profile_result.get('Item', {}) or {}
+    user_birth = user_profile_item.get('birthDate', '')
+
+    # Default gender filter to caller's preferredGender when no explicit `?gender=`
+    # is passed. Treat 'everyone' as "no filter". This makes the default safe
+    # (straight users don't see the wrong gender) while still allowing an
+    # override via the query string, e.g. `?gender=male` for deliberate browsing.
+    if not gender_filter:
+        caller_preferred = (user_profile_item.get('preferredGender') or '').strip()
+        if caller_preferred and caller_preferred != 'everyone':
+            gender_filter = caller_preferred
+
+    # Scan all profiles (in production, use GSI or pre-computed candidate lists).
+    # Do NOT pass `Limit` here — in DynamoDB scan, Limit caps rows *scanned*
+    # (pre-filter), not rows *returned*. kismet-discovery mixes PROFILE# rows
+    # with BAZI# cache rows (~99% are BAZI# today), so a small Limit blows the
+    # entire page on cache rows before reaching any profile. Without Limit the
+    # scan reads the full table each call. That's OK for demo-scale and we
+    # break out early once we have `limit` matching candidates below.
     scan_params = {
-        'FilterExpression': Key('SK').eq('META') & Attr('userId').ne(user_id),
-        'Limit': limit * 3,  # over-fetch to account for filters
+        'FilterExpression': Attr('SK').eq('META') & Attr('userId').ne(user_id),
     }
 
     if cursor:
@@ -117,6 +174,15 @@ def get_candidates(event):
             return _response(400, {'code': 'VALIDATION_ERROR', 'message': 'Invalid cursor'})
 
     result = table.scan(**scan_params)
+
+    # Collect candidate birthdates for batch reverse BaZi lookup
+    candidate_births = set()
+    for item in result.get('Items', []):
+        if item.get('userId') not in swiped_ids:
+            b = item.get('birthDate', '')
+            if b:
+                candidate_births.add(b)
+    reverse_bazi = _fetch_reverse_bazi_scores(candidate_births, user_birth)
 
     candidates = []
     for item in result.get('Items', []):
@@ -138,6 +204,7 @@ def get_candidates(event):
         # Look up BaZi score by candidate's birthDate
         candidate_birth = item.get('birthDate', '')
         bazi_score = bazi_scores.get(candidate_birth)
+        reverse_score = reverse_bazi.get(candidate_birth)
 
         candidates.append({
             'userId': candidate_id,
@@ -149,6 +216,7 @@ def get_candidates(event):
             'avatarUrl': item.get('avatarUrl', ''),
             'bio': item.get('bio', ''),
             'baziScore': bazi_score,
+            'reverseBaziScore': reverse_score,
         })
 
         if len(candidates) >= limit:
@@ -206,6 +274,32 @@ def _get_bazi_scores_for_user(user_id):
     return _ensure_bazi_cache(birth_date)
 
 
+def _fetch_reverse_bazi_scores(candidate_birth_dates, user_birth):
+    """For each candidate birthDate, look up user's score in that candidate's BaZi cache."""
+    if not user_birth or not candidate_birth_dates:
+        return {}
+
+    reverse = {}
+    birth_list = list(candidate_birth_dates)
+    for i in range(0, len(birth_list), 100):
+        batch = birth_list[i:i + 100]
+        keys = [{'PK': f'BAZI#{b}', 'SK': 'SCORES'} for b in batch]
+        try:
+            response = dynamodb.batch_get_item(
+                RequestItems={TABLE_NAME: {'Keys': keys}}
+            )
+            for item in response.get('Responses', {}).get(TABLE_NAME, []):
+                candidate_birth = item.get('birthDate', '')
+                scores = item.get('scores', {})
+                score = scores.get(user_birth)
+                if score is not None:
+                    reverse[candidate_birth] = int(score)
+        except Exception as e:
+            logger.warning('Reverse BaZi batch read failed: %s', e)
+
+    return reverse
+
+
 def _ensure_bazi_cache(birth_date):
     """Read BaZi cache for a birthDate. If cache miss, call API and store. Returns {date: score} dict."""
     cache_key = {'PK': f'BAZI#{birth_date}', 'SK': 'SCORES'}
@@ -235,7 +329,55 @@ def _ensure_bazi_cache(birth_date):
             'cachedAt': datetime.utcnow().isoformat() + 'Z',
         })
 
+        # Reverse write: for each high-scoring match, also write `birth_date` into
+        # that match's cache. This ensures bidirectional visibility when the BaZi
+        # API returns asymmetric results (A's top matches include B but B's top
+        # matches may not include A).
+        _reverse_write_bazi_cache(birth_date, scores)
+
     return scores
+
+
+def _reverse_write_bazi_cache(source_birth_date, scores):
+    """For each score >= 80, ensure source_birth_date appears in that person's cache."""
+    now = datetime.utcnow().isoformat() + 'Z'
+    for match_date, score in scores.items():
+        if score < 80:
+            continue
+        reverse_key = {'PK': f'BAZI#{match_date}', 'SK': 'SCORES'}
+        try:
+            # Try to add the entry only if it doesn't already exist
+            table.update_item(
+                Key=reverse_key,
+                UpdateExpression='SET scores.#bd = if_not_exists(scores.#bd, :score), cachedAt = :now',
+                ExpressionAttributeNames={'#bd': source_birth_date},
+                ExpressionAttributeValues={
+                    ':score': int(score),
+                    ':now': now,
+                },
+                ConditionExpression='attribute_exists(PK)',
+            )
+            logger.info('Reverse cache: added %s=%d to BAZI#%s', source_birth_date, score, match_date)
+        except Exception as e:
+            # Cache entry doesn't exist yet — create a minimal one with just this entry
+            error_code = getattr(e, 'response', {}).get('Error', {}).get('Code', '')
+            if error_code == 'ConditionalCheckFailedException':
+                try:
+                    table.put_item(
+                        Item={
+                            **reverse_key,
+                            'birthDate': match_date,
+                            'scores': {source_birth_date: int(score)},
+                            'cachedAt': now,
+                            'partialCache': True,  # flag: this entry wasn't built from API
+                        },
+                        ConditionExpression='attribute_not_exists(PK)',
+                    )
+                    logger.info('Reverse cache: created partial BAZI#%s with %s=%d', match_date, source_birth_date, score)
+                except Exception:
+                    pass  # another concurrent write beat us, that's fine
+            else:
+                logger.warning('Reverse cache write failed for BAZI#%s: %s', match_date, e)
 
 
 def _call_bazi_api(birth_date):
@@ -305,6 +447,19 @@ def _get_user_id(event):
         or {}
     )
     return claims.get('sub') or claims.get('cognito:username')
+
+
+def _get_event_detail(event):
+    detail = event.get('detail') or {}
+    if isinstance(detail, dict):
+        return detail
+    if isinstance(detail, str):
+        try:
+            parsed = json.loads(detail)
+        except json.JSONDecodeError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
 
 
 CORS_HEADERS = {

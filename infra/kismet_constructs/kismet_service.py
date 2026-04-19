@@ -148,6 +148,10 @@ class KismetService(Construct):
             self.tables.append(table)
 
         # ── API Gateway routes ────────────────────────────────────────────────
+        # We also track each Method so that callers can force the shared REST
+        # API stage to redeploy when routes change (issue #118).
+        self.api_methods: List[apigateway.Method] = []
+        self.route_specs: List[str] = []
         if api and routes:
             integration = apigateway.LambdaIntegration(self.function)
             cors_added: set[str] = set()
@@ -160,7 +164,11 @@ class KismetService(Construct):
                     method_options["authorization_type"] = (
                         apigateway.AuthorizationType.COGNITO
                     )
-                resource.add_method(route["method"], integration, **method_options)
+                method = resource.add_method(
+                    route["method"], integration, **method_options
+                )
+                self.api_methods.append(method)
+                self.route_specs.append(f"{route['method']} {route['path']}")
                 # Add CORS OPTIONS method (needed for cross-stack imported APIs)
                 resource_path = resource.path
                 if resource_path not in cors_added:
@@ -198,3 +206,83 @@ class KismetService(Construct):
         # ── Extra IAM policies ────────────────────────────────────────────────
         for policy in extra_policies or []:
             self.function.add_to_role_policy(policy)
+
+
+def synth_stage_redeploy(
+    scope: Construct,
+    *,
+    api: apigateway.IRestApi,
+    services: Optional[List[KismetService]] = None,
+    stage_name: str = "dev",
+) -> Optional[apigateway.Deployment]:
+    """Force the shared REST API stage to redeploy when any domain route changes.
+
+    CDK bug / footgun (issue #118): when a domain stack uses
+    `apigateway.RestApi.from_rest_api_attributes(...)` to import the shared API
+    and adds new Resources/Methods to it, CloudFormation creates the resources
+    but does NOT create a new Deployment for the stage. The result is that the
+    new routes exist in the API definition but return 403/404 to clients
+    because the `dev` stage is still serving the old deployment.
+
+    This helper creates an `apigateway.Deployment` whose logical ID is a hash
+    of every service's route specs. When a domain stack adds, removes, or
+    renames a route the hash changes, the logical ID changes, CFN synthesises
+    a new Deployment, and the stage is updated to serve the new one.
+
+    `depends_on` is wired to every route Method so that CFN cannot create
+    the Deployment before the methods it needs to capture exist.
+
+    Intended usage (one call per domain stack, after all services are built)::
+
+        KismetService(self, "A", ...)
+        KismetService(self, "B", ...)
+        synth_stage_redeploy(self, api=imported_api)
+
+    If `services` is omitted, every `KismetService` in `scope`'s subtree is
+    auto-discovered. Pass an explicit list to scope down.
+    """
+    import hashlib
+
+    if services is None:
+        services = [
+            node for node in scope.node.find_all() if isinstance(node, KismetService)
+        ]
+
+    all_routes: List[str] = []
+    all_methods: List[apigateway.Method] = []
+    for svc in services:
+        all_routes.extend(svc.route_specs)
+        all_methods.extend(svc.api_methods)
+
+    # Also pick up any apigateway.Method added directly in `scope` (e.g. a
+    # domain stack that calls imported_api.root.add_resource(...).add_method(...)
+    # without going through KismetService, like D5's /events/* routes).
+    for node in scope.node.find_all():
+        if isinstance(node, apigateway.Method) and node not in all_methods:
+            all_methods.append(node)
+            # Best-effort fingerprint entry — we don't know the path, but the
+            # Method's construct id changes when the route set changes.
+            all_routes.append(f"loose:{node.node.path}")
+
+    if not all_routes:
+        return None
+
+    digest = hashlib.sha256(",".join(sorted(all_routes)).encode()).hexdigest()[:12]
+
+    deployment = apigateway.Deployment(
+        scope,
+        f"StageRedeploy{digest}",
+        api=api,
+        description=f"Routes fingerprint: {digest} (see issue #118)",
+        retain_deployments=False,
+    )
+    # Direct the deployment at the existing shared stage instead of creating
+    # a new stage. The CFN property is `StageName` on AWS::ApiGateway::Deployment.
+    cfn_deployment = deployment.node.default_child  # type: ignore[attr-defined]
+    cfn_deployment.add_override("Properties.StageName", stage_name)
+
+    # Ensure every route method is created before the deployment is synthesised.
+    for method in all_methods:
+        deployment.node.add_dependency(method)
+
+    return deployment

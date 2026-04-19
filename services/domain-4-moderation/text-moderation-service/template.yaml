@@ -62,7 +62,7 @@ Resources:
       FunctionName: !Sub kismet-text-moderation-service-${EnvironmentName}
       Description: Text moderation — Comprehend, DynamoDB, content.flagged, message.sent.
       CodeUri: .
-      Handler: lambda_function.lambda_handler
+      Handler: lambda_function.handler
       Policies:
         - AWSLambdaBasicExecutionRole
         - DynamoDBCrudPolicy:

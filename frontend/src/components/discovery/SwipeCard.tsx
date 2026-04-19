@@ -2,7 +2,7 @@
 
 import { motion, useMotionValue, useTransform, type PanInfo } from "framer-motion";
 import { Heart, X } from "@phosphor-icons/react";
-import { BaziScoreBadge } from "./BaziScoreBadge";
+import { YinYangScore } from "./YinYangScore";
 import type { Candidate } from "@/types";
 
 interface SwipeCardProps {
@@ -103,10 +103,16 @@ export function SwipeCard({ candidate, onSwipe, onTap, isTop }: SwipeCardProps) 
           </motion.div>
         )}
 
-        {/* BaZi score badge */}
-        <div className="absolute top-4 right-4">
-          <BaziScoreBadge score={candidate.baziScore} />
-        </div>
+        {/* BaZi yin-yang compatibility — outer=forward, inner=reverse */}
+        {(candidate.baziScore != null || candidate.reverseBaziScore != null) && (
+          <div className="absolute top-4 right-4">
+            <YinYangScore
+              forward={candidate.baziScore}
+              reverse={candidate.reverseBaziScore}
+              size="md"
+            />
+          </div>
+        )}
 
         {/* Info overlay */}
         <div className="absolute bottom-0 left-0 right-0 p-5">

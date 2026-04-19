@@ -143,7 +143,12 @@ def handle_refresh(body: Dict[str, Any]) -> Dict[str, Any]:
     )
 
     auth = response["AuthenticationResult"]
-    return _response(200, {"accessToken": auth["AccessToken"], "expiresIn": auth["ExpiresIn"]})
+    return _response(200, {
+        "accessToken": auth["AccessToken"],
+        "idToken": auth.get("IdToken", ""),
+        "refreshToken": refresh_token,  # Cognito doesn't return new refresh token
+        "expiresIn": auth["ExpiresIn"],
+    })
 
 
 def handle_logout(body: Dict[str, Any]) -> Dict[str, Any]:

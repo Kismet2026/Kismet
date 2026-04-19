@@ -7,7 +7,9 @@ export interface Candidate {
   city?: string;
   avatarUrl?: string;
   bio?: string;
-  baziScore?: number | null; // 0-100, null if uncached
+  interests?: string[];
+  baziScore?: number | null; // them→you: outer amber ring
+  reverseBaziScore?: number | null; // you→them: inner cream ring
 }
 
 export type SwipeAction = "like" | "pass";

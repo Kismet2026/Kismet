@@ -5,9 +5,10 @@ import { PaperPlaneRight } from "@phosphor-icons/react";
 
 interface ChatInputProps {
   onSend: (content: string) => void;
+  onTyping?: () => void;
 }
 
-export function ChatInput({ onSend }: ChatInputProps) {
+export function ChatInput({ onSend, onTyping }: ChatInputProps) {
   const [text, setText] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -29,7 +30,7 @@ export function ChatInput({ onSend }: ChatInputProps) {
         ref={inputRef}
         type="text"
         value={text}
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => { setText(e.target.value); onTyping?.(); }}
         placeholder="Type a message..."
         className="flex-1 bg-background/50 rounded-full px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50"
       />

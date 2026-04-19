@@ -12,7 +12,7 @@ from aws_cdk import (
 )
 
 from stacks.shared_stack import SharedStack
-from kismet_constructs.kismet_service import KismetService
+from kismet_constructs.kismet_service import KismetService, synth_stage_redeploy
 
 
 class Domain3Stack(cdk.Stack):
@@ -72,7 +72,7 @@ class Domain3Stack(cdk.Stack):
                 {"method": "GET", "path": "/messages/match/{matchId}", "auth": True},
                 {"method": "DELETE", "path": "/messages/{messageId}", "auth": True},
             ],
-            consume_events=[],   # no incoming events; other services call via HTTP
+            consume_events=["user.deleted", "profile.banned"],   # cleans up messages for deleted/banned users
             publish_events=True, # publishes message.sent
             environment={
                 "EVENT_BUS_NAME": event_bus.event_bus_name,
@@ -293,3 +293,6 @@ class Domain3Stack(cdk.Stack):
             "TABLE_NAME", icebreaker_service.tables[0].table_name
         )
         matches_table.grant_read_data(icebreaker_service.function)
+
+        # Force API Gateway dev stage to redeploy when routes change (issue #118)
+        synth_stage_redeploy(self, api=imported_api)

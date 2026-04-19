@@ -45,6 +45,18 @@ def _profile_event(user_id, name='Alice', gender='female', birth_date='1999-05-1
     }
 
 
+def _profile_banned_event(user_id, reason='harassment'):
+    return {
+        'source': 'kismet.profile-service',
+        'detail-type': 'profile.banned',
+        'detail': {
+            'userId': user_id,
+            'reason': reason,
+            'timestamp': '2026-04-12T18:00:00Z',
+        },
+    }
+
+
 class TestCalculateAge:
     def test_normal_age(self):
         age = _calculate_age('2000-01-01')
@@ -77,7 +89,8 @@ class TestHandleProfileCompleted:
         assert item['displayName'] == 'Bob'
         assert item['age'] >= 27
         assert item['birthDate'] == '1998-03-15'
-        assert item['location'] == [42.36, -71.06]
+        from decimal import Decimal
+        assert item['location'] == [Decimal('42.36'), Decimal('-71.06')]
 
         # Verify BaZi cache was pre-warmed
         mock_cache.assert_called_once_with('1998-03-15')
@@ -92,6 +105,29 @@ class TestHandleProfileCompleted:
 
         assert resp['statusCode'] == 200
         mock_cache.assert_not_called()
+
+
+class TestHandleProfileBanned:
+    @patch('lambda_function.table')
+    def test_deletes_profile_from_discovery(self, mock_table):
+        resp = handler(_profile_banned_event('user-ban'), None)
+
+        assert resp['statusCode'] == 200
+        mock_table.delete_item.assert_called_once_with(Key={
+            'PK': 'PROFILE#user-ban',
+            'SK': 'META',
+        })
+
+    @patch('lambda_function.table')
+    def test_missing_user_id_returns_400(self, mock_table):
+        resp = handler({
+            'source': 'kismet.profile-service',
+            'detail-type': 'profile.banned',
+            'detail': {},
+        }, None)
+
+        assert resp['statusCode'] == 400
+        mock_table.delete_item.assert_not_called()
 
 
 class TestBaziCache:
@@ -130,6 +166,33 @@ class TestBaziCache:
 
     @patch('lambda_function._call_bazi_api')
     @patch('lambda_function.table')
+    def test_reverse_write_high_scores(self, mock_table, mock_api):
+        """Scores >= 80 should trigger reverse cache writes for bidirectional visibility."""
+        mock_table.get_item.return_value = {}  # cache miss
+        mock_api.return_value = {
+            '1991-06-20': 99,   # reverse write
+            '1998-07-13': 85,   # reverse write
+            '1990-01-01': 70,   # skipped (< 80)
+            '2000-05-05': 50,   # skipped
+        }
+
+        _ensure_bazi_cache('1995-11-21')
+
+        # 2 reverse writes for scores >= 80
+        assert mock_table.update_item.call_count == 2
+
+        # Check the first reverse write
+        calls = mock_table.update_item.call_args_list
+        reverse_keys = [call[1]['Key'] for call in calls]
+        assert {'PK': 'BAZI#1991-06-20', 'SK': 'SCORES'} in reverse_keys
+        assert {'PK': 'BAZI#1998-07-13', 'SK': 'SCORES'} in reverse_keys
+        # Verify the low-score ones were NOT reverse-written
+        for call in calls:
+            assert 'BAZI#1990-01-01' not in call[1]['Key']['PK']
+            assert 'BAZI#2000-05-05' not in call[1]['Key']['PK']
+
+    @patch('lambda_function._call_bazi_api')
+    @patch('lambda_function.table')
     def test_api_failure_returns_empty(self, mock_table, mock_api):
         mock_table.get_item.return_value = {}
         mock_api.side_effect = URLError('Connection refused')
@@ -146,6 +209,7 @@ class TestGetCandidates:
     @patch('lambda_function.table')
     def test_returns_candidates_with_bazi_score(self, mock_table, mock_swipe, mock_bazi):
         mock_swipe.query.return_value = {'Items': []}
+        mock_table.get_item.return_value = {}  # caller profile not found → no default gender filter
         mock_bazi.return_value = {'1999-05-15': 92}
         mock_table.scan.return_value = {
             'Items': [
@@ -169,6 +233,7 @@ class TestGetCandidates:
     @patch('lambda_function.table')
     def test_bazi_score_none_when_not_in_top200(self, mock_table, mock_swipe, mock_bazi):
         mock_swipe.query.return_value = {'Items': []}
+        mock_table.get_item.return_value = {}  # caller profile not found → no default gender filter
         mock_bazi.return_value = {'2000-01-01': 85}
         mock_table.scan.return_value = {
             'Items': [
@@ -191,6 +256,7 @@ class TestGetCandidates:
         mock_swipe.query.return_value = {
             'Items': [{'targetUserId': 'user-456'}]
         }
+        mock_table.get_item.return_value = {}  # caller profile not found → no default gender filter
         mock_bazi.return_value = {}
         mock_table.scan.return_value = {
             'Items': [
@@ -215,6 +281,7 @@ class TestGetCandidates:
     @patch('lambda_function.table')
     def test_filters_by_gender(self, mock_table, mock_swipe, mock_bazi):
         mock_swipe.query.return_value = {'Items': []}
+        mock_table.get_item.return_value = {}  # caller profile not found → no default gender filter
         mock_bazi.return_value = {}
         mock_table.scan.return_value = {
             'Items': [
@@ -239,6 +306,7 @@ class TestGetCandidates:
     @patch('lambda_function.table')
     def test_filters_by_age(self, mock_table, mock_swipe, mock_bazi):
         mock_swipe.query.return_value = {'Items': []}
+        mock_table.get_item.return_value = {}  # caller profile not found → no default gender filter
         mock_bazi.return_value = {}
         mock_table.scan.return_value = {
             'Items': [

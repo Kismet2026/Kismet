@@ -5,6 +5,8 @@ from aws_cdk import (
     aws_apigateway as apigateway,
     aws_events as events,
     aws_s3 as s3,
+    aws_cloudfront as cloudfront,
+    aws_cloudfront_origins as origins,
     aws_kinesis as kinesis,
     aws_sns as sns,
 )
@@ -100,6 +102,20 @@ class SharedStack(cdk.Stack):
             auto_delete_objects=True,
         )
 
+        self.photos_distribution = cloudfront.Distribution(
+            self,
+            "PhotosDistribution",
+            comment="Kismet profile photos CDN",
+            default_behavior=cloudfront.BehaviorOptions(
+                origin=origins.S3BucketOrigin(self.photos_bucket),
+                viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+                allowed_methods=cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS,
+                cache_policy=cloudfront.CachePolicy.CACHING_OPTIMIZED,
+                compress=True,
+            ),
+        )
+        self.photos_cdn_base_url = f"https://{self.photos_distribution.distribution_domain_name}"
+
         self.analytics_bucket = s3.Bucket(
             self,
             "AnalyticsBucket",
@@ -108,31 +124,23 @@ class SharedStack(cdk.Stack):
             auto_delete_objects=True,
         )
 
-        self.frontend_bucket = s3.Bucket(
-            self,
-            "FrontendBucket",
-            bucket_name=f"kismet-frontend-{self.account}-dev",
-            website_index_document="index.html",
-            public_read_access=True,
-            block_public_access=s3.BlockPublicAccess(
-                block_public_acls=False,
-                ignore_public_acls=False,
-                block_public_policy=False,
-                restrict_public_buckets=False,
-            ),
-            removal_policy=cdk.RemovalPolicy.DESTROY,
-            auto_delete_objects=True,
-        )
-
         # ── Kinesis Data Stream ───────────────────────────────────────────────
-        # Activity Logger writes here; Analytics Pipeline reads via Firehose
-        self.activity_stream = kinesis.Stream(
-            self,
-            "ActivityStream",
-            stream_name="kismet-activity-stream",
-            shard_count=1,
-            removal_policy=cdk.RemovalPolicy.DESTROY,
-        )
+        # Opt-in via CDK context: `cdk deploy -c enableActivityStream=true`
+        # or by setting `"enableActivityStream": true` in cdk.json context.
+        # Disabled by default to avoid unexpected cost (~$11/month per shard).
+        # Accept both the JSON boolean (from cdk.json) and the string "true"
+        # (from `-c key=true` on the CLI, which CDK does not coerce to bool).
+        _enable_stream = self.node.try_get_context("enableActivityStream")
+        if _enable_stream is True or _enable_stream == "true":
+            self.activity_stream = kinesis.Stream(
+                self,
+                "ActivityStream",
+                stream_name="kismet-activity-stream",
+                shard_count=1,
+                removal_policy=cdk.RemovalPolicy.DESTROY,
+            )
+        else:
+            self.activity_stream = None
 
         # ── SNS ───────────────────────────────────────────────────────────────
         # Health Monitor publishes alerts here
@@ -150,4 +158,11 @@ class SharedStack(cdk.Stack):
         cdk.CfnOutput(self, "ApiUrl", value=self.api.url)
         cdk.CfnOutput(self, "EventBusArn", value=self.event_bus.event_bus_arn)
         cdk.CfnOutput(self, "PhotosBucketName", value=self.photos_bucket.bucket_name)
-        cdk.CfnOutput(self, "ActivityStreamArn", value=self.activity_stream.stream_arn)
+        cdk.CfnOutput(
+            self,
+            "PhotosCdnBaseUrl",
+            value=self.photos_cdn_base_url,
+            description="CloudFront base URL for profile photo delivery",
+        )
+        if self.activity_stream is not None:
+            cdk.CfnOutput(self, "ActivityStreamArn", value=self.activity_stream.stream_arn)

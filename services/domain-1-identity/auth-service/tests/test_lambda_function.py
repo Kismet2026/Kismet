@@ -145,7 +145,8 @@ class AuthServiceRefreshTests(unittest.TestCase):
 
             self.assertEqual(response["statusCode"], 200)
             self.assertEqual(payload["accessToken"], "new-access-xyz")
-            self.assertNotIn("refreshToken", payload)
+            self.assertEqual(payload["refreshToken"], "valid-refresh")
+            self.assertIn("idToken", payload)
 
     def test_refresh_missing_token_returns_validation_error(self):
         with patch.dict("os.environ", ENV):

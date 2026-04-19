@@ -44,7 +44,7 @@ def _table():
     return _mod_table
 
 
-def lambda_handler(event: Optional[Dict[str, Any]], context: Any) -> Dict[str, Any]:
+def handler(event: Optional[Dict[str, Any]], context: Any) -> Dict[str, Any]:
     event = event or {}
     if _is_eventbridge(event):
         return handle_eventbridge(event, context)

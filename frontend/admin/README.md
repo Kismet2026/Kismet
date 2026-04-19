@@ -1,6 +1,6 @@
 # Kismet Admin Dashboard
 
-A Streamlit-based admin interface for viewing app stats, managing user reports, and monitoring service health.
+A Streamlit-based admin interface for viewing live platform stats, moderating flagged content, managing users, monitoring service health, and checking analytics pipeline output.
 
 **Owner:** Lingyun Xiao
 
@@ -44,28 +44,44 @@ http://localhost:8501
 ## Features
 
 ### Stats Tab
-Displays app-wide metrics: total users, new users today, total matches, matches today, messages today, and swipes today.
+Reads `GET /admin/stats` and shows live admin metrics:
 
-> Currently using mock data. Will connect to `GET /admin/stats` once backend is deployed.
+- total users
+- active users
+- matches today
+- pending flagged content count
 
-### Reports Tab
-Lists user reports with filters by status (`pending`, `resolved`, `dismissed`). Admins can ban a user or dismiss a report directly from the UI.
+### Flagged Content Tab
+Reads `GET /admin/flagged-content` and lets admins resolve items through `PUT /admin/flagged-content/{contentId}/resolve`.
 
-> Currently using mock data. Will connect to `GET /admin/reports` and `PUT /admin/reports/{reportId}/resolve`.
+### Users Tab
+Reads `GET /admin/users` with optional name search and supports banning/unbanning through:
+
+- `PUT /admin/users/{userId}/ban`
+- `PUT /admin/users/{userId}/unban`
 
 ### Health Monitor Tab
-Shows real-time health status of all 25 microservices, including error rate and average latency. Services in ALARM state are highlighted in red.
+Reads `GET /health` and `GET /health/alarms`.
 
-> Currently using mock data. Will connect to `GET /admin/health` once health-monitor-service is deployed.
+Health status meanings:
+
+- `healthy`: recent traffic exists and current metrics are within threshold
+- `degraded`: recent traffic exists but latency is above threshold
+- `unhealthy`: recent traffic exists and error rate is above threshold
+
+### Analytics Pipeline Tab
+Reads `GET /analytics/dashboard` for Athena-backed analytics and `GET /analytics/log/recent` for the near-real-time DynamoDB activity log.
+
+If the Athena pipeline is unavailable, the backend now returns `503` with `ANALYTICS_UNAVAILABLE` instead of silently returning zeros.
 
 ---
 
-## Connecting to Real Backend (Week 2)
+## Connecting to Backend
 
-Update `API_BASE_URL` at the top of `app.py`:
+Set the backend base URL before starting Streamlit:
 
-```python
-API_BASE_URL = "https://<your-api-gateway-url>/prod"
+```bash
+export API_BASE_URL="https://<your-api-gateway-url>/dev"
 ```
 
-Then replace each `# TODO` block in `app.py` with the corresponding `requests.get()` or `requests.put()` call.
+The app expects a working login endpoint at `/auth/login` and uses the returned `idToken` as a bearer token for protected admin APIs.

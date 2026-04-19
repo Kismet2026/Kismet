@@ -30,8 +30,13 @@ class DecimalEncoder(json.JSONEncoder):
 def handler(event, context):
     # EventBridge: profile.completed → add to recommendation pool
     if event.get('source') == 'kismet.profile-service':
-        logger.info('EventBridge: profile.completed')
-        return handle_profile_completed(event)
+        detail_type = event.get('detail-type') or event.get('detailType')
+        if detail_type == 'profile.completed':
+            logger.info('EventBridge: profile.completed')
+            return handle_profile_completed(event)
+        if detail_type in ('user.deleted', 'profile.banned'):
+            logger.info('EventBridge: %s', detail_type)
+            return handle_user_deleted(event)
 
     # EventBridge: swipe.created → remove swiped candidate
     if event.get('source') == 'kismet.swipe-service':
@@ -48,6 +53,78 @@ def handler(event, context):
         return refresh_recommendations(event)
     else:
         return _response(404, {'code': 'NOT_FOUND', 'message': f'No route: {method} {path}'})
+
+
+def handle_user_deleted(event):
+    """Purge a banned/deleted user from the recommendation cache.
+
+    Two directions to clean:
+      1. Rows keyed on the user's own PK (the user's *view* of candidates) —
+         query by PK and batch-delete.
+      2. Rows where the user appears as a *candidate* inside someone else's
+         cache (candidateUserId == user_id). Without these, a banned user
+         keeps showing up in other users' /recommend responses until their
+         cache TTL flips. No GSI on candidateUserId, so we scan + filter.
+         Recommendation cache is small (bounded by active users × cache
+         size), so a filtered scan is acceptable here.
+    """
+    detail = event.get('detail') or {}
+    if isinstance(detail, str):
+        try:
+            detail = json.loads(detail)
+        except (json.JSONDecodeError, TypeError):
+            detail = {}
+    user_id = detail.get('userId')
+    if not user_id:
+        logger.warning('user.deleted event missing userId')
+        return {'statusCode': 400, 'body': 'Missing userId'}
+
+    from boto3.dynamodb.conditions import Key, Attr
+
+    # 1) Delete the user's own cache rows.
+    last_key = None
+    own_deleted = 0
+    while True:
+        query_kwargs = {
+            'KeyConditionExpression': Key('PK').eq(f'USER#{user_id}'),
+        }
+        if last_key:
+            query_kwargs['ExclusiveStartKey'] = last_key
+        result = table.query(**query_kwargs)
+        with table.batch_writer() as batch:
+            for item in result.get('Items', []):
+                batch.delete_item(Key={'PK': item['PK'], 'SK': item['SK']})
+                own_deleted += 1
+        last_key = result.get('LastEvaluatedKey')
+        if not last_key:
+            break
+
+    # 2) Delete rows where this user appears as a candidate in *other* users'
+    #    caches. No GSI, so scan + filter. Bounded by total recommendation
+    #    rows which stays small for this project.
+    last_key = None
+    orphan_deleted = 0
+    while True:
+        scan_kwargs = {
+            'FilterExpression': Attr('candidateUserId').eq(user_id),
+            'ProjectionExpression': 'PK, SK',
+        }
+        if last_key:
+            scan_kwargs['ExclusiveStartKey'] = last_key
+        result = table.scan(**scan_kwargs)
+        with table.batch_writer() as batch:
+            for item in result.get('Items', []):
+                batch.delete_item(Key={'PK': item['PK'], 'SK': item['SK']})
+                orphan_deleted += 1
+        last_key = result.get('LastEvaluatedKey')
+        if not last_key:
+            break
+
+    logger.info(
+        'Recommendation cache cleanup for %s: own=%d orphan=%d',
+        user_id, own_deleted, orphan_deleted,
+    )
+    return {'statusCode': 200, 'body': 'Recommendation cache deleted'}
 
 
 def handle_profile_completed(event):
@@ -125,6 +202,10 @@ def get_recommendations(event):
         'gender': item.get('gender', ''),
         'location': item.get('location', ''),
         'avatarUrl': item.get('avatarUrl', ''),
+        'bio': item.get('bio', ''),
+        'city': item.get('city', ''),
+        'baziScore': item.get('baziScore'),
+        'reverseBaziScore': item.get('reverseBaziScore'),
         'score': item.get('score', 0),
         'scoreBreakdown': item.get('scoreBreakdown', {}),
     } for item in items]
@@ -162,11 +243,13 @@ def _compute_recommendations(user_id, limit):
     """Compute recommendation scores for a user from the discovery pool."""
     from boto3.dynamodb.conditions import Key, Attr
 
-    # Get user's own profile for BaZi lookup
+    # Get user's own profile for BaZi lookup + preferredGender filter
     user_profile = discovery_table.get_item(
         Key={'PK': f'PROFILE#{user_id}', 'SK': 'META'}
-    ).get('Item', {})
+    ).get('Item', {}) or {}
     user_birth = user_profile.get('birthDate', '')
+    caller_preferred = (user_profile.get('preferredGender') or '').strip()
+    gender_filter = caller_preferred if caller_preferred and caller_preferred != 'everyone' else None
 
     # Get BaZi scores from discovery table cache
     bazi_scores = {}
@@ -180,11 +263,24 @@ def _compute_recommendations(user_id, limit):
     # Get already-swiped users to exclude
     swiped_ids = _get_swiped_user_ids(user_id)
 
-    # Get all candidate profiles from discovery table
+    # Scan candidate profiles. Do NOT pass `Limit` — kismet-discovery mixes
+    # PROFILE# rows with BAZI# cache rows (~99% are BAZI#), and DynamoDB's
+    # Limit caps rows *scanned* (pre-filter), so a small Limit can exhaust
+    # the page on cache rows before any profile surfaces. See #150.
     result = discovery_table.scan(
-        FilterExpression=Key('SK').eq('META') & Attr('userId').ne(user_id),
-        Limit=200,
+        FilterExpression=Attr('SK').eq('META') & Attr('userId').ne(user_id),
     )
+
+    # Collect unique candidate birth dates to batch-lookup reverse BaZi scores
+    candidate_birth_dates = set()
+    for profile in result.get('Items', []):
+        if profile.get('userId') not in swiped_ids:
+            b = profile.get('birthDate', '')
+            if b:
+                candidate_birth_dates.add(b)
+
+    # Reverse BaZi lookup: candidate's cache → user's score
+    reverse_bazi = _fetch_reverse_bazi_scores(candidate_birth_dates, user_birth)
 
     candidates = []
     timestamp = datetime.utcnow().isoformat() + 'Z'
@@ -196,9 +292,16 @@ def _compute_recommendations(user_id, limit):
         if candidate_id in swiped_ids:
             continue
 
+        # Apply caller's preferredGender (same default as /discovery, #151)
+        if gender_filter and profile.get('gender') != gender_filter:
+            continue
+
         score_breakdown = _calculate_score(profile, bazi_scores)
         total_score = sum(score_breakdown.values())
 
+        candidate_birth = profile.get('birthDate', '')
+        raw_bazi = bazi_scores.get(candidate_birth)
+        reverse_score = reverse_bazi.get(candidate_birth)
         candidate = {
             'PK': f'USER#{user_id}',
             'SK': f'SCORE#{total_score:04d}#{candidate_id}',
@@ -209,6 +312,9 @@ def _compute_recommendations(user_id, limit):
             'location': profile.get('location', ''),
             'city': profile.get('city', ''),
             'avatarUrl': profile.get('avatarUrl', ''),
+            'bio': profile.get('bio', ''),
+            'baziScore': raw_bazi,
+            'reverseBaziScore': reverse_score,
             'score': total_score,
             'scoreBreakdown': score_breakdown,
             'calculatedAt': timestamp,
@@ -249,6 +355,36 @@ def _calculate_score(profile, bazi_scores):
         'profileCompleteness': completeness,
         'activityRecency': recency,
     }
+
+
+def _fetch_reverse_bazi_scores(candidate_birth_dates, user_birth):
+    """For each candidate birthDate, look up user's score in that candidate's BaZi cache.
+
+    Returns dict {candidate_birthDate: score_or_None}. Uses batch_get_item for efficiency.
+    """
+    if not user_birth or not candidate_birth_dates:
+        return {}
+
+    reverse = {}
+    birth_list = list(candidate_birth_dates)
+    # DynamoDB batch_get_item supports up to 100 keys per call
+    for i in range(0, len(birth_list), 100):
+        batch = birth_list[i:i + 100]
+        keys = [{'PK': f'BAZI#{b}', 'SK': 'SCORES'} for b in batch]
+        try:
+            response = dynamodb.batch_get_item(
+                RequestItems={DISCOVERY_TABLE: {'Keys': keys}}
+            )
+            for item in response.get('Responses', {}).get(DISCOVERY_TABLE, []):
+                candidate_birth = item.get('birthDate', '')
+                scores = item.get('scores', {})
+                score = scores.get(user_birth)
+                if score is not None:
+                    reverse[candidate_birth] = int(score)
+        except Exception as e:
+            logger.warning('Reverse BaZi batch read failed: %s', e)
+
+    return reverse
 
 
 def _get_swiped_user_ids(user_id):

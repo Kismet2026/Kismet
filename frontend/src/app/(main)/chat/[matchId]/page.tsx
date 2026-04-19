@@ -4,10 +4,12 @@ import { use, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useChat } from "@/hooks/useChat";
 import { useIcebreakers } from "@/hooks/useIcebreakers";
+import { useOnlineStatus } from "@/hooks/usePresence";
 import { ChatWindow } from "@/components/chat/ChatWindow";
 import { ChatInput } from "@/components/chat/ChatInput";
 import { IcebreakerSuggestions } from "@/components/chat/IcebreakerSuggestions";
 import { ReportDialog } from "@/components/chat/ReportDialog";
+import { PresenceDot } from "@/components/shared/PresenceDot";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { ArrowLeft, DotsThreeVertical } from "@phosphor-icons/react";
 
@@ -24,6 +26,7 @@ export default function ChatPage({
 
   const otherUserId = messages.find((m) => m.senderId !== myId)?.senderId ?? "";
   const isEmptyConversation = messages.length === 0;
+  const isOnline = useOnlineStatus(otherUserId || undefined);
 
   return (
     <div className="flex flex-col h-dvh">
@@ -35,8 +38,9 @@ export default function ChatPage({
         >
           <ArrowLeft size={24} />
         </button>
-        <div className="flex-1">
+        <div className="flex-1 flex items-center gap-2">
           <h2 className="font-semibold text-foreground">Chat</h2>
+          {otherUserId && <PresenceDot isOnline={isOnline} />}
         </div>
         <button
           onClick={() => setShowReport(true)}

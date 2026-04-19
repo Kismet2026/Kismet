@@ -1,0 +1,5 @@
+# Kismet CODEOWNERS
+# Every PR to main requires @mahamayashen approval before merge.
+# Enforced by branch protection (required_pull_request_reviews.require_code_owner_reviews = true).
+
+*       @mahamayashen

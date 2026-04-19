@@ -1,4 +1,4 @@
-# Kismet Frontend Plan (v1 — Revised 2026-04-10)
+# Kismet Frontend Plan (v1 — Revised 2026-04-12)
 
 > Supersedes `FRONTEND_PLAN_v0_OUTDATED.md`. Key changes: corrected API paths to match actual backend, added WebSocket chat, added `/recommend` endpoint usage, removed phantom endpoints.
 
@@ -6,9 +6,9 @@
 
 | Domain | Status | Key Endpoints |
 |--------|--------|---------------|
-| D1 Identity & Profiles | Deployed | `/auth/signup`, `/auth/login`, `/auth/refresh`, `/auth/logout`, `/profiles`, `/photos/upload`, `/users/{userId}/photos`, `/verify/send`, `/verify/confirm`, `/verify/status` |
+| D1 Identity & Profiles | Deployed | `/auth/signup`, `/auth/confirm`, `/auth/login`, `/auth/refresh`, `/auth/logout`, `/profiles`, `/photos/upload`, `/users/{userId}/photos` |
 | D2 Discovery & Matching | Deployed | `/discovery`, `/recommend`, `/bazi/top-matches`, `/swipe`, `/swipe/history`, `/matches`, `/matches/{matchId}` |
-| D3 Messaging | Deployed | REST: `/messages`, `/messages/{matchId}`, `/messages/{matchId}/since/{timestamp}`, `/presence/heartbeat`, `/presence/{userId}`, `/presence/{matchId}/typing`, `/icebreaker/generate`, `/icebreaker/{matchId}`. **WebSocket**: `wss://` with `$connect`, `$disconnect`, default route for real-time message delivery |
+| D3 Messaging | Deployed | REST: `/messages`, `/messages/read`, `/messages/match/{matchId}`, `/messages/{messageId}`, `/presence/heartbeat`, `/presence/user/{userId}`, `/presence/{matchId}/typing`, `/icebreaker/generate`, `/icebreaker/{matchId}`. **WebSocket**: `wss://` with `$connect`, `$disconnect`, default route for real-time message delivery |
 | D4 Safety & Moderation | Deployed | `/reports`, `/moderate/text`, `/moderate/image`, `/ratelimit/status/{userId}` |
 | D5 Notifications | Deployed | `/notifications`, `/notifications/unread-count`, `/email/preferences` |
 | D6 Analytics & Admin | Deployed | `/analytics/log`, `/admin/stats`, `/health` |
@@ -105,11 +105,12 @@ frontend/
 |-----------------|------------|------------------------|
 | Get candidates | `GET /discovery` | `GET /discovery` OR `GET /recommend` (ranked by BaZi) |
 | Send message | `GET /chat/{id}/messages` | `POST /messages` with `{matchId, content, messageType}` |
-| Get messages | `GET /chat/{matchId}/messages` | `GET /messages/{matchId}` |
-| Poll new messages | — | `GET /messages/{matchId}/since/{timestamp}` |
+| Get messages | `GET /chat/{matchId}/messages` | `GET /messages/match/{matchId}` |
+| Poll new messages | — | Re-fetch `GET /messages/match/{matchId}` with pagination when WebSocket is unavailable |
 | Real-time messages | 3s HTTP polling only | **WebSocket** primary + HTTP polling fallback |
-| Send verification | implicit in signup | Explicit `POST /verify/send` after signup |
-| Confirm verification | — | `POST /verify/confirm` |
+| Send verification | implicit in signup | Cognito sends the email code during `POST /auth/signup` |
+| Confirm verification | — | `POST /auth/confirm` |
+| Resend verification code | — | Not yet implemented on backend (`POST /auth/resend-code` is still pending) |
 | List photos | — | `GET /users/{userId}/photos` |
 | Upload photo | — | `POST /photos/upload` → presigned URL → PUT to S3 |
 | Delete photo | — | `DELETE /photos/{photoId}` |
@@ -164,7 +165,7 @@ frontend/
 
 ### Phase 5: Matches (~3h)
 1. `useMatches` hook (`GET /matches` → enrich with profile data)
-2. `PresenceDot` using `GET /presence/{userId}`
+2. `PresenceDot` using `GET /presence/user/{userId}`
 3. `MatchCard` — avatar, name, last message preview, unread badge, relative time
 4. `MatchList` + `matches/page.tsx`
 
@@ -172,7 +173,7 @@ frontend/
 
 ### Phase 6: Chat (~5h)
 1. `lib/ws.ts` — WebSocket manager: connect with `?userId=&matchId=`, auto-reconnect with exponential backoff, message event dispatch
-2. `useChat` hook — WebSocket for real-time receive, `POST /messages` for send, `GET /messages/{matchId}` for history, HTTP polling fallback (`GET /messages/{matchId}/since/{timestamp}` every 5s when WS disconnected)
+2. `useChat` hook — WebSocket for real-time receive, `POST /messages` for send, `GET /messages/match/{matchId}` for history, HTTP polling fallback by refetching `GET /messages/match/{matchId}` when WS disconnects
 3. `usePresence` hook — `POST /presence/heartbeat` every 30s, `POST /presence/{matchId}/typing`, `GET /presence/{matchId}/typing` every 2s
 4. `useIcebreakers` hook — `POST /icebreaker/generate`, `GET /icebreaker/{matchId}`
 5. `MessageBubble`, `ChatInput`, `TypingIndicator`, `IcebreakerSuggestions`
@@ -207,4 +208,4 @@ frontend/
 | **framer-motion for swipe** | Core UX. Native CSS drag lacks spring physics + exit animations. |
 | **Dark theme only** | Modern dating app aesthetic. No light mode for demo. |
 | **Client-side only (no SSR)** | All APIs require JWT. No tokens on server. All pages `"use client"`. |
-| **Explicit verify flow** | Backend requires separate `/verify/send` + `/verify/confirm` calls after signup. |
+| **Cognito-native verify flow** | Signup triggers Cognito's email code automatically; the verify page submits `POST /auth/confirm`. Resend is a separate future backend task. |

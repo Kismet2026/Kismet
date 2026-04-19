@@ -202,6 +202,31 @@ class TestGetQueryResults:
 
 
 class TestGetDashboard:
+    def test_query_counts_distinct_match_ids(self, monkeypatch):
+        captured = {}
+
+        def mock_run_query_sync(sql, timeout_seconds=25):
+            captured["sql"] = sql
+            return [
+                {
+                    "dau": "50",
+                    "totalUsers": "200",
+                    "matchesToday": "10",
+                    "messagesToday": "80",
+                }
+            ]
+
+        monkeypatch.setattr(lambda_function, "_ensure_catalog", lambda: None)
+        monkeypatch.setattr(lambda_function, "_run_query_sync", mock_run_query_sync)
+
+        r = lambda_function.handler(
+            http_event("GET", "/analytics/dashboard"), {},
+        )
+
+        assert r["statusCode"] == 200
+        assert "COUNT(DISTINCT CASE" in captured["sql"]
+        assert "json_extract_scalar(eventData, '$.matchId')" in captured["sql"]
+
     def test_returns_metrics(self, monkeypatch):
         _mock_athena_start(monkeypatch)
         call_count = {"n": 0}
@@ -248,7 +273,7 @@ class TestGetDashboard:
         assert body["messagesToday"] == 80
         assert "generatedAt" in body
 
-    def test_returns_zeros_on_failure(self, monkeypatch):
+    def test_returns_503_on_failure(self, monkeypatch):
         monkeypatch.setattr(
             lambda_function.athena, "start_query_execution",
             lambda **kw: (_ for _ in ()).throw(RuntimeError("fail")),
@@ -256,9 +281,23 @@ class TestGetDashboard:
         r = lambda_function.handler(
             http_event("GET", "/analytics/dashboard"), {},
         )
+        assert r["statusCode"] == 503
         body = json.loads(r["body"])
-        assert body["dau"] == 0
-        assert body["totalUsers"] == 0
+        assert body["error"] == "ANALYTICS_UNAVAILABLE"
+
+    def test_returns_503_when_query_has_no_rows(self, monkeypatch):
+        _mock_athena_start(monkeypatch)
+        _mock_athena_get_succeeded(monkeypatch)
+        monkeypatch.setattr(
+            lambda_function.athena, "get_query_results",
+            lambda **kw: {"ResultSet": {"Rows": []}},
+        )
+        r = lambda_function.handler(
+            http_event("GET", "/analytics/dashboard"), {},
+        )
+        assert r["statusCode"] == 503
+        body = json.loads(r["body"])
+        assert body["error"] == "ANALYTICS_UNAVAILABLE"
 
 
 # ── Routing ───────────────────────────────────────────────────────────────────
