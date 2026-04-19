@@ -3,6 +3,7 @@ import logging
 import os
 import re
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Any, Dict, Optional
 
 import boto3
@@ -100,7 +101,7 @@ def handle_create(user_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
         "gender": gender,
         "interestedIn": interested_in,
         "birthDate": birth_date,
-        "location": location,
+        "location": json.loads(json.dumps(location), parse_float=Decimal),
         "createdAt": now,
         "updatedAt": now,
     }
@@ -113,7 +114,7 @@ def handle_create(user_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
     events.put_events(Entries=[{
         "Source": "kismet.profile-service",
         "DetailType": "profile.completed",
-        "Detail": json.dumps(_build_event_detail(item)),
+        "Detail": json.dumps(_build_event_detail(item), default=str),
         "EventBusName": EVENT_BUS_NAME,
     }])
 
@@ -141,7 +142,8 @@ def handle_update(caller_id: str, user_id: str, body: Dict[str, Any]) -> Dict[st
     if not table.get_item(Key={"PK": f"USER#{user_id}", "SK": "PROFILE"}).get("Item"):
         return _response(404, {"code": "NOT_FOUND", "message": "Profile not found."})
 
-    updates = {k: v for k, v in body.items() if k in UPDATABLE_FIELDS}
+    updates = {k: json.loads(json.dumps(v), parse_float=Decimal) if isinstance(v, (dict, list, float)) else v
+                for k, v in body.items() if k in UPDATABLE_FIELDS}
     if not updates:
         return _response(400, {"code": "VALIDATION_ERROR", "message": "No valid fields to update."})
 
@@ -175,7 +177,7 @@ def handle_update(caller_id: str, user_id: str, body: Dict[str, Any]) -> Dict[st
     events.put_events(Entries=[{
         "Source": "kismet.profile-service",
         "DetailType": "profile.updated",
-        "Detail": json.dumps(_build_event_detail(updated_item)),
+        "Detail": json.dumps(_build_event_detail(updated_item), default=str),
         "EventBusName": EVENT_BUS_NAME,
     }])
 
@@ -204,7 +206,7 @@ def _build_event_detail(item: Dict[str, Any]) -> Dict[str, Any]:
         "birthTime": item.get("birthTime", ""),
         "gender": item.get("gender", ""),
         "preferred_gender": item.get("interestedIn", ""),
-        "location_coordinates": item.get("location", []),
+        "location_coordinates": [float(v) for v in (item.get("location", {}).values() if isinstance(item.get("location"), dict) else item.get("location", []))],
         "city": item.get("city", ""),
         "avatarUrl": item.get("avatarUrl", ""),
         "bio": item.get("bio", ""),
@@ -268,5 +270,5 @@ def _response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "statusCode": status_code,
         "headers": CORS_HEADERS,
-        "body": json.dumps(body),
+        "body": json.dumps(body, default=str),
     }

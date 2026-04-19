@@ -68,9 +68,9 @@ class Domain3Stack(cdk.Stack):
                 }
             ],
             routes=[
-                {"method": "POST",   "path": "/messages",                 "auth": True},
-                {"method": "GET",    "path": "/messages/match/{matchId}", "auth": True},
-                {"method": "DELETE", "path": "/messages/{messageId}",     "auth": True},
+                {"method": "POST", "path": "/messages", "auth": True},
+                {"method": "GET", "path": "/messages/match/{matchId}", "auth": True},
+                {"method": "DELETE", "path": "/messages/{messageId}", "auth": True},
             ],
             consume_events=[],   # no incoming events; other services call via HTTP
             publish_events=True, # publishes message.sent
@@ -118,10 +118,14 @@ class Domain3Stack(cdk.Stack):
             code=lambda_.Code.from_asset(code_path),
             timeout=cdk.Duration.seconds(30),
             memory_size=256,
-            environment={"CONNECTIONS_TABLE": connections_table.table_name},
+            environment={
+                "CONNECTIONS_TABLE": connections_table.table_name,
+                "MATCHES_TABLE": matches_table.table_name,
+            },
             log_retention=logs.RetentionDays.ONE_WEEK,
         )
         connections_table.grant_read_write_data(connect_fn)
+        matches_table.grant_read_data(connect_fn)
 
         disconnect_fn = lambda_.Function(
             self, "WsDisconnectFn",
@@ -185,6 +189,15 @@ class Domain3Stack(cdk.Stack):
 
         cdk.CfnOutput(self, "ChatWebSocketUrl", value=ws_stage.url, description="WebSocket chat URL")
 
+        # Allow message-service to push read receipts via WebSocket
+        message_service.function.add_environment("CONNECTIONS_TABLE", connections_table.table_name)
+        message_service.function.add_environment("WEBSOCKET_ENDPOINT", ws_stage.callback_url)
+        connections_table.grant_read_write_data(message_service.function)
+        message_service.function.add_to_role_policy(iam.PolicyStatement(
+            actions=["execute-api:ManageConnections"],
+            resources=[f"arn:aws:execute-api:{self.region}:{self.account}:{ws_api.api_id}/*"],
+        ))
+
         # ── Presence Service (QX) ────────────────────────────────────────────
         # Tracks online/offline status (heartbeat TTL=60s) and typing indicators (TTL=5s).
         # Tables created manually to support DynamoDB TTL — KismetService doesn't expose that.
@@ -217,7 +230,7 @@ class Domain3Stack(cdk.Stack):
             code_path="../services/domain-3-messaging/presence-service",
             tables=[],  # created manually above to support TTL
             routes=[
-                {"method": "POST", "path": "/presence/heartbeat",          "auth": True},
+                {"method": "POST", "path": "/presence/heartbeat",         "auth": True},
                 {"method": "GET",  "path": "/presence/user/{userId}",     "auth": True},
                 {"method": "POST", "path": "/presence/{matchId}/typing",  "auth": True},
                 {"method": "GET",  "path": "/presence/{matchId}/typing",  "auth": True},
@@ -269,9 +282,14 @@ class Domain3Stack(cdk.Stack):
                 )
             ],
             environment={
-                "TABLE_NAME": "kismet-icebreakers",
+                "MATCHES_TABLE": matches_table.table_name,
             },
             api=imported_api,
             authorizer=shared.authorizer,
             event_bus=event_bus,
         )
+        # Inject TABLE_NAME via CDK token (same pattern as message-service)
+        icebreaker_service.function.add_environment(
+            "TABLE_NAME", icebreaker_service.tables[0].table_name
+        )
+        matches_table.grant_read_data(icebreaker_service.function)

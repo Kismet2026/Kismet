@@ -1,0 +1,76 @@
+name: Unit Tests
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'services/**'
+      - 'tests/**'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        domain:
+          - name: domain-1-identity
+            services: auth-service photo-service profile-service
+          - name: domain-2-discovery
+            services: bazi-service discovery-service match-service recommendation-service swipe-service
+          - name: domain-3-messaging
+            services: chat-gateway message-service presence-service icebreaker-service
+          - name: domain-4-moderation
+            services: image-moderation-service text-moderation-service report-service rate-limiter-service
+          - name: domain-5-notifications
+            services: email-service event-bus-service push-notification-service scheduler-service
+          - name: domain-6-analytics
+            services: activity-logger-service admin-dashboard-service analytics-pipeline-service health-monitor-service
+
+    name: ${{ matrix.domain.name }}
+    env:
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: testing
+      AWS_SECRET_ACCESS_KEY: testing
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install test dependencies
+        run: pip install boto3 moto pytest
+
+      - name: Run unit tests
+        run: |
+          failed=0
+          for svc in ${{ matrix.domain.services }}; do
+            svc_dir="services/${{ matrix.domain.name }}/${svc}"
+            if [ -d "${svc_dir}/tests" ]; then
+              echo "::group::${svc}"
+              PYTHONPATH="${svc_dir}:${PYTHONPATH}" python -m pytest "${svc_dir}/tests/" -v --tb=short || failed=1
+              echo "::endgroup::"
+            fi
+          done
+          exit $failed
+
+  integration:
+    runs-on: ubuntu-latest
+    name: cross-domain-integration
+    env:
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: testing
+      AWS_SECRET_ACCESS_KEY: testing
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install boto3 moto pytest
+
+      - name: Run integration tests
+        run: python -m pytest tests/ -v --tb=short
